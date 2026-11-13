@@ -36,7 +36,7 @@ Native development remains in [`clients/nsgo`](clients/nsgo). Flutter and NSGo W
 
 The button above deploys the **whole repository**, not an isolated monorepo subdirectory. Cloudflare provisions the D1 database and SQLite Durable Object. The deploy command applies the D1 schema after provisioning. No OAuth applications, payment configuration, domain or external VM are required. Set every client to the resulting service origin.
 
-For manual deployment, run `pnpm build:web`, `pnpm exec wrangler login`, then `pnpm deploy`. See [deployment and optional probes](docs/platform/self-hosting.md).
+For manual deployment, run `pnpm build:web`, `pnpm exec wrangler login`, then `pnpm run deploy`. See [deployment and optional probes](docs/platform/self-hosting.md).
 
 An optional Go probe improves native TCP/UDP candidate discovery. It runs independently:
 

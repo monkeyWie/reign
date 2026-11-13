@@ -4,7 +4,7 @@
 
 Use the root repository Deploy to Cloudflare button. The template needs the root pnpm workspace; Cloudflare's deploy button does not include sibling dependencies when given a monorepo subdirectory.
 
-The template provides one Worker, static React assets, one D1 database and one SQLite Durable Object class. D1 is automatically provisioned by Wrangler/Workers Builds; `pnpm deploy` deploys the Worker, then applies the schema. Initial requests may briefly return unavailable before that first migration finishes. No paid-plan enforcement exists in this deployment. Cloudflare's own free-tier resource allowances still apply.
+The template provides one Worker, static React assets, one D1 database and one SQLite Durable Object class. D1 is automatically provisioned by Wrangler/Workers Builds; `pnpm run deploy` deploys the Worker, then applies the schema. Initial requests may briefly return unavailable before that first migration finishes. No paid-plan enforcement exists in this deployment. Cloudflare's own free-tier resource allowances still apply.
 
 After deployment, paste the resulting `https://<worker>.<account>.workers.dev` origin into clients. The browser controller lives at `/chat`. The website and docs are included. No custom domain is required.
 
@@ -17,7 +17,7 @@ corepack enable
 pnpm install --frozen-lockfile
 pnpm build:web
 pnpm exec wrangler login
-pnpm deploy
+pnpm run deploy
 ```
 
 Wrangler provisions missing draft resources. Keep the assigned database ID in your deployment configuration for later releases. Back up D1 before future schema changes. D1 metadata includes the service signing identity; replacing it invalidates existing short leases until clients refresh their service configuration.
