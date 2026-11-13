@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 	"unicode/utf16"
+
+	"github.com/monkeyWie/reign/pkg/messagecontent"
 )
 
 type Directory struct {
@@ -197,6 +199,21 @@ func displayText(m Message) string {
 		}
 	}
 	return body
+}
+
+func messageCopyText(m Message) string {
+	if m.Role == "user" {
+		return messagecontent.PlainText(messagecontent.Parse(m.Text))
+	}
+	return m.Text
+}
+
+func messagePreviewText(m Message) string {
+	text := displayText(m)
+	if m.Role == "user" {
+		return messagecontent.PlainText(messagecontent.Parse(text))
+	}
+	return text
 }
 
 func mergeLatest(old, latest Object) Object {

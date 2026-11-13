@@ -5,6 +5,23 @@ import (
 	"testing"
 )
 
+func TestQuestionReplyPresentationKeepsOriginalMessage(t *testing.T) {
+	source := "<send_user_message_question_reply>\n[{\"questionItemId\":\"internal\",\"question\":\"允许吗？\",\"answer\":\"允许\"}]\n</send_user_message_question_reply>"
+	m := Message{Role: "user", Text: source}
+	for _, text := range []string{messageCopyText(m), messagePreviewText(m)} {
+		if text != "问题：允许吗？\n回答：允许" {
+			t.Fatalf("unreadable reply: %q", text)
+		}
+	}
+	if m.Text != source || displayText(m) != source {
+		t.Fatal("rewrote stored source")
+	}
+	m.Role = "assistant"
+	if messageCopyText(m) != source || messagePreviewText(m) != source {
+		t.Fatal("parsed assistant example as user reply")
+	}
+}
+
 func TestDirectoryRoutingAndRecentOrder(t *testing.T) {
 	rows := []Object{{"id": "same", "providerId": "codex-cli", "sourceKind": "app", "cwd": "/a/project", "updatedAt": 30}, {"id": "same", "providerId": "codex-app", "sourceKind": "app", "cwd": "/a/project", "updatedAt": 29}, {"id": "c", "providerId": "claude-code", "cwd": "/a/project", "updatedAt": 40}, {"id": "other", "providerId": "codex-cli", "sourceKind": "cli", "cwd": "/b/project", "updatedAt": 20}, {"id": "vscode", "providerId": "codex-vscode", "cwd": "/a/project", "updatedAt": 100}}
 	d := directories(rows)

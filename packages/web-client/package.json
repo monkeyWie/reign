@@ -27,6 +27,7 @@
     "@types/qrcode": "^1.5.5"
   },
   "scripts": {
-    "check": "tsc --noEmit"
+    "check": "tsc --noEmit",
+    "test": "tsx --test test/*.test.tsx"
   }
 }

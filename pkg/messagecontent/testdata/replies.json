@@ -1,0 +1,241 @@
+[
+  {
+    "name": "actual reply",
+    "source": "<send_user_message_question_reply>\n[{\"questionItemId\": \"[\\\"request_user_input_async\\\",\\\"internal-call\\\",0]\", \"question\": \"是否允许我点击 Chrome 中的 Authorize？\", \"answer\": \"允许，点击 Authorize 并继续部署\"}]\n</send_user_message_question_reply>",
+    "parts": [
+      {
+        "replies": [
+          {
+            "question": "是否允许我点击 Chrome 中的 Authorize？",
+            "answer": "允许，点击 Authorize 并继续部署"
+          }
+        ]
+      }
+    ],
+    "plain": "问题：是否允许我点击 Chrome 中的 Authorize？\n回答：允许，点击 Authorize 并继续部署"
+  },
+  {
+    "name": "multiple questions and choices",
+    "source": "<send_user_message_question_reply>\n[{\"question\": \"先做哪个？\", \"answer\": [\"桌面端\", \"移动端🙂\\n都要\"]}, {\"question\": \"备注\", \"answer\": \"\"}]\n</send_user_message_question_reply>",
+    "parts": [
+      {
+        "replies": [
+          {
+            "question": "先做哪个？",
+            "answer": "桌面端\n移动端🙂\n都要"
+          },
+          {
+            "question": "备注",
+            "answer": ""
+          }
+        ]
+      }
+    ],
+    "plain": "问题：先做哪个？\n回答：桌面端\n移动端🙂\n都要\n\n问题：备注\n回答：未填写"
+  },
+  {
+    "name": "surrounding text and repeated blocks",
+    "source": "前文\n\n<send_user_message_question_reply>\n[{\"questionItemId\": \"[\\\"request_user_input_async\\\",\\\"internal-call\\\",0]\", \"question\": \"是否允许我点击 Chrome 中的 Authorize？\", \"answer\": \"允许，点击 Authorize 并继续部署\"}]\n</send_user_message_question_reply>\n\n后文\n<send_user_message_question_reply>\n[{\"questionItemId\": \"[\\\"request_user_input_async\\\",\\\"internal-call\\\",0]\", \"question\": \"是否允许我点击 Chrome 中的 Authorize？\", \"answer\": \"允许，点击 Authorize 并继续部署\"}]\n</send_user_message_question_reply>",
+    "parts": [
+      {
+        "text": "前文\n\n"
+      },
+      {
+        "replies": [
+          {
+            "question": "是否允许我点击 Chrome 中的 Authorize？",
+            "answer": "允许，点击 Authorize 并继续部署"
+          }
+        ]
+      },
+      {
+        "text": "\n后文\n"
+      },
+      {
+        "replies": [
+          {
+            "question": "是否允许我点击 Chrome 中的 Authorize？",
+            "answer": "允许，点击 Authorize 并继续部署"
+          }
+        ]
+      }
+    ],
+    "plain": "前文\n\n问题：是否允许我点击 Chrome 中的 Authorize？\n回答：允许，点击 Authorize 并继续部署\n\n后文\n\n问题：是否允许我点击 Chrome 中的 Authorize？\n回答：允许，点击 Authorize 并继续部署"
+  },
+  {
+    "name": "CRLF and allowed indentation",
+    "source": "  <send_user_message_question_reply>\r\n  [{\"questionItemId\": \"[\\\"request_user_input_async\\\",\\\"internal-call\\\",0]\", \"question\": \"是否允许我点击 Chrome 中的 Authorize？\", \"answer\": \"允许，点击 Authorize 并继续部署\"}]\r\n  </send_user_message_question_reply>\r\n",
+    "parts": [
+      {
+        "replies": [
+          {
+            "question": "是否允许我点击 Chrome 中的 Authorize？",
+            "answer": "允许，点击 Authorize 并继续部署"
+          }
+        ]
+      }
+    ],
+    "plain": "问题：是否允许我点击 Chrome 中的 Authorize？\n回答：允许，点击 Authorize 并继续部署"
+  },
+  {
+    "name": "invalid JSON",
+    "source": "<send_user_message_question_reply>\n[oops]\n</send_user_message_question_reply>",
+    "parts": [
+      {
+        "text": "<send_user_message_question_reply>\n[oops]\n</send_user_message_question_reply>"
+      }
+    ],
+    "plain": "<send_user_message_question_reply>\n[oops]\n</send_user_message_question_reply>"
+  },
+  {
+    "name": "empty array",
+    "source": "<send_user_message_question_reply>\n[]\n</send_user_message_question_reply>",
+    "parts": [
+      {
+        "text": "<send_user_message_question_reply>\n[]\n</send_user_message_question_reply>"
+      }
+    ],
+    "plain": "<send_user_message_question_reply>\n[]\n</send_user_message_question_reply>"
+  },
+  {
+    "name": "missing answer",
+    "source": "<send_user_message_question_reply>\n[{\"question\":\"q\"}]\n</send_user_message_question_reply>",
+    "parts": [
+      {
+        "text": "<send_user_message_question_reply>\n[{\"question\":\"q\"}]\n</send_user_message_question_reply>"
+      }
+    ],
+    "plain": "<send_user_message_question_reply>\n[{\"question\":\"q\"}]\n</send_user_message_question_reply>"
+  },
+  {
+    "name": "null answer",
+    "source": "<send_user_message_question_reply>\n[{\"question\":\"q\",\"answer\":null}]\n</send_user_message_question_reply>",
+    "parts": [
+      {
+        "text": "<send_user_message_question_reply>\n[{\"question\":\"q\",\"answer\":null}]\n</send_user_message_question_reply>"
+      }
+    ],
+    "plain": "<send_user_message_question_reply>\n[{\"question\":\"q\",\"answer\":null}]\n</send_user_message_question_reply>"
+  },
+  {
+    "name": "null choice",
+    "source": "<send_user_message_question_reply>\n[{\"question\":\"q\",\"answer\":[null]}]\n</send_user_message_question_reply>",
+    "parts": [
+      {
+        "text": "<send_user_message_question_reply>\n[{\"question\":\"q\",\"answer\":[null]}]\n</send_user_message_question_reply>"
+      }
+    ],
+    "plain": "<send_user_message_question_reply>\n[{\"question\":\"q\",\"answer\":[null]}]\n</send_user_message_question_reply>"
+  },
+  {
+    "name": "number answer",
+    "source": "<send_user_message_question_reply>\n[{\"question\":\"q\",\"answer\":7}]\n</send_user_message_question_reply>",
+    "parts": [
+      {
+        "text": "<send_user_message_question_reply>\n[{\"question\":\"q\",\"answer\":7}]\n</send_user_message_question_reply>"
+      }
+    ],
+    "plain": "<send_user_message_question_reply>\n[{\"question\":\"q\",\"answer\":7}]\n</send_user_message_question_reply>"
+  },
+  {
+    "name": "blank question",
+    "source": "<send_user_message_question_reply>\n[{\"question\":\" \",\"answer\":\"a\"}]\n</send_user_message_question_reply>",
+    "parts": [
+      {
+        "text": "<send_user_message_question_reply>\n[{\"question\":\" \",\"answer\":\"a\"}]\n</send_user_message_question_reply>"
+      }
+    ],
+    "plain": "<send_user_message_question_reply>\n[{\"question\":\" \",\"answer\":\"a\"}]\n</send_user_message_question_reply>"
+  },
+  {
+    "name": "object payload",
+    "source": "<send_user_message_question_reply>\n{\"question\":\"q\",\"answer\":\"a\"}\n</send_user_message_question_reply>",
+    "parts": [
+      {
+        "text": "<send_user_message_question_reply>\n{\"question\":\"q\",\"answer\":\"a\"}\n</send_user_message_question_reply>"
+      }
+    ],
+    "plain": "<send_user_message_question_reply>\n{\"question\":\"q\",\"answer\":\"a\"}\n</send_user_message_question_reply>"
+  },
+  {
+    "name": "incomplete block",
+    "source": "<send_user_message_question_reply>\n[{\"questionItemId\": \"[\\\"request_user_input_async\\\",\\\"internal-call\\\",0]\", \"question\": \"\\u662f\\u5426\\u5141\\u8bb8\\u6211\\u70b9\\u51fb Chrome \\u4e2d\\u7684 Authorize\\uff1f\", \"answer\": \"\\u5141\\u8bb8\\uff0c\\u70b9\\u51fb Authorize \\u5e76\\u7ee7\\u7eed\\u90e8\\u7f72\"}]",
+    "parts": [
+      {
+        "text": "<send_user_message_question_reply>\n[{\"questionItemId\": \"[\\\"request_user_input_async\\\",\\\"internal-call\\\",0]\", \"question\": \"\\u662f\\u5426\\u5141\\u8bb8\\u6211\\u70b9\\u51fb Chrome \\u4e2d\\u7684 Authorize\\uff1f\", \"answer\": \"\\u5141\\u8bb8\\uff0c\\u70b9\\u51fb Authorize \\u5e76\\u7ee7\\u7eed\\u90e8\\u7f72\"}]"
+      }
+    ],
+    "plain": "<send_user_message_question_reply>\n[{\"questionItemId\": \"[\\\"request_user_input_async\\\",\\\"internal-call\\\",0]\", \"question\": \"\\u662f\\u5426\\u5141\\u8bb8\\u6211\\u70b9\\u51fb Chrome \\u4e2d\\u7684 Authorize\\uff1f\", \"answer\": \"\\u5141\\u8bb8\\uff0c\\u70b9\\u51fb Authorize \\u5e76\\u7ee7\\u7eed\\u90e8\\u7f72\"}]"
+  },
+  {
+    "name": "ordinary Markdown",
+    "source": "# title\n\nA **normal** message.\n",
+    "parts": [
+      {
+        "text": "# title\n\nA **normal** message.\n"
+      }
+    ],
+    "plain": "# title\n\nA **normal** message.\n"
+  },
+  {
+    "name": "backtick example",
+    "source": "```xml\n<send_user_message_question_reply>\n[{\"questionItemId\": \"[\\\"request_user_input_async\\\",\\\"internal-call\\\",0]\", \"question\": \"是否允许我点击 Chrome 中的 Authorize？\", \"answer\": \"允许，点击 Authorize 并继续部署\"}]\n</send_user_message_question_reply>\n```",
+    "parts": [
+      {
+        "text": "```xml\n<send_user_message_question_reply>\n[{\"questionItemId\": \"[\\\"request_user_input_async\\\",\\\"internal-call\\\",0]\", \"question\": \"是否允许我点击 Chrome 中的 Authorize？\", \"answer\": \"允许，点击 Authorize 并继续部署\"}]\n</send_user_message_question_reply>\n```"
+      }
+    ],
+    "plain": "```xml\n<send_user_message_question_reply>\n[{\"questionItemId\": \"[\\\"request_user_input_async\\\",\\\"internal-call\\\",0]\", \"question\": \"是否允许我点击 Chrome 中的 Authorize？\", \"answer\": \"允许，点击 Authorize 并继续部署\"}]\n</send_user_message_question_reply>\n```"
+  },
+  {
+    "name": "tilde example",
+    "source": "~~~text\n<send_user_message_question_reply>\n[{\"questionItemId\": \"[\\\"request_user_input_async\\\",\\\"internal-call\\\",0]\", \"question\": \"是否允许我点击 Chrome 中的 Authorize？\", \"answer\": \"允许，点击 Authorize 并继续部署\"}]\n</send_user_message_question_reply>\n~~~",
+    "parts": [
+      {
+        "text": "~~~text\n<send_user_message_question_reply>\n[{\"questionItemId\": \"[\\\"request_user_input_async\\\",\\\"internal-call\\\",0]\", \"question\": \"是否允许我点击 Chrome 中的 Authorize？\", \"answer\": \"允许，点击 Authorize 并继续部署\"}]\n</send_user_message_question_reply>\n~~~"
+      }
+    ],
+    "plain": "~~~text\n<send_user_message_question_reply>\n[{\"questionItemId\": \"[\\\"request_user_input_async\\\",\\\"internal-call\\\",0]\", \"question\": \"是否允许我点击 Chrome 中的 Authorize？\", \"answer\": \"允许，点击 Authorize 并继续部署\"}]\n</send_user_message_question_reply>\n~~~"
+  },
+  {
+    "name": "inline example",
+    "source": "`<send_user_message_question_reply>\n[{\"questionItemId\": \"[\\\"request_user_input_async\\\",\\\"internal-call\\\",0]\", \"question\": \"是否允许我点击 Chrome 中的 Authorize？\", \"answer\": \"允许，点击 Authorize 并继续部署\"}]\n</send_user_message_question_reply>`",
+    "parts": [
+      {
+        "text": "`<send_user_message_question_reply>\n[{\"questionItemId\": \"[\\\"request_user_input_async\\\",\\\"internal-call\\\",0]\", \"question\": \"是否允许我点击 Chrome 中的 Authorize？\", \"answer\": \"允许，点击 Authorize 并继续部署\"}]\n</send_user_message_question_reply>`"
+      }
+    ],
+    "plain": "`<send_user_message_question_reply>\n[{\"questionItemId\": \"[\\\"request_user_input_async\\\",\\\"internal-call\\\",0]\", \"question\": \"是否允许我点击 Chrome 中的 Authorize？\", \"answer\": \"允许，点击 Authorize 并继续部署\"}]\n</send_user_message_question_reply>`"
+  },
+  {
+    "name": "indented code",
+    "source": "    <send_user_message_question_reply>\n    [{\"questionItemId\": \"[\\\"request_user_input_async\\\",\\\"internal-call\\\",0]\", \"question\": \"是否允许我点击 Chrome 中的 Authorize？\", \"answer\": \"允许，点击 Authorize 并继续部署\"}]\n    </send_user_message_question_reply>",
+    "parts": [
+      {
+        "text": "    <send_user_message_question_reply>\n    [{\"questionItemId\": \"[\\\"request_user_input_async\\\",\\\"internal-call\\\",0]\", \"question\": \"是否允许我点击 Chrome 中的 Authorize？\", \"answer\": \"允许，点击 Authorize 并继续部署\"}]\n    </send_user_message_question_reply>"
+      }
+    ],
+    "plain": "    <send_user_message_question_reply>\n    [{\"questionItemId\": \"[\\\"request_user_input_async\\\",\\\"internal-call\\\",0]\", \"question\": \"是否允许我点击 Chrome 中的 Authorize？\", \"answer\": \"允许，点击 Authorize 并继续部署\"}]\n    </send_user_message_question_reply>"
+  },
+  {
+    "name": "markup remains text",
+    "source": "<send_user_message_question_reply>\n[{\"question\": \"HTML </send_user_message_question_reply> in text\", \"answer\": \"<script>alert(1)</script>\"}]\n</send_user_message_question_reply>",
+    "parts": [
+      {
+        "replies": [
+          {
+            "question": "HTML </send_user_message_question_reply> in text",
+            "answer": "<script>alert(1)</script>"
+          }
+        ]
+      }
+    ],
+    "plain": "问题：HTML </send_user_message_question_reply> in text\n回答：<script>alert(1)</script>"
+  },
+  {
+    "name": "empty message",
+    "source": "",
+    "parts": [],
+    "plain": ""
+  }
+]

@@ -1,8 +1,8 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import Markdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { MessageContent } from "./message-content-view";
+import { readableMessage } from "./message-content";
 import {
   ArrowLeft,
   ArrowUp,
@@ -813,7 +813,7 @@ function Chat({
   }
   async function copy(item: Item) {
     try {
-      await copyText(item.text);
+      await copyText(readableMessage(item));
       setCopied(item.id);
       setTimeout(() => setCopied(""), 1800);
     } catch (e) {
@@ -893,23 +893,7 @@ function Chat({
                           onError={onError}
                         />
                       )}
-                      <div className="markdown">
-                        <Markdown
-                          remarkPlugins={[remarkGfm]}
-                          components={{
-                            a: (props) => (
-                              <a
-                                {...props}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                              />
-                            ),
-                            img: () => null,
-                          }}
-                        >
-                          {item.text}
-                        </Markdown>
-                      </div>
+                      <MessageContent role={item.role} text={item.text} />
                       {item.live && item.activities?.length ? (
                         <details className="activity">
                           <summary>
@@ -967,7 +951,7 @@ function Chat({
             .map((item) => (
               <button
                 key={item.id}
-                title={item.text.slice(0, 100)}
+                title={readableMessage(item).slice(0, 100)}
                 aria-label="跳转到消息"
                 onClick={() => {
                   bottom.current = false;

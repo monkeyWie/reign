@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/monkeyWie/reign/pkg/messagecontent"
 	"github.com/nsgo-dev/nsgo/base/textview"
 	"github.com/nsgo-dev/nsgo/core"
 	"github.com/nsgo-dev/nsgo/icons/lucide"
@@ -163,12 +164,29 @@ func (s *State) message(cx *core.Scope, get func() Message) core.Node {
 		}
 		return core.Style{}
 	}}
+	var bodyContent core.Node = body
+	if user {
+		bodyContent = core.Dynamic(func(cx *core.Scope) core.Node {
+			children := []core.Node{}
+			for _, part := range messagecontent.Parse(displayText(get())) {
+				if len(part.Replies) > 0 {
+					children = append(children, questionReplyCard(cx, part.Replies))
+				} else if strings.TrimSpace(part.Text) != "" {
+					text := part.Text
+					view := body
+					view.MarkdownFunc = func() string { return strings.TrimRight(text, " \t\r\n") }
+					children = append(children, view)
+				}
+			}
+			return core.View{Style: core.Style{Gap: 12, MinWidth: core.Pt(0)}, Children: children}
+		})
+	}
 	bubble := core.View{TestID: "message-body-" + m.ID, Selectable: true, Style: core.Style{MinWidth: core.Pt(0), MaxWidth: core.Pt(choose(user, core.Points(680), core.Points(820)))}, StyleFunc: func() core.Style {
 		if user {
 			return core.Style{Background: palette(cx).muted, CornerRadius: 20, Padding: core.All(16)}
 		}
 		return core.Style{}
-	}, Children: []core.Node{core.Show{When: func() bool { return strings.TrimSpace(displayText(get())) != "" }, Then: func(*core.Scope) core.Node { return body }}, core.Each(func() []Object {
+	}, Children: []core.Node{core.Show{When: func() bool { return strings.TrimSpace(displayText(get())) != "" }, Then: func(*core.Scope) core.Node { return bodyContent }}, core.Each(func() []Object {
 		out := []Object{}
 		for _, a := range get().Attachments {
 			if str(a, "kind") != "image" && !flag(a, "inline") {
@@ -203,7 +221,7 @@ func (s *State) message(cx *core.Scope, get func() Message) core.Node {
 		return core.View{TestID: "message-actions-" + m.ID, Style: core.Style{Height: core.Pt(32), Direction: core.Row, AlignItems: core.AlignCenter, Gap: 8}, StyleFunc: func() core.Style {
 			visible := hover.Get() || isMobile(cx)
 			return core.Style{Opacity: core.Alpha(choose(visible, float32(1), float32(0))), PointerEvents: choose(visible, core.PointerEventsAuto, core.PointerEventsNone)}
-		}, Children: []core.Node{s.copyButton(cx, "copy-message-"+m.ID, "", "ghost", func() string { return get().Text }), dynamicText(cx, func() string {
+		}, Children: []core.Node{s.copyButton(cx, "copy-message-"+m.ID, "", "ghost", func() string { return messageCopyText(get()) }), dynamicText(cx, func() string {
 			ts := get().Timestamp
 			if ts == 0 {
 				return "时间未知"
@@ -330,10 +348,10 @@ func (s *State) messageNavigation(cx *core.Scope, rows *core.Memo[[]Message], re
 			}
 			rowIndex := v[idx]
 			message := rows.Get()[rowIndex]
-			tick := core.View{TestID: fmt.Sprintf("message-tick-%d", i), Role: core.RoleButton, Label: displayText(message), Tooltip: core.View{Style: core.Style{Width: core.Pt(300), Padding: core.All(16), CornerRadius: 14, BorderWidth: 1}, StyleFunc: func() core.Style {
+			tick := core.View{TestID: fmt.Sprintf("message-tick-%d", i), Role: core.RoleButton, Label: messagePreviewText(message), Tooltip: core.View{Style: core.Style{Width: core.Pt(300), Padding: core.All(16), CornerRadius: 14, BorderWidth: 1}, StyleFunc: func() core.Style {
 				c := palette(cx)
 				return core.Style{Background: c.background, BorderColor: c.border}
-			}, Children: []core.Node{core.Text{Content: displayText(message), MaxLines: 5, Style: core.Style{FontSize: 12}}}}, OnPress: func(core.PressEvent) { ref.ScrollToIndexAt(rowIndex+tailCount(), 0.5, 0, true) }, Style: core.Style{Height: core.Pt(12), Width: core.Pt(30), JustifyContent: core.JustifyCenter, Padding: core.Edges{Left: 8, Right: 11}}, Children: []core.Node{core.View{Style: core.Style{Height: core.Pt(2), CornerRadius: 1}, StyleFunc: func() core.Style {
+			}, Children: []core.Node{core.Text{Content: messagePreviewText(message), MaxLines: 5, Style: core.Style{FontSize: 12}}}}, OnPress: func(core.PressEvent) { ref.ScrollToIndexAt(rowIndex+tailCount(), 0.5, 0, true) }, Style: core.Style{Height: core.Pt(12), Width: core.Pt(30), JustifyContent: core.JustifyCenter, Padding: core.Edges{Left: 8, Right: 11}}, Children: []core.Node{core.View{Style: core.Style{Height: core.Pt(2), CornerRadius: 1}, StyleFunc: func() core.Style {
 				return core.Style{Background: palette(cx).mutedText, Opacity: core.Alpha(.4), Hover: &core.Style{Opacity: core.Alpha(1)}}
 			}}}}
 			ticks = append(ticks, tick)
