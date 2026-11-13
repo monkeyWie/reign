@@ -1,0 +1,52 @@
+---
+title: 包体积与内存测量
+description: 给出可复现的预览测量，不把原生 UI 的选择等同于性能保证。
+---
+
+## 预览构建测量
+
+以下为 **2026-11-14 本地测量**，不是所有平台或正式发行包的保证。
+
+| 项目               | 结果                         | 测量范围                                 |
+| ------------------ | ---------------------------- | ---------------------------------------- |
+| macOS arm64 压缩包 | 8,897,655 bytes，约 8.9 MB   | 完整 .app 的 tar.gz                      |
+| macOS .app         | 23,137,597 bytes，约 23.1 MB | 包内常规文件字节数之和，不是磁盘分配大小 |
+| 演示面板空闲 RSS   | 中位数 118.9 MiB             | 5 次样本，每次间隔 2 秒                  |
+
+测试设备：Apple M5，macOS 26.6，arm64。应用版本：`0.1.0-site-preview`；原生代码基线 `dc19c8b`，NSGo 依赖以 `clients/nsgo/go.mod` 为准，使用仓库构建脚本的默认优化设置。
+
+内存采样值为 121696、121712、121712、121728、121696 KiB。单位 MB 使用十进制，MiB 使用二进制。
+
+## 场景与限制
+
+应用以 `AGENTHUB_NSGO_DEMO=1` 启动，停留在隔离演示面板，未运行真实 Agent，也未传输附件。采样前已完成启动并空闲约一分钟。
+
+RSS 是操作系统报告的该进程驻留集，不是峰值、不等同于独占物理内存，也不包含独立的 Codex app-server、模型服务或被控 Agent 进程。
+
+真实会话、Markdown、图片、窗口数量和缓存都会改变内存占用。不能从这个单一场景推断整个工作环境只需 119 MiB，也不能据此宣称比某个竞品快多少。
+
+## 复现构建
+
+在仓库根目录进入原生模块：
+
+```sh
+cd clients/nsgo
+./scripts/build.sh macos_arm64 -output /tmp/reign-measure -version 0.1.0-site-preview
+```
+
+在隔离演示模式启动生成的 `.app` 内可执行文件，然后记录 PID：
+
+```sh
+AGENTHUB_NSGO_DEMO=1 AGENTHUB_NSGO_DATA_DIR=/tmp/reign-measure-data \
+  /tmp/reign-measure/Reign-0.1.0-site-preview-macos_arm64/Reign.app/Contents/MacOS/Reign
+```
+
+另一个终端用 `ps -p PID -o rss=` 采样；macOS 的 RSS 以 KiB 报告。不要把开发工具、旧客户端或真实 Agent 的进程误算成测试进程。
+
+包体积使用同一构建的完整 `.app` 创建 tar.gz 后测量。不同压缩工具、签名、调试符号和架构会改变结果。
+
+## 为什么选择原生 UI
+
+NSGo 使用平台原生视图，不随应用打包 Chromium／WebView 运行时。Go 核心与 UI 在同一应用进程内工作，消息采用虚拟列表和增量更新。
+
+这些设计减少了运行时层次，但不代替持续的性能测量。今后的版本应补充真实长会话、附件和直连／中继场景，再对照相同设备和操作步骤评估。

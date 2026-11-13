@@ -1,0 +1,39 @@
+---
+title: 连接与架构
+description: 原生 Agent 留在电脑，云端只协调连接和传递加密帧。
+---
+
+## 数据路径
+
+```text
+原生／Web 控制端
+   │ 配对、设备发现、信令
+   ▼
+Cloudflare Worker ── D1 元数据
+   │                Durable Objects 设备房间
+   │
+   ├─ 直连成功：控制端 ⇄ 被控电脑 Reign ⇄ Agent Provider
+   └─ 无法直连：控制端 ⇄ Worker 加密中继 ⇄ 被控电脑
+```
+
+## 原生端
+
+NSGo 渲染平台原生视图，Go 在同一个应用进程中处理设备状态、Provider、缓存、配对和网络。不嵌入 Chromium 或 WebView，也不为 UI 再启动一个独立 Hub 后台 CLI。
+
+Agent 自己的进程仍独立存在，例如共享 Codex app-server；这与再拆一个 Reign 后台进程不是一回事。
+
+## Web 与云端
+
+Next.js／React 提供官网与浏览器控制台，通过 OpenNext 适配到 Cloudflare Worker。Fumadocs 负责 Markdown／MDX 文档。
+
+D1 保存设备、配对和服务身份等元数据；Durable Objects 为设备房间提供有状态协调和可休眠 WebSocket。自建开源部署不需要商业账号系统。
+
+## 可选探测器
+
+Go 探测器在公网监听 TCP／UDP 26330，只增强直连候选发现。地址通过 Worker 的统一配置下发。
+
+## 开源与商业边界
+
+官网、文档、原生 UI、Web 控制端、协议、SDK、Worker 核心和探测器属于开源核心。官方商业服务复用这些核心，另组合私有的身份、计费和权益策略，并非维护一套分叉的连接协议。
+
+详细技术选型见[技术栈](/technology)，开发协议见[协议与扩展边界](/docs/architecture/protocol)。

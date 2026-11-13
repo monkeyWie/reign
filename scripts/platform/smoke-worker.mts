@@ -1,6 +1,7 @@
 // Run against an isolated local Worker with its D1 migrations applied.
 // The spawned host only exposes a fake Agent, never real local sessions.
 import assert from "node:assert/strict";
+import { smokeSite } from "./smoke-site.mts";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { Service } from "../../packages/client-sdk/src/service";
@@ -54,7 +55,8 @@ try {
       reject(Error(`Fixture exited ${n}: ${stderr}`));
     });
   });
-  for (const path of ["/", "/docs", "/chat", "/account"]) {
+  await smokeSite(origin);
+  for (const path of ["/chat", "/account"]) {
     const response = await fetch(origin + path);
     assert.equal(response.status, 200, path);
     assert.match(await response.text(), /Reign/);

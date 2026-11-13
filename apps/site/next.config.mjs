@@ -1,4 +1,4 @@
-import type { NextConfig } from "next";
+import { createMDX } from "fumadocs-mdx/next";
 import { initOpenNextCloudflareForDev } from "@opennextjs/cloudflare";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -12,7 +12,7 @@ for (let dir = workspaceRoot; ; dir = dirname(dir)) {
   if (dirname(dir) === dir) break;
 }
 if (process.env.NODE_ENV === "development") void initOpenNextCloudflareForDev();
-const config: NextConfig = {
+const config = {
   turbopack: { root: workspaceRoot },
   outputFileTracingRoot:
     process.env.NEXT_PRIVATE_OUTPUT_TRACE_ROOT || workspaceRoot,
@@ -24,4 +24,4 @@ const config: NextConfig = {
   images: { unoptimized: true },
   poweredByHeader: false,
 };
-export default config;
+export default createMDX()(config);

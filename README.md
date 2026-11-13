@@ -4,6 +4,10 @@ Remote control for the AI Agents on your own computers. Native desktop and mobil
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/monkeyWie/reign)
 
+## Website and documentation
+
+The official site is [myreign.cloud](https://myreign.cloud), with [quick start](https://myreign.cloud/docs/quick-start), [self-hosting](https://myreign.cloud/docs/self-hosting), [technology](https://myreign.cloud/technology) and [contribution guides](CONTRIBUTING.md). Documentation uses Fumadocs on Next.js; edit Markdown/MDX in `apps/site/content/docs` and each folder’s `meta.json` for sidebar order. Run `pnpm dev` for a content preview. The complete Worker build also includes the static browser-search index.
+
 ## Architecture
 
 - **One Worker** hosts `/`, `/docs`, `/chat` and `/p2p/*`. D1 stores device identities and encrypted pairing envelopes. Hibernating Durable Objects route signaling and encrypted relay frames.
@@ -49,16 +53,16 @@ Expose **26330/TCP and 26330/UDP** directly. The probe contains no website, devi
 
 ## Source map
 
-| Directory | Responsibility |
-| --- | --- |
-| `apps/site` | Public website, docs and React controller entry |
-| `packages/web-client` | Browser chat UI, messages, attachments and account UI |
-| `packages/client-sdk` | Pairing, encrypted RPC, WebRTC and IndexedDB |
-| `packages/protocol` | Current `/p2p/*` protocol and policy interfaces |
+| Directory              | Responsibility                                            |
+| ---------------------- | --------------------------------------------------------- |
+| `apps/site`            | Public website, docs and React controller entry           |
+| `packages/web-client`  | Browser chat UI, messages, attachments and account UI     |
+| `packages/client-sdk`  | Pairing, encrypted RPC, WebRTC and IndexedDB              |
+| `packages/protocol`    | Current `/p2p/*` protocol and policy interfaces           |
 | `packages/worker-core` | D1 directory/pairing, signed leases and hibernating rooms |
-| `clients/nsgo` | Native desktop, Android and iOS UI |
-| `internal` | Native Go application, Providers, transport and SQLite |
-| `cmd/reign-probe` | Optional TCP/UDP discovery binary |
-| `.github/workflows` | Native, Web, Worker and probe checks/builds/releases |
+| `clients/nsgo`         | Native desktop, Android and iOS UI                        |
+| `internal`             | Native Go application, Providers, transport and SQLite    |
+| `cmd/reign-probe`      | Optional TCP/UDP discovery binary                         |
+| `.github/workflows`    | Native, Web, Worker and probe checks/builds/releases      |
 
 Protocol compatibility with older prototypes is intentionally not provided. See [implementation scope](docs/platform/implementation.md) and [protocol](docs/platform/protocol.md). Older documents outside `docs/platform` describe historical prototypes.

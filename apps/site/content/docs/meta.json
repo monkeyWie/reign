@@ -1,0 +1,12 @@
+{
+  "pages": [
+    "index",
+    "quick-start",
+    "guides",
+    "agents",
+    "self-hosting",
+    "architecture",
+    "privacy",
+    "contributing"
+  ]
+}

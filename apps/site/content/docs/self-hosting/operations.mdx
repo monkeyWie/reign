@@ -1,0 +1,45 @@
+---
+title: 升级与维护
+description: 保留服务身份、备份元数据，并知道如何检查发布结果。
+---
+
+## 升级流程
+
+1. 阅读目标版本的发布说明，确认配置或数据库迁移变化。
+2. 备份当前 D1，保留 Worker 名称、D1 ID、域名及变量。
+3. 更新代码和依赖，运行检查、测试和 Web 构建。
+4. 使用原配置部署，再验证健康检查、配置端点、配对和会话读取。
+
+```sh
+git pull --ff-only
+pnpm install --frozen-lockfile
+pnpm check
+pnpm test
+pnpm build:web
+pnpm run deploy
+```
+
+## 数据备份
+
+```sh
+pnpm exec wrangler d1 export DB --remote --output ./reign-backup.sql
+```
+
+把备份放在私有位置，不要提交 Git。D1 虽不保存聊天明文，但包含设备元数据、凭据哈希、配对记录及服务签名身份。
+
+重建数据库会改变服务身份、影响旧目录与短期租约。不要把“清空数据库”作为普通网络问题的修复步骤。浏览器／原生控制端的本地会话缓存不包含在 D1 备份中。
+
+## 发布失败怎么排查
+
+区分构建、资源上传、新版本激活、域名生效四个阶段。文件上传成功不代表新版本已经接收流量。
+
+```sh
+pnpm exec wrangler deployments list
+pnpm exec wrangler versions list
+```
+
+若 API 返回未知错误，记录错误码、时间和请求阶段，查询 Cloudflare 状态；不要直接判断是代码错误或免费额度问题。旧版本可继续服务时，优先保留它再排查。
+
+## 监控与资源费用
+
+检查 Worker／DO 请求、CPU、WebSocket 连接，D1 存储和读写，以及可选探测器的网络流量。中继承载业务数据，比单纯信令更需要关注连接规模。按自己的 Cloudflare 计划设置预算提醒。

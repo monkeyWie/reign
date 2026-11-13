@@ -1127,7 +1127,7 @@ hr {
   font-family: monospace;
 }
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not(.light) {
     --bg: #171717;
     --surface: #1d1d1d;
     --rail: #202020;
@@ -1313,4 +1313,17 @@ hr {
   .spin {
     animation-duration: 3s;
   }
+}
+
+:root.dark {
+  --bg: #171717;
+  --surface: #1d1d1d;
+  --rail: #202020;
+  --fg: #ededed;
+  --muted: #a1a1aa;
+  --border: #343434;
+  --hover: #2b2b2b;
+  --accent: #ededed;
+  --accent-fg: #171717;
+  --danger: #fca5a5;
 }

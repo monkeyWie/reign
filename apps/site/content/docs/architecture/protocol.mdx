@@ -1,0 +1,31 @@
+---
+title: 协议与扩展边界
+description: 连接层统一使用 /p2p/，Provider 保留 Agent 原生协议。
+---
+
+## 公共连接入口
+
+| 入口          | 职责                             |
+| ------------- | -------------------------------- |
+| `/p2p/config` | 服务能力、签名身份与可选探测入口 |
+| `/p2p/signal` | 握手与直连信令                   |
+| `/p2p/relay`  | 端到端加密的业务帧               |
+| `/healthz`    | 服务健康检查                     |
+
+完整请求类型和设备注册、配对 API 请以仓库 [`packages/protocol`](https://github.com/monkeyWie/reign/tree/main/packages/protocol) 以及 [`docs/platform/protocol.md`](https://github.com/monkeyWie/reign/blob/main/docs/platform/protocol.md) 为准。
+
+## 一次连接
+
+设备向同一服务注册身份并取得连接编号；首次配对证明对方控制权，经电脑确认或密码验证建立本地信任。信令交换候选地址，建立直连或回退中继，再通过加密 RPC 调用 Provider。
+
+会话快照与增量事件有各自的游标／序号，缺口触发重新同步；客户端不能把传输重放当成新的用户指令。
+
+## 商业策略
+
+官方服务可下发短期签名租约，绑定设备、控制端、产品与连接权益。被控端在统一调用入口校验，因此直连不会绕过官方设备／产品限制。
+
+自建服务的同一协议默认不加商业额度。业务策略留在服务组合层，不应把付费判断散落在每一个 Provider 中。
+
+## 兼容性
+
+当前开发预览不兼容早期 `/v2/` 或旧原型接口。修改协议时同时更新 Go、TypeScript、测试 fixture 与文档，不保留只有一端可以使用的半套链路。
