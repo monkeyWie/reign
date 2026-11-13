@@ -1,41 +1,38 @@
 ---
 title: 技术栈详解
-description: 每一层采用什么、负责什么，以及不负责什么。
+description: 从原生视图到云端连接，每一层的技术与职责。
 ---
+
+<ArchitectureDiagram kind="stack" />
 
 ## 原生 UI：NSGo
 
-桌面与移动端使用 NSGo，以 Go 编写界面，映射到平台原生视图。设备导航、会话虚拟列表、Markdown 和图片预览在原生 UI 中完成。
+桌面与移动端使用 NSGo，以 Go 编写界面，映射到平台原生视图。设备导航、会话虚拟列表、Markdown 和图片预览均在原生 UI 中完成。原生视图无需打包浏览器运行时。[查看体积与内存实测](/docs/architecture/performance)。
 
-采用原生视图避免打包完整浏览器运行时；包体积仍取决于目标架构、系统库、签名和构建选项。当前浏览器产品使用 React，不再分发 NSGo WASM 作为官网控制台。
+## 应用核心与 Provider：Go
 
-## 应用与 Provider：Go
+Go 核心复用设备管理、配对、加密、网络与同步逻辑。Provider 封装各 Agent 的安装发现、启动和原生协议，并向界面提供统一能力。应用内直接调用 Go 核心。
 
-Go 复用设备管理、加密、网络连接和 Agent 适配逻辑；Provider 隔离 Codex 的启动细节及原生协议。应用内直接调用 Go 逻辑，减少 UI 与单独后台服务之间的通信层。
+## 网络：WebRTC、TCP、WebSocket
 
-## 网络：WebRTC、原生 TCP、WebSocket
+原生 WebRTC 由 Pion 实现；浏览器使用标准 RTCPeerConnection 与 DataChannel。原生端还提供 TCP 候选发现与打洞。公共 STUN 和自建探测器并行辅助获取地址映射。
 
-原生 WebRTC 使用 Pion；浏览器使用标准 RTCPeerConnection 和 DataChannel，无需额外下载 Go WASM 来建立连接。原生端还实现 TCP 候选发现与打洞。
-
-WebSocket 分为信令和加密业务中继。可选 STUN 探测只辅助获取映射；不部署 TURN／DERP，也不使用 cloudflared 隧道。
+WebSocket 承载信令，并在需要时中继端到端加密业务数据。用户仅配置一个服务根地址，探测与连接能力由服务自动下发。
 
 ## Web：Next.js、React、OpenNext
 
-官网、文档和 `/chat` 共用 Next.js App Router；React 控制端保留消息虚拟滚动与增量同步。OpenNext 将 Next 构建结果适配到 Worker，客户端默认使用当前页面 origin。
+官网、文档与 `/chat` 共用 Next.js App Router。React 控制端采用响应式布局、虚拟消息列表与增量同步；浏览器直接使用 WebRTC 和 Web Crypto。
 
-Fumadocs 用仓库内 MDX 生成文档页面、目录、搜索和前后篇导航；无需另起 CMS 或单独的文档服务。
+OpenNext 将站点构建适配到 Cloudflare Worker。Fumadocs 根据仓库内 Markdown／MDX 生成多语言文档、导航、搜索与目录。
 
-## 数据：SQLite、IndexedDB、D1
+## 本地数据：SQLite 与 IndexedDB
 
-- 原生端：SQLite 保存配置与会话缓存，附件存放本地文件。
-- 浏览器：IndexedDB 保存配对身份、会话快照和有界附件缓存。
-- Worker：D1 保存服务元数据；官方业务层使用 Drizzle ORM 管理账号、套餐和订单。
-- 现存 Go 数据访问路径使用 SQLite，部分服务存储采用 GORM；不能把云端 D1 和本地 ORM 当成同一个数据库。
+原生端用 SQLite 保存配置与会话缓存，附件缓存在本地文件中；浏览器用 IndexedDB 保存配对身份、会话快照和附件缓存。恢复连接后补齐最新状态，继续增量订阅。
 
-## 官方业务层
+## 云端：Workers、Durable Objects、D1
 
-Better Auth 负责 GitHub／Google 登录，Waffo 对接支付；最终权益由服务端校验。登录渠道、付费产品和正式售价以线上开放状态为准。开源自建无需部署这套业务层。
+Worker 处理 HTTP 请求与连接入口；Durable Objects 协调设备房间和可休眠 WebSocket；D1 持久化设备身份、配对与服务元数据。云端不持久化聊天和附件明文。
 
-## 依赖与版本
+## 开发与扩展
 
-依赖的固定版本以 `go.mod`、`clients/nsgo/go.mod`、`package.json` 和 `pnpm-lock.yaml` 为准。NSGo 是较新的框架，升级需完成平台构建和 UI 回归。[查看贡献要求](/docs/contributing)。
+依赖版本分别记录在 `go.mod`、`clients/nsgo/go.mod`、`package.json` 与 `pnpm-lock.yaml`。开发环境、构建命令和检查流程见[本地开发](/docs/contributing/development)；扩展 Agent 见[Provider 接入](/docs/contributing/providers)。

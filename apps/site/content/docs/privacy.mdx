@@ -13,7 +13,7 @@ Signaling coordinates connections; relay carries ciphertext. The service does no
 
 The open-source service stores device public keys, credential hashes, names, IDs, pairing relationships, temporary encrypted envelopes and service signing identity. Connection handling also exposes necessary network information. The official business layer adds sign-in information, device ownership, plans, orders and entitlements.
 
-No plaintext chat storage in D1 does not mean no metadata exists. Operators should limit administrative access, backups and logs.
+Self-hosted operators manage this metadata. Limit administrative access and keep backups private.
 
 ## Controller caches
 
@@ -24,5 +24,3 @@ After using a shared computer, clear site data and revoke the controller on the 
 ## Reporting security issues
 
 Do not post exploit details, pairing keys, credentials or private conversations in public issues. Follow the private reporting channel in [SECURITY.md](https://github.com/monkeyWie/reign/blob/main/SECURITY.md).
-
-This developer preview does not claim an independent security audit. These technical boundaries do not replace a formal service privacy policy or legal terms.

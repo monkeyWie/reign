@@ -51,13 +51,13 @@ export function PricingCards() {
         {!data && !error && (
           <div className="pricing-loading">
             <LoaderCircle size={20} className="spin" />
-            <p>{t("正在读取当前服务的套餐与价格…")}</p>
+            <p>{t("正在加载方案…")}</p>
           </div>
         )}
         {error && (
           <div className="pricing-loading">
             <h2>{t("暂时无法加载官方套餐")}</h2>
-            <p>{t("价格与权益以服务端配置为准，请稍后重试。")}</p>
+            <p>{t("请稍后重试，或前往账号页查看。")}</p>
             <button className="button" onClick={() => setAttempt(attempt + 1)}>
               {t("重新加载")}
             </button>
@@ -130,7 +130,7 @@ export function PricingCards() {
                 </li>
                 <li>
                   <Check size={16} />
-                  {t("支持范围内的会话管理")}
+                  {t("跨设备项目与会话管理")}
                 </li>
                 <li>
                   <Check size={16} />
@@ -232,7 +232,7 @@ export function PricingCards() {
       )}
       <p className="pricing-status">
         {t(
-          "官方套餐实时读取自当前服务。登录与支付能力按实际开放状态显示；Reign 不包含 Agent 模型订阅或 API 用量费用。",
+          "Reign 服务方案与 Agent 模型费用独立，模型订阅或 API 用量由你使用的模型服务计费。",
         )}
       </p>
     </>

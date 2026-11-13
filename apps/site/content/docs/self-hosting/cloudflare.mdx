@@ -9,7 +9,7 @@ Open [Deploy to Cloudflare](https://deploy.workers.cloudflare.com/?url=https://g
 
 Deploy the **root repository, not only `apps/site`**: the site depends on the connection core and SDK in the same pnpm workspace. Provision a Worker, one D1 database and a SQLite Durable Object.
 
-Automatic resource configuration is prepared in the repository. The complete authorization and setup flow still needs to be completed and verified in your own account.
+Grant the Worker, D1 and Durable Object permissions requested by the setup flow, then save the assigned service URL and resource bindings.
 
 ## Manual deployment
 

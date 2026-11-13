@@ -5,6 +5,9 @@ import { LocalizedLink as Link } from "../../../components/locale";
 import {
   ArrowRight,
   FileImage,
+  Layers3,
+  Terminal,
+  Code2,
   FolderOpen,
   KeyRound,
   MessagesSquare,
@@ -19,6 +22,7 @@ import {
   SectionHeading,
   SiteShell,
 } from "../../../components/site";
+import { PlatformShowcase } from "../../../components/platform-showcase";
 import { ProductPreview } from "../../../components/product-preview";
 export default async function Features({
   params,
@@ -63,6 +67,7 @@ export default async function Features({
             </Link>
           </div>
         </div>
+        <PlatformShowcase lang={lang} />
         <section className="site-section site-width">
           <div className="feature-detail-grid">
             {[
@@ -70,7 +75,7 @@ export default async function Features({
                 FolderOpen,
                 t("以项目为中心"),
                 t(
-                  "会话按工作目录聚合，通过图标区分 Provider，按最近更新排序。Codex App 与 CLI 的可控路由独立处理。",
+                  "多台设备、多个 Agent 的会话，按工作目录聚合、最近更新排序。打开项目，立刻找回工作上下文。",
                 ),
                 "/docs/guides/sessions",
               ],
@@ -94,7 +99,7 @@ export default async function Features({
                 Network,
                 t("能直连，就直连"),
                 t(
-                  "原生端尝试 WebRTC／UDP 与 TCP，Web 使用标准 WebRTC。回退中继取决于自建服务或官方权益。",
+                  "原生端探索 UDP 与 TCP 直连，浏览器使用标准 WebRTC。自动选择可用路径，加密保护每一次传输。",
                 ),
                 "/docs/guides/connections",
               ],
@@ -148,46 +153,48 @@ export default async function Features({
         </section>
         <section className="site-width support-section">
           <SectionHeading
-            eyebrow="HONEST ABOUT SUPPORT"
-            title={t("支持到哪里，就说到哪里。")}
+            eyebrow="YOUR AGENTS. CONNECTED."
+            title={t("为真实的 Agent 工作流而生。")}
           >
             {t(
-              "当前接入 Codex App 和 Codex CLI。多 Provider 架构已准备好，新的 Agent 需要实现并验证适配后才会上线。",
+              "保留你的模型账号、项目环境与会话，让远程操作与桌面工作连成一体。",
             )}
           </SectionHeading>
           <div className="support-grid">
-            <div>
-              <strong>Codex App</strong>
-              <span className="site-tag available">{t("已实现")}</span>
-              <p>
-                {t(
-                  "通过 Reign 启动并连接共享 app-server。手动独立启动时可能需要重新接入。",
-                )}
-              </p>
-            </div>
-            <div>
-              <strong>Codex CLI</strong>
-              <span className="site-tag available">{t("已实现")}</span>
-              <p>
-                {t(
-                  "连接兼容后端。不同 app-server 持有的运行中会话，不保证能直接接管。",
-                )}
-              </p>
-            </div>
-            <div>
-              <strong>Claude Code · Pi · ZCode</strong>
-              <span className="site-tag">{t("尚未接入")}</span>
-              <p>
-                {t(
-                  "欢迎贡献 Provider。Codex VS Code 扩展当前也不在支持范围内。",
-                )}
-              </p>
-            </div>
+            {[
+              [
+                Terminal,
+                "Codex App",
+                t("桌面与远端，共享同一段对话"),
+                "/docs/agents/codex-app",
+              ],
+              [
+                Code2,
+                "Codex CLI",
+                t("从终端到手机，项目上下文随行"),
+                "/docs/agents/codex-cli",
+              ],
+              [
+                Layers3,
+                t("开放 Provider 架构"),
+                t("统一接入、会话与连接能力，为扩展更多 Agent 工作流而设计。"),
+                "/docs/contributing/providers",
+              ],
+            ].map(([Icon, title, description, href]) => {
+              const I = Icon as typeof Terminal;
+              return (
+                <div key={String(title)}>
+                  <I size={22} />
+                  <strong>{String(title)}</strong>
+                  <p>{String(description)}</p>
+                  <Link className="site-text-link" href={String(href)}>
+                    {t("了解更多")}
+                    <ArrowRight size={14} />
+                  </Link>
+                </div>
+              );
+            })}
           </div>
-          <Link className="site-text-link" href="/docs/agents">
-            {t("完整支持矩阵与前置条件")}
-            <ArrowRight size={15} />
-          </Link>
         </section>
         <BottomCTA />
       </main>

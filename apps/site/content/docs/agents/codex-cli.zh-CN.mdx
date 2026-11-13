@@ -1,6 +1,6 @@
 ---
 title: 接入 Codex CLI
-description: 区分会话文件、运行中的 CLI 和它实际使用的后端。
+description: 接入 CLI 后端，跨设备管理项目与会话。
 ---
 
 ## 安装与状态
@@ -13,7 +13,7 @@ description: 区分会话文件、运行中的 CLI 和它实际使用的后端�
 
 可以读取历史的范围，与能发送消息的范围不同。由独立 CLI 进程或其他 app-server 持有的运行中会话，不保证可以从另一后端接管。
 
-Reign 只应把实际可接入的 Provider 标为就绪。出现 active writer 或 read-only 错误时，按照界面提示接入对应后端，或等待原任务结束；不要另建一个同名会话来冒充接续成功。
+出现 active writer 或 read-only 错误时，按照面板提示接入对应后端；如果原任务仍在运行，请等待它结束再重新连接。
 
 ## App 与 CLI 的关系
 

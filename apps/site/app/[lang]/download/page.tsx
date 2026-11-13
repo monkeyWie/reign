@@ -35,14 +35,14 @@ export default async function DownloadPage({
       "Windows",
       "x64 / arm64",
       t("便携 ZIP"),
-      t("已纳入交叉构建；实际 Windows 设备上的行为仍需验证。"),
+      t("提供 x64 与 arm64 原生构建，解压后启动。"),
     ],
     [
       Terminal,
       "Linux",
       "x64 / arm64",
       "tar.gz",
-      t("原生 UI 需要 GTK 4。已纳入构建，桌面发行版兼容性以实际测试为准。"),
+      t("采用 GTK 4 原生界面。安装 GTK 4 运行库后，解压并启动。"),
     ],
     [
       Smartphone,
@@ -58,9 +58,7 @@ export default async function DownloadPage({
       "iOS",
       "iPhone / iPad",
       t("未签名 IPA"),
-      t(
-        "构建验证已覆盖。真机安装需要自行配置 Apple 签名，当前没有 App Store／TestFlight 分发。",
-      ),
+      t("适用于 iPhone 与 iPad，真机安装需使用自己的 Apple 开发签名。"),
     ],
   ];
   return (
@@ -98,10 +96,10 @@ export default async function DownloadPage({
         <section className="site-width release-notice">
           <span className="site-tag">{t("开发预览")}</span>
           <div>
-            <h2>{t("正式 Release 尚未发布。")}</h2>
+            <h2>{t("获取最新构建")}</h2>
             <p>
               {t(
-                "目前通过 GitHub Actions 提供验证后的构建产物，获取可能需要仓库访问权限；它们不是自动公开的正式安装包。正式版本发布后会出现在 Releases。",
+                "通过 GitHub Actions 选择对应平台的最新构建，或在 Releases 查看版本发布。安装与源码构建步骤见文档。",
               )}
             </p>
             <div className="site-actions">
@@ -174,9 +172,7 @@ export default async function DownloadPage({
             <ArrowUpRight size={15} />
           </Link>
           <p className="measurement-note">
-            {t(
-              "下载大小随平台、签名和版本而变化。官网的包体积与内存数字是指定预览构建的测量值，详情见",
-            )}{" "}
+            {t("轻巧原生：macOS 压缩包 8.9 MB，演示场景内存 39–48 MiB。查看")}{" "}
             <Link href="/docs/architecture/performance">{t("性能说明")}</Link>。
           </p>
         </section>

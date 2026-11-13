@@ -1,39 +1,38 @@
 ---
 title: Architecture
-description: Keep agents on your computer; coordinate connections in the cloud.
+description: How devices, cloud coordination and agents work together.
 ---
 
-## Data paths
+## System overview
 
-```text
-Native / Web controller
-   │ Pairing, discovery, signaling
-   ▼
-Cloudflare Worker ── D1 metadata
-   │                Durable Object device rooms
-   │
-   ├─ Direct: controller ⇄ Host Reign ⇄ Agent provider
-   └─ Relay:  controller ⇄ Worker encrypted relay ⇄ Host
-```
+Reign separates the interface, connection coordination and agent execution. Send instructions from any device while your agents work on your own computer.
 
-## Native clients
+<ArchitectureDiagram />
 
-NSGo renders platform-native views. Go handles device state, providers, caches, pairing and networking in the same app process. No Chromium/WebView is embedded and no separate Hub CLI daemon is required for UI.
+## Native applications
 
-Agent processes remain independent, such as the shared Codex app-server. They are distinct from an extra Reign background process.
+NSGo renders native desktop and mobile views. Go handles devices, pairing, networking, session caches and providers in the same application process. Native views deliver a small package and low memory usage without bundling a browser runtime. [See measured performance](/docs/architecture/performance).
 
-## Web and cloud
+The desktop app is both a controller and a host: connect to other computers or share local agents with authorized devices. Mobile apps act as controllers.
 
-Next.js/React provide the website and Web console, adapted to Workers by OpenNext. Fumadocs builds Markdown/MDX documentation. English and Simplified Chinese routes are rendered with localized content, navigation and metadata.
+## Web and connection service
 
-D1 stores device, pairing and service identity metadata. Durable Objects coordinate device rooms with hibernating WebSockets. Open-source self-hosting does not require a commercial account system.
+Next.js and React power the website, documentation and browser console, deployed to Cloudflare Workers through OpenNext. The service handles discovery, pairing signals and encrypted relay.
 
-## Optional probe
+- **Durable Objects** manage device rooms, online connections and WebSocket signaling.
+- **D1** stores device identities, pairing relationships and service metadata.
+- **End-to-end encryption** keeps session and attachment decryption on devices; relays forward ciphertext.
 
-A Go probe listens publicly on TCP/UDP 26330 to enhance direct candidate discovery. Worker configuration publishes its endpoints.
+## Direct connections first
 
-## Open-source and commercial boundaries
+Clients gather LAN, IPv6 and STUN candidates. Native apps explore UDP and TCP paths; browsers use WebRTC. Once connected directly, application data flows between devices. When direct access is unavailable, an encrypted relay can carry traffic according to service access.
 
-The site, docs, native UI, Web controller, protocol, SDK, Worker core and probe are in the open-source core. The official business service composes them with private identity, billing and entitlement policies over the same connection protocol.
+An optional Go probe provides TCP/UDP discovery on one public port. Its endpoints are published by the connection service. [Connection strategy](/docs/guides/connections).
 
-See [Technology](/technology) and [Protocol boundaries](/docs/architecture/protocol).
+## Agent integration
+
+Providers map native agent interfaces to shared session, message, model and attachment capabilities. Codex App and CLI have dedicated providers, with sessions grouped by project in one interface. [Connect your agents](/docs/agents).
+
+## Deployment options
+
+Use the official service to manage accounts and devices, or deploy your own Worker with the same clients, connection protocol and encryption. [Self-host Reign](/docs/self-hosting).

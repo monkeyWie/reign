@@ -7,13 +7,9 @@ description: Let Reign and the desktop App share one Codex app-server.
 
 Other clients may read Codex history, but the corresponding backend owns running sessions. Reading a record does not connect to that backend.
 
-Reign starts a shared Codex app-server and passes connection settings when launching Codex App. Both clients connect directly to the same backend, without an extra WebSocket gateway.
+Reign starts a shared Codex app-server and passes connection settings when launching Codex App. Both clients connect directly to the same backend, sharing session state and live output.
 
-```text
-Codex App ──┐
-            ├── Shared Codex app-server ── Working directory / Agent task
-Reign ──────┘
-```
+<ArchitectureDiagram kind="codex" />
 
 ## Steps
 
@@ -31,9 +27,9 @@ Reign ──────┘
 
 ## Independent launch and quitting Reign
 
-An App opened directly through the OS may not use the shared backend and can require reintegration. The dashboard provides instructions; an existing process alone does not establish controllability.
+An App opened directly through the OS may not use the shared backend and can require reintegration. Follow the dashboard instructions and wait for Ready before sending remote instructions.
 
-The shared backend has an independently managed lifecycle. Quitting Reign should not actively terminate local Codex tasks. Killing the backend, logging out or losing connectivity can still disrupt connections.
+The shared backend has an independently managed lifecycle. The shared backend continues to manage local Codex tasks after Reign closes. Killing the backend, logging out or losing connectivity can still disrupt connections.
 
 ## Compatibility boundaries
 

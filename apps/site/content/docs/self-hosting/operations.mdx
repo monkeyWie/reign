@@ -31,16 +31,16 @@ Keep backups private and out of Git. D1 contains device metadata, credential has
 
 Recreating the database changes service identity and affects directories and short-lived leases. Do not clear it to fix routine connectivity issues. Controller-side local session caches are not included in a D1 backup.
 
-## Deployment troubleshooting
+## Verify deployment
 
-Distinguish build, upload, version activation and domain activation. Uploaded files do not prove the new version is serving traffic.
+View version and domain status in the Cloudflare dashboard, or use the CLI:
 
 ```sh
 pnpm exec wrangler deployments list
 pnpm exec wrangler versions list
 ```
 
-For an unknown API error, record the code, time and failing stage and check Cloudflare status. Do not assume a code defect or free-tier limit. Preserve a working old version while diagnosing.
+After deploying, check `/healthz` and `/p2p/config`, then connect to a device through `/chat`. If an upgrade fails, roll back to a working version in the Cloudflare dashboard.
 
 ## Monitoring and cost
 

@@ -38,8 +38,8 @@ TCP_STUN=probe.example.com:26330
 
 Clients still configure only the Worker HTTPS URL. `/p2p/config` publishes these endpoints.
 
-Public and self-hosted STUN run in parallel to find a direct path. This is not public relay followed by your server. Browsers have no raw TCP API; TCP probing is primarily for native clients.
+Public and self-hosted STUN run in parallel to find a direct path. Browsers have no raw TCP API; TCP probing is primarily for native clients.
 
 ## Limits
 
-Symmetric NAT, carrier networks and enterprise firewalls may still block hole punching. A probe does not guarantee direct access. The final fallback is Worker encrypted WebSocket relay; no TURN UDP allocation range is required.
+Symmetric NAT, carrier networks and enterprise firewalls may still block hole punching. A probe does not guarantee direct access. When direct access is unavailable, the Worker encrypted WebSocket relay provides a fallback path.

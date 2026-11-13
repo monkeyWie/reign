@@ -6,9 +6,8 @@ import {
   ArrowRight,
   ArrowUpRight,
   Check,
-  Cloud,
+  Layers3,
   Code2,
-  Fingerprint,
   FolderOpen,
   Globe,
   HardDrive,
@@ -20,6 +19,7 @@ import {
   Zap,
 } from "lucide-react";
 import { BottomCTA, SectionHeading, SiteShell } from "../../components/site";
+import { PlatformShowcase } from "../../components/platform-showcase";
 import { ProductPreview } from "../../components/product-preview";
 
 export default async function Home({
@@ -54,14 +54,14 @@ export default async function Home({
               <span className="online-dot" /> YOUR AGENTS. ANYWHERE.
             </span>
             <h1>
-              {t("Agent 在电脑上，")}
+              {t("掌控你的 Agent，")}
               <br />
-              <span>{t("掌控在你手中。")}</span>
+              <span>{t("不止于桌面。")}</span>
             </h1>
             <p>
-              {t("手机、桌面、浏览器，一个工作空间。")}
+              {t("六大平台，一个 Agent 工作空间。")}
               <br />
-              {t("连接自己的电脑，继续与你的 AI Agent 对话。")}
+              {t("让电脑持续创造，让你随处掌控。原生、轻量、端到端加密。")}
             </p>
             <div className="site-actions">
               <Link className="button primary" href="/download">
@@ -78,46 +78,36 @@ export default async function Home({
               <Smartphone size={14} /> Android · iOS <span />
               <Globe size={14} /> Web
             </div>
-            <small className="hero-preview-note">
-              {t("开发预览 · 平台分发与签名状态见下载页")}
-            </small>
           </div>
           <ProductPreview />
         </section>
         <section className="home-facts site-width" aria-label={t("产品要点")}>
           <div>
             <strong>
-              8.9 <span>MB</span>
+              6<span>{t("大平台")}</span>
             </strong>
-            <p>
-              {t("macOS arm64 预览压缩包")}{" "}
-              <Link href="/docs/architecture/performance">
-                {t("测试条件 ↗")}
-              </Link>
-            </p>
+            <p>{t("桌面、手机、浏览器，全面连接")}</p>
           </div>
           <div>
             <strong>
-              {t("原生")}
-              <span>UI</span>
+              8.9<span>MB</span>
             </strong>
-            <p>{t("Go + NSGo，无内嵌 WebView")}</p>
+            <p>{t("macOS arm64 压缩包")}</p>
           </div>
           <div>
             <strong>
-              {t("直连")}
-              <span>{t("优先")}</span>
+              39–48<span>MiB</span>
             </strong>
-            <p>{t("可用时 P2P，按服务权益回退中继")}</p>
+            <p>{t("macOS 演示场景内存实测")}</p>
           </div>
           <div>
             <strong>
-              {t("你的")}
-              <span>{t("设备")}</span>
+              E2E<span>{t("加密")}</span>
             </strong>
-            <p>{t("Agent 和工作目录留在本机")}</p>
+            <p>{t("会话与附件，只在你的设备解密")}</p>
           </div>
         </section>
+        <PlatformShowcase lang={lang} />
         <section className="site-section site-width">
           <SectionHeading
             eyebrow="ONE WORKSPACE"
@@ -138,7 +128,7 @@ export default async function Home({
                 Network,
                 t("尽可能直接，连接彼此"),
                 t(
-                  "原生端尝试 UDP 与 TCP 路径，浏览器使用 WebRTC。直连不可用时，按服务权限回退加密中继。",
+                  "UDP、TCP 与 WebRTC 多路径探索，优先建立设备间直连。端到端加密贯穿直连与中继。",
                 ),
               ],
               [
@@ -152,7 +142,7 @@ export default async function Home({
                 Terminal,
                 t("真实 Agent，真实会话"),
                 t(
-                  "目前接入 Codex App 与 CLI。通过 Provider 扩展更多 Agent，共用同一套连接和会话体验。",
+                  "接入 Codex App 与 CLI，管理原有会话、创建新任务。开放 Provider 架构，连接更多 Agent 工作流。",
                 ),
               ],
               [
@@ -191,14 +181,14 @@ export default async function Home({
           <div>
             <SectionHeading
               eyebrow="BUILT FOR YOUR AGENTS"
-              title={t("连接 Agent，而非另造一个 Agent。")}
+              title={t("熟悉的 Agent，更大的掌控半径。")}
             >
               {t(
                 "使用你已有的模型账号、项目与开发环境。Reign 负责把它们带到你面前。",
               )}
             </SectionHeading>
             <Link className="site-text-link" href="/docs/agents">
-              {t("查看接入要求")}
+              {t("连接你的 Agent")}
               <ArrowRight size={15} />
             </Link>
           </div>
@@ -207,7 +197,7 @@ export default async function Home({
               <Terminal size={25} />
               <div>
                 <strong>Codex App</strong>
-                <p>{t("通过 Reign 启动，共用 app-server")}</p>
+                <p>{t("桌面与远端，共享同一段对话")}</p>
               </div>
               <span className="site-tag available">{t("已接入")}</span>
             </div>
@@ -215,21 +205,18 @@ export default async function Home({
               <Code2 size={25} />
               <div>
                 <strong>Codex CLI</strong>
-                <p>{t("连接兼容后端，管理 CLI 会话")}</p>
+                <p>{t("从终端到手机，项目上下文随行")}</p>
               </div>
               <span className="site-tag available">{t("已接入")}</span>
             </div>
-            <div className="agent-row planned">
-              <PlusIcon />
-              <div>
-                <strong>{t("更多 Agent")}</strong>
-                <p>{t("Claude Code、Pi、ZCode 等待接入")}</p>
-              </div>
-              <span className="site-tag">{t("待扩展")}</span>
+            <div className="agent-architecture">
+              <Layers3 size={18} />
+              <p>
+                {t(
+                  "可扩展 Provider 架构，让不同 Agent 共享连接、会话与安全能力。",
+                )}
+              </p>
             </div>
-            <small>
-              {t("已安装不等于可控，具体以 Provider 就绪状态为准。")}
-            </small>
           </div>
         </section>
         <section className="site-section site-width">
@@ -267,55 +254,66 @@ export default async function Home({
             <ArrowRight size={15} />
           </Link>
         </section>
-        <section className="site-width native-section">
+        <section className="site-width native-section performance-spotlight">
           <div>
-            <span className="site-eyebrow">SMALL BY DESIGN</span>
-            <h2>{t("轻量，不靠省掉体验。")}</h2>
+            <span className="site-eyebrow">NATIVE. LIGHT. POWERFUL.</span>
+            <h2>{t("把性能留给 Agent，把自由交给你。")}</h2>
             <p>
               {t(
-                "桌面和手机使用 NSGo 原生视图，Go 在同一应用进程中承载核心逻辑。浏览器走标准 WebRTC，不必先下载原生客户端或 Go WASM。",
+                "原生视图，Go 驱动。不打包浏览器运行时，以轻巧的体积承载完整的远程工作体验。",
               )}
             </p>
             <div className="native-points">
               <span>
                 <Check size={15} />
-                {t("不打包浏览器运行时")}
+                {t("8.9 MB macOS 压缩包，原生轻巧")}
               </span>
               <span>
                 <Check size={15} />
-                {t("本地缓存与虚拟消息列表")}
+                {t("低内存常驻，随时准备接入")}
               </span>
               <span>
                 <Check size={15} />
-                {t("不另起 Hub 后台 CLI")}
+                {t("流式对话、图片附件、长会话虚拟滚动")}
               </span>
             </div>
             <Link className="site-text-link" href="/technology">
-              {t("看看我们如何构建")}
+              {t("探索轻量背后的技术")}
               <ArrowRight size={15} />
             </Link>
           </div>
-          <div className="stack-tiles">
-            <div>
-              <Code2 />
-              <strong>Go + NSGo</strong>
-              <small>{t("原生应用")}</small>
+          <div className="performance-card">
+            <span className="site-eyebrow">
+              SMALL FOOTPRINT. FULL EXPERIENCE.
+            </span>
+            <div className="performance-number">
+              48.4 <span>MiB</span>
             </div>
-            <div>
-              <Globe />
-              <strong>React + Next.js</strong>
-              <small>{t("官网与 Web 控制台")}</small>
+            <p>{t("打开对话，依然轻盈。")}</p>
+            <div className="memory-sample">
+              <div>
+                <span>{t("待机面板")}</span>
+                <strong>39.5 MiB</strong>
+              </div>
+              <div className="memory-track">
+                <i style={{ width: "65.3%" }} />
+              </div>
             </div>
-            <div>
-              <Cloud />
-              <strong>Cloudflare</strong>
-              <small>{t("连接服务")}</small>
+            <div className="memory-sample">
+              <div>
+                <span>{t("Markdown 丰富对话")}</span>
+                <strong>48.4 MiB</strong>
+              </div>
+              <div className="memory-track">
+                <i style={{ width: "80%" }} />
+              </div>
             </div>
-            <div>
-              <Fingerprint />
-              <strong>E2E encryption</strong>
-              <small>{t("端到端加密")}</small>
-            </div>
+            <small>
+              {t("Apple M5 · macOS · Reign 应用进程实测")}{" "}
+              <Link href="/docs/architecture/performance">
+                {t("查看测试 ↗")}
+              </Link>
+            </small>
           </div>
         </section>
         <section className="site-section site-width self-host-section">
@@ -336,11 +334,6 @@ export default async function Home({
                 {t("比较使用方式")}
               </Link>
             </div>
-            <small>
-              {t(
-                "自建无需商业订阅；Cloudflare 资源仍按自己的账号配额与计费执行。",
-              )}
-            </small>
           </div>
           <div className="selfhost-code">
             <div>
@@ -356,10 +349,6 @@ export default async function Home({
     </SiteShell>
   );
 }
-function PlusIcon() {
-  return <span className="agent-plus">+</span>;
-}
-
 export async function generateMetadata({
   params,
 }: {

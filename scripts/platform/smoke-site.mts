@@ -21,6 +21,11 @@ export async function smokeSite(origin: string) {
     const lang = path.startsWith("/en") ? "en" : "zh-CN";
     assert.match(html, new RegExp(`<html[^>]*lang="${lang}"`), path);
     assert.match(html, /<h1[\s>]/, path);
+    assert.doesNotMatch(
+      html,
+      /\[object Object\]/,
+      `Invalid rendered content: ${path}`,
+    );
     assert.match(html, /<title>[^<]+Reign|<title>Reign/, path);
     assert.match(html, /<meta name="description" content="[^\"]+"/, path);
     assert.match(
@@ -56,12 +61,48 @@ export async function smokeSite(origin: string) {
       );
     }
     if (path === "/en") {
-      assert.match(html, /Your agents on your computer/);
+      assert.match(html, /Beyond your desk/);
       assert.ok(
         !html.includes("Agent 在电脑上"),
         "English homepage must have translated content",
       );
     }
+    if (/^\/(en|zh-CN)$/.test(path)) {
+      for (const text of [
+        "8.9",
+        "39–48",
+        "macOS",
+        "Windows",
+        "Linux",
+        "iOS",
+        "Android",
+        "Web",
+      ])
+        assert.ok(
+          html.includes(text),
+          `Missing product highlight ${text}: ${path}`,
+        );
+    }
+    const diagramKind =
+      path.endsWith("/technology") || path.endsWith("/docs/architecture")
+        ? "overview"
+        : path.endsWith("/docs/architecture/stack")
+          ? "stack"
+          : path.endsWith("/docs/architecture/protocol") ||
+              path.endsWith("/docs/guides/connections")
+            ? "connection"
+            : path.endsWith("/docs/agents/codex-app")
+              ? "codex"
+              : undefined;
+    if (diagramKind)
+      assert.ok(
+        html.includes(`id="architecture-${diagramKind}-${lang}-title"`),
+        `Missing localized architecture diagram: ${path}`,
+      );
+    assert.ok(
+      !html.includes("/v2/") && !html.includes("Legacy Flutter"),
+      `Internal migration history in public content: ${path}`,
+    );
     visited.add(path);
     for (const match of html.matchAll(
       /href="(\/(?:en|zh-CN)\/docs(?:\/[^"?#]*)?)(?:[?#][^"]*)?"/g,

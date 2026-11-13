@@ -1,3 +1,4 @@
+import { ArchitectureDiagram } from "../../../components/architecture-diagram";
 import { pageMetadata, marketingMeta } from "../../../lib/seo";
 import { translate, isLocale } from "../../../lib/i18n";
 import { notFound } from "next/navigation";
@@ -11,7 +12,6 @@ import {
   Globe,
   Network,
   ShieldCheck,
-  Terminal,
 } from "lucide-react";
 import {
   BottomCTA,
@@ -35,14 +35,14 @@ export default async function Technology({
       kicker: "01 / NATIVE CLIENTS",
       title: t("Go + NSGo，原生到底。"),
       description: t(
-        "桌面与手机共用 Go 编写的 UI，映射到各平台原生视图。应用核心直接在同一进程内调用，不需要额外启动一个 Hub 后台 CLI，也不内嵌 WebView。",
+        "以 Go 编写跨平台 UI，映射到系统原生视图。界面与应用核心在同一进程协作，以小体积和低内存承载完整体验。",
       ),
       tags: ["macOS · Windows · Linux", "Android · iOS", t("原生视图")],
       points: [
         [
           t("UI 与核心同语言"),
           t(
-            "设备管理、配对、网络和 Provider 复用 Go 逻辑。Agent 自身的独立进程不被强行塞进 UI 进程。",
+            "设备管理、配对、网络与 Provider 共用 Go 核心，原生视图与业务逻辑直接协作。",
           ),
         ],
         [
@@ -59,7 +59,7 @@ export default async function Technology({
       kicker: "02 / WEB EXPERIENCE",
       title: t("React + Next.js，打开就能连接。"),
       description: t(
-        "官网、价格、账号和 Web 控制台共用 Next.js App Router，通过 OpenNext 适配到 Worker。浏览器直接使用原生 WebRTC 与 Web Crypto，不必先下载 Go WASM。",
+        "Next.js App Router 构建官网、文档与 Web 控制台，OpenNext 将完整体验部署到 Cloudflare。浏览器直接使用标准 WebRTC 与 Web Crypto。",
       ),
       tags: ["Next.js + React", "OpenNext", "Fumadocs + MDX"],
       points: [
@@ -72,7 +72,7 @@ export default async function Technology({
         [
           t("标准 Web 能力"),
           t(
-            "IndexedDB 本地缓存、虚拟消息列表、响应式布局。浏览器作为控制端，不直接访问本机 Agent 进程。",
+            "IndexedDB 缓存、虚拟消息列表与响应式布局，让手机、平板和桌面浏览器拥有一致的工作体验。",
           ),
         ],
       ],
@@ -96,9 +96,9 @@ export default async function Technology({
           ),
         ],
         [
-          t("失败后有明确回退"),
+          t("灵活的连接路径"),
           t(
-            "自建服务提供自己的加密 WebSocket 中继；官方中继受套餐控制。当前不依赖 TURN、DERP 或 Tunnel。",
+            "设备间优先建立直连；需要中继时，通过服务提供的加密 WebSocket 路径连接，保持端到端加密。",
           ),
         ],
       ],
@@ -122,9 +122,9 @@ export default async function Technology({
           ),
         ],
         [
-          t("复用核心，隔离业务"),
+          t("一站式连接能力"),
           t(
-            "开源连接层不执行商业配额；官方业务层注入身份、计费和服务端权益策略，复用同一连接协议。",
+            "设备发现、配对信令与加密中继共用一个入口。官方托管与开源自建使用相同的客户端和协议。",
           ),
         ],
       ],
@@ -142,7 +142,7 @@ export default async function Technology({
       tags: ["SQLite", "IndexedDB", "D1 + Drizzle"],
       points: [
         [
-          t("缓存不是云托管"),
+          t("项目留在你的电脑"),
           t(
             "云端不保存聊天与附件明文；原始项目和 Agent 继续运行在被控电脑上。",
           ),
@@ -150,7 +150,7 @@ export default async function Technology({
         [
           t("数据库各司其职"),
           t(
-            "官方 D1 业务层使用 Drizzle ORM；Go 的本地存储和部分 GORM 路径保持独立，避免误把两种服务数据库混为一谈。",
+            "SQLite 为原生端保存本地状态，IndexedDB 服务浏览器，D1 持久化云端元数据；官方服务通过 Drizzle ORM 管理业务数据。",
           ),
         ],
       ],
@@ -174,9 +174,9 @@ export default async function Technology({
           ),
         ],
         [
-          t("官方商业能力"),
+          t("统一的服务授权"),
           t(
-            "Better Auth 对接 GitHub／Google，Waffo 对接支付。官方权益通过短期签名授权在被控端验证，直连不会绕过限制。",
+            "服务签发短期授权，由被控设备验证；直连与中继共享一致的访问控制，设备信任由用户掌握。",
           ),
         ],
       ],
@@ -198,43 +198,11 @@ export default async function Technology({
           }
         >
           {t(
-            "UI 用原生视图，核心交给 Go，Web 使用浏览器标准能力。每一层都有清楚的职责，尽量少一点运行时和部署负担。",
+            "原生视图与 Go 核心，标准 Web 与全球边缘网络。从界面到连接，每一层都为轻量、安全与跨平台协作而设计。",
           )}
         </PageIntro>
-        <section
-          className="site-width architecture-panel"
-          aria-label={t("架构概览")}
-        >
-          <div className="architecture-clients">
-            <span>
-              <Code2 size={20} />
-              {t("原生桌面／手机")}
-              <small>Go + NSGo</small>
-            </span>
-            <span>
-              <Globe size={20} />
-              {t("Web 控制端")}
-              <small>React + Next.js</small>
-            </span>
-          </div>
-          <div className="architecture-arrow">
-            <ArrowDown size={20} />
-            <span>{t("设备发现 · 配对 · 信令")}</span>
-          </div>
-          <div className="architecture-service">
-            <Cloud size={24} />
-            <strong>Cloudflare Worker</strong>
-            <span>{t("D1 · Durable Objects · 加密中继")}</span>
-          </div>
-          <div className="architecture-arrow">
-            <ArrowDown size={20} />
-            <span>{t("优先直连 / 按服务权益回退中继")}</span>
-          </div>
-          <div className="architecture-host">
-            <MonitorIcon />
-            <strong>{t("被控电脑 · Go 核心")}</strong>
-            <span>{t("Provider → Codex App / CLI → 本地项目")}</span>
-          </div>
+        <section className="site-width" aria-label={t("架构概览")}>
+          <ArchitectureDiagram locale={lang} />
         </section>
         <div className="tech-toc site-width">
           {layers.map((l) => (
@@ -317,10 +285,6 @@ export default async function Technology({
     </SiteShell>
   );
 }
-function MonitorIcon() {
-  return <Terminal size={22} />;
-}
-
 export async function generateMetadata({
   params,
 }: {

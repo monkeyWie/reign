@@ -1,41 +1,38 @@
 ---
 title: Technology stack
-description: What each layer uses and the responsibility it owns.
+description: The technologies and responsibilities behind each layer.
 ---
+
+<ArchitectureDiagram kind="stack" />
 
 ## Native UI: NSGo
 
-Desktop and mobile UI is written in Go with NSGo and mapped to platform-native views. Device navigation, virtual session lists, Markdown and image previews use native UI.
+NSGo maps Go-written desktop and mobile interfaces to native platform views. Device navigation, virtual session lists, Markdown and image previews use native UI without bundling a browser runtime. [Package size and memory measurements](/docs/architecture/performance).
 
-Native views avoid bundling a browser runtime, but package size still depends on architecture, system libraries, signing and build options. The browser product now uses React, not a distributed NSGo WASM console.
+## Application core and providers: Go
 
-## Application and providers: Go
+The Go core shares device management, pairing, encryption, networking and synchronization. Providers encapsulate agent discovery, launch and native protocols behind shared capabilities. Applications call the Go core directly.
 
-Go shares device management, cryptography, networking and agent adaptation. Providers isolate Codex launch details and native protocols. The app calls Go logic directly instead of adding a separate UI-to-daemon layer.
+## Networking: WebRTC, TCP and WebSocket
 
-## Networking: WebRTC, native TCP and WebSocket
+Native WebRTC uses Pion; browsers use RTCPeerConnection and DataChannel. Native clients also provide TCP candidate discovery and hole punching. Public STUN and self-hosted probes discover address mappings in parallel.
 
-Native WebRTC uses Pion. Browsers use RTCPeerConnection and DataChannel without Go WASM. Native clients also implement TCP candidate discovery and hole punching.
-
-WebSockets serve signaling and encrypted traffic relay. Optional STUN discovers address mappings. No TURN, DERP or cloudflared tunnel is required.
+WebSockets carry signaling and, when needed, end-to-end encrypted relay traffic. Users configure one service root URL; the service publishes probe endpoints and connection capabilities.
 
 ## Web: Next.js, React and OpenNext
 
-The website, docs and `/chat` share Next.js App Router. The React controller uses virtual messages and incremental synchronization. OpenNext adapts builds to Workers; clients default to the current page origin.
+The website, docs and `/chat` share Next.js App Router. React provides responsive layouts, virtual messages and incremental synchronization. Browsers use WebRTC and Web Crypto directly.
 
-Fumadocs generates pages, navigation, search and pagination from repository MDX. English and Simplified Chinese each have real content and a language-specific search filter. No separate CMS or docs service is needed.
+OpenNext adapts the build to Cloudflare Workers. Fumadocs generates multilingual documentation, navigation, search and tables of contents from repository Markdown/MDX.
 
-## Storage: SQLite, IndexedDB and D1
+## Local data: SQLite and IndexedDB
 
-- Native: SQLite for settings and session caches; attachment files on local disk.
-- Browser: IndexedDB for pairing identity, session snapshots and bounded attachment caches.
-- Worker: D1 for service metadata; the official business layer uses Drizzle ORM for accounts, plans and orders.
-- Existing Go storage uses SQLite, with GORM on some service paths. Cloud D1 and local ORM are separate systems.
+Native apps store settings and session caches in SQLite and attachments in local files. Browsers store pairing identity, session snapshots and attachment caches in IndexedDB. Reconnection fetches the latest state before resuming incremental subscriptions.
 
-## Official business layer
+## Cloud: Workers, Durable Objects and D1
 
-Better Auth integrates GitHub/Google and Waffo handles payments. The server verifies entitlements. Actual provider availability, products and prices follow live service configuration. Open-source deployments do not require this layer.
+Workers handle HTTP requests and connection endpoints. Durable Objects coordinate device rooms and hibernating WebSockets. D1 persists device identities, pairing relationships and service metadata. The cloud does not persist plaintext chats or attachments.
 
-## Dependencies and versions
+## Development and extensions
 
-Pinned versions are in `go.mod`, `clients/nsgo/go.mod`, `package.json` and `pnpm-lock.yaml`. NSGo is a newer framework; upgrades require platform builds and UI regression checks. See [Contributing](/docs/contributing).
+Dependency versions are recorded in `go.mod`, `clients/nsgo/go.mod`, `package.json` and `pnpm-lock.yaml`. See [Local development](/docs/contributing/development) for setup and checks, or [Add a provider](/docs/contributing/providers) to integrate agents.

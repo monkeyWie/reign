@@ -124,8 +124,8 @@ export function BottomCTA() {
     <section className="site-cta site-width">
       <div>
         <span className="site-eyebrow">TAKE YOUR WORK WITH YOU</span>
-        <h2>{t("下一次灵感，不必等到回到电脑前。")}</h2>
-        <p>{t("保留熟悉的 Agent，让你的设备连在一起。")}</p>
+        <h2>{t("你的下一步，不受距离限制。")}</h2>
+        <p>{t("六大平台，原生轻量。现在，把你的 Agent 带到身边。")}</p>
       </div>
       <Link className="button primary" href="/docs/quick-start">
         {t("开始使用")}

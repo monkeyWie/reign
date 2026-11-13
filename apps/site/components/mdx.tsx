@@ -1,3 +1,4 @@
+import { ArchitectureDiagram } from "./architecture-diagram";
 import defaultMdxComponents from "fumadocs-ui/mdx";
 import { Card } from "fumadocs-ui/components/card";
 import type { ComponentProps, ComponentType } from "react";
@@ -14,6 +15,9 @@ export function getMDXComponents(
   return {
     ...defaultMdxComponents,
     ...components,
+    ArchitectureDiagram: (
+      props: Omit<ComponentProps<typeof ArchitectureDiagram>, "locale">,
+    ) => <ArchitectureDiagram {...props} locale={locale} />,
     a: ({ href, ...props }: ComponentProps<"a">) => (
       <Anchor {...props} href={href ? localizeHref(href, locale) : href} />
     ),

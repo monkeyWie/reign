@@ -5,12 +5,14 @@ description: One service URL discovers the available network paths.
 
 ## Connection sequence
 
+<ArchitectureDiagram kind="connection" />
+
 1. Complete device discovery, pairing and the encrypted handshake through the service.
 2. Gather LAN, IPv6, public STUN and optional self-hosted probe candidates.
 3. Native clients try WebRTC/UDP and native TCP paths in parallel; browsers try WebRTC.
 4. If direct connection fails, use the service's encrypted WebSocket relay when permitted.
 
-Public and self-hosted probes assist direct connections in parallel. They are not a fallback after a public relay. Once connected directly, application data flows between devices; signaling still maintains device state.
+Public and self-hosted probes assist direct connections in parallel. Once connected directly, application data flows between devices; signaling still maintains device state.
 
 ## Native and browser capabilities
 
@@ -31,4 +33,4 @@ Browser cryptography, clipboard and some connection capabilities require a secur
 
 NAT, firewalls and enterprise Wi-Fi isolation can prevent direct access. Official Free has no official traffic relay entitlement. Paid plans may provide relay when available; an open-source self-hosted Worker provides your own relay.
 
-The current stack does not require TURN, DERP, Tailscale or Cloudflare Tunnel. The optional probe only discovers mappings and cannot replace relay. See [Deploy a probe](/docs/self-hosting/probe).
+The optional probe adds TCP/UDP candidate discovery; the Worker handles application relay. See [Deploy a probe](/docs/self-hosting/probe).

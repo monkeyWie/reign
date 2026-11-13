@@ -17,19 +17,19 @@ export default async function Pricing({
     [
       t("Free 和 Pro 的区别是什么？"),
       t(
-        "官方免费方案侧重设备同步与直连，付费方案可提供更多设备额度和官方中继。上方数值、价格和购买状态从当前服务实时读取；尚未开放的套餐不会接受购买。",
+        "Free 提供设备同步与 P2P 直连；Pro 提供更多设备空间和官方加密中继。各方案的额度与价格见上方卡片。",
       ),
     ],
     [
       t("设备与 Agent 怎么计数？"),
       t(
-        "额度按被控电脑计算，手机和浏览器控制端不占电脑名额。Codex App 与 CLI 合并为一个 Codex 产品。Agent 产品配额不代表所有 Provider 都已接入，当前支持范围见文档。",
+        "设备额度按被控电脑计算，手机与浏览器控制端不占名额。Codex App 和 CLI 合并计为一个 Codex 产品。",
       ),
     ],
     [
       t("免费直连失败了怎么办？"),
       t(
-        "官方免费方案不提供官方业务中继，因此有些网络下可能无法连接。可以使用开放后的付费中继，或部署自己的开源 Worker，使用自己的加密中继。",
+        "可以选择提供官方加密中继的方案，或部署自己的开源 Worker，为设备提供备用连接路径。",
       ),
     ],
     [
@@ -84,14 +84,14 @@ export default async function Pricing({
             </Link>
           </div>
           <div>
-            <h2>{t("先确认 Agent 接入范围。")}</h2>
+            <h2>{t("熟悉的 Agent，统一的体验。")}</h2>
             <p>
               {t(
-                "目前提供 Codex App 和 CLI Provider。套餐中的 Agent 数量是产品额度，新的 Provider 接入后才可实际使用。",
+                "接入 Codex App 与 CLI，跨设备管理项目、会话与附件。Agent 和代码继续运行在你自己的电脑上。",
               )}
             </p>
             <Link className="site-text-link" href="/docs/agents">
-              {t("查看支持矩阵 →")}
+              {t("了解 Agent 接入 →")}
             </Link>
           </div>
         </section>

@@ -1,21 +1,21 @@
 ---
-title: Agent support
-description: Providers integrate agents; reading history is not remote control.
+title: Connect your agents
+description: Connect Codex App and CLI to manage projects and sessions together.
 ---
 
-## Current support
+## Supported agents
 
-| Agent                   | Status         | Requirement                                                                     |
-| ----------------------- | -------------- | ------------------------------------------------------------------------------- |
-| Codex App               | Implemented    | Launch through Reign with a shared app-server                                   |
-| Codex CLI               | Implemented    | Compatible reachable backend; independent sessions need appropriate integration |
-| Codex VS Code extension | Unsupported    | Not shown as a controllable provider                                            |
-| Claude Code, Pi, ZCode  | Not integrated | No usable provider yet                                                          |
+| Agent     | Workflow                                                                      | Setup                                       |
+| --------- | ----------------------------------------------------------------------------- | ------------------------------------------- |
+| Codex App | Share sessions and live output between the desktop App and remote controllers | [Connect Codex App](/docs/agents/codex-app) |
+| Codex CLI | Connect the CLI backend to manage projects and sessions                       | [Connect Codex CLI](/docs/agents/codex-cli) |
 
-Codex App availability also depends on the desktop version and launch capabilities. You install, sign in to and authorize the agents. Reign provides neither model accounts nor model usage credits.
+Install and sign in to your agent on the host computer. Open the Reign local dashboard and enable its provider. Once it shows Ready, you can send instructions from other devices. Model accounts and usage are supplied by your agent service.
 
-## Provider capabilities
+## One session experience
 
-Providers map an agent's native protocol to status, sessions, history, creation, sending, incremental output, approvals, models and attachments. Unimplemented capabilities must not appear usable in the UI.
+Providers map agent interfaces to shared capabilities: session lists, history, creation, messages, live output, approvals, models and attachments. Sessions share project groups, with icons identifying their sources.
 
-New providers reuse device connections, pairing and relay. Start with the [provider integration guide](/docs/contributing/providers).
+## Extend to more agents
+
+The provider architecture separates agent adaptation from device connectivity. Contributors reuse pairing, encryption, relay and synchronization while implementing the agent interface. [Add an agent provider](/docs/contributing/providers).

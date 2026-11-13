@@ -16,16 +16,14 @@ Use [`packages/protocol`](https://github.com/monkeyWie/reign/tree/main/packages/
 
 ## A connection
 
+<ArchitectureDiagram kind="connection" />
+
 Devices register identities with the same service and receive connection IDs. Pairing proves control through host confirmation or password verification and establishes local trust. Signaling exchanges candidates, then encrypted RPC invokes providers over direct or relay transport.
 
 Snapshots and incremental events have cursors/sequences. Gaps trigger resynchronization; replayed transport data must not become a new instruction.
 
-## Commercial policy
+## Service authorization
 
 The official service may issue short-lived signed leases bound to host, controller, product and connection entitlements. Hosts verify them at a shared call boundary, preventing direct access from bypassing quotas.
 
-The same protocol applies no commercial quotas in self-hosted mode. Business policy belongs to composition, not repeated payment checks inside every provider.
-
-## Compatibility
-
-This developer preview does not support early `/v2/` or prototype APIs. Update Go, TypeScript, fixtures and docs together when changing the protocol. Do not ship a partial connection chain usable by only one side.
+Self-hosted services use the same protocol without a commercial subscription. On the official service, your plan determines host device, agent and relay access.

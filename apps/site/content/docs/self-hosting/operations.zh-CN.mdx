@@ -29,16 +29,16 @@ pnpm exec wrangler d1 export DB --remote --output ./reign-backup.sql
 
 重建数据库会改变服务身份、影响旧目录与短期租约。不要把“清空数据库”作为普通网络问题的修复步骤。浏览器／原生控制端的本地会话缓存不包含在 D1 备份中。
 
-## 发布失败怎么排查
+## 检查部署状态
 
-区分构建、资源上传、新版本激活、域名生效四个阶段。文件上传成功不代表新版本已经接收流量。
+在 Cloudflare 控制台查看版本和域名状态，也可以使用命令行：
 
 ```sh
 pnpm exec wrangler deployments list
 pnpm exec wrangler versions list
 ```
 
-若 API 返回未知错误，记录错误码、时间和请求阶段，查询 Cloudflare 状态；不要直接判断是代码错误或免费额度问题。旧版本可继续服务时，优先保留它再排查。
+部署后访问 `/healthz` 和 `/p2p/config`，再通过 `/chat` 完成一次设备连接。升级异常时，可在 Cloudflare 控制台回滚到上一个可用版本。
 
 ## 监控与资源费用
 

@@ -60,21 +60,21 @@ export const marketingMeta = {
   "/": {
     en: [
       "Reign — Your agents. Anywhere.",
-      "Control Codex App and CLI on your computer from native desktop, mobile and Web clients. Direct connections first, end-to-end encrypted and self-hostable.",
+      "Your agents, beyond your desk. Reign spans macOS, Windows, Linux, iOS, Android and Web. Native UI, an 8.9 MB macOS archive, low memory usage and end-to-end encryption.",
     ],
     "zh-CN": [
       "Reign — 你的 Agent，随处掌控",
-      "原生桌面与手机客户端，加上 Web 控制台，远控自己电脑上的 Codex App 与 CLI。直连优先、端到端加密，支持自行部署。",
+      "掌控你的 Agent，不止于桌面。Reign 覆盖 macOS、Windows、Linux、iOS、Android 与 Web，原生轻量，macOS 包体积 8.9 MB、演示内存实测 39–48 MiB，端到端加密。",
     ],
   },
   "/features": {
     en: [
       "Features · Reign",
-      "Manage agent sessions across devices with native and Web clients, direct connections, encrypted attachments and self-hosting.",
+      "One workspace across six platforms. Manage agent sessions by project with native and Web clients, live output, encrypted files, direct connections and self-hosting.",
     ],
     "zh-CN": [
       "特性 · Reign",
-      "跨设备管理 Agent 会话，原生与 Web、直连优先、端到端加密及自行部署。",
+      "六大平台，一个 Agent 工作空间。跨设备聚合项目会话、实时输出、图片附件、原生低内存、P2P 直连与端到端加密，支持自建服务。",
     ],
   },
   "/technology": {

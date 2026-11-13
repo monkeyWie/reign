@@ -1,6 +1,6 @@
 ---
 title: Connect Codex CLI
-description: Distinguish history files, running CLI processes and their backends.
+description: Connect the CLI backend to work with projects and sessions across devices.
 ---
 
 ## Installation and readiness
@@ -13,7 +13,7 @@ Installing the CLI does not mean a connectable app-server is always running. Cod
 
 Readable history and writable sessions are different scopes. A session owned by an independent CLI process or another app-server cannot always be taken over from a different backend.
 
-Only reachable providers should be marked ready. For active-writer or read-only errors, follow the backend integration instructions or wait for the original task to finish. Creating a similarly named session is not resuming the original.
+For active-writer or read-only errors, follow the dashboard instructions to connect the corresponding backend. If the original task is still running, wait for it to finish before reconnecting.
 
 ## App and CLI relationship
 

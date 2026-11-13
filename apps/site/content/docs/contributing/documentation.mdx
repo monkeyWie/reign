@@ -9,7 +9,7 @@ User documentation lives in `apps/site/content/docs/`, built with Fumadocs MDX a
 
 English uses `page.mdx`; Simplified Chinese uses `page.zh-CN.mdx`. Each language has matching sidebar metadata (`meta.json` / `meta.zh-CN.json`). Keep slugs and code examples aligned. Missing translations return 404 rather than silently showing another language.
 
-Engineering and protocol notes remain under `docs/platform/`. Historical proposals are not current product documentation.
+Protocol and API references are available under `docs/platform/`.
 
 ## Add a page
 
@@ -30,7 +30,8 @@ Fumadocs generates sidebar, TOC, pagination and search. Shared MDX link componen
 
 ## Writing standards
 
-- Distinguish current behavior, plans and platform limits. Demo data is not proof of shipped support.
+- Explain capabilities, steps and expected results for readers. Keep engineering discussions, migration history and internal exchanges in development records.
+- Illustrate architecture, connections and data flow with bilingual diagrams and text descriptions.
 - Make commands runnable in the specified directory; use example.com or explicit placeholders.
 - Explain software fees separately from infrastructure costs.
 - Include version, platform, build and scenario for performance claims. Do not invent competitor comparisons.
