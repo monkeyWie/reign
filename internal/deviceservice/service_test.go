@@ -52,7 +52,7 @@ func TestIdentityAndDeviceRouteIsolation(t *testing.T) {
 		t.Fatal("service identity not durable", e)
 	}
 	dial := func(i device.Identity, host, role string) (*websocket.Conn, error) {
-		ws, _, e := websocket.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http")+"/relay?id="+host+"&role="+role, &websocket.DialOptions{HTTPHeader: map[string][]string{"Authorization": {"Bearer " + i.Token}}})
+		ws, _, e := websocket.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http")+"/p2p/signal?id="+host+"&role="+role, &websocket.DialOptions{HTTPHeader: map[string][]string{"Authorization": {"Bearer " + i.Token}}})
 		return ws, e
 	}
 	if ws, e := dial(client, h1.ID, "client"); e == nil {
@@ -98,7 +98,7 @@ func TestIdentityAndDeviceRouteIsolation(t *testing.T) {
 	if e != nil || !strings.Contains(string(raw), client.ID) || strings.Contains(string(raw), "forged") {
 		t.Fatalf("untrusted identity forwarded: %s %v", raw, e)
 	}
-	if e = device.Post(ctx, server.URL, h2.Token, "/v2/revoke", map[string]string{"client": client.ID}, nil); e != nil {
+	if e = device.Post(ctx, server.URL, h2.Token, "/p2p/pairings/revoke", map[string]string{"client": client.ID}, nil); e != nil {
 		t.Fatal(e)
 	}
 	var grant DeviceGrant
@@ -106,7 +106,7 @@ func TestIdentityAndDeviceRouteIsolation(t *testing.T) {
 	if !still {
 		t.Fatal("another host revoked grant")
 	}
-	if e = device.Post(ctx, server.URL, h1.Token, "/v2/revoke", map[string]string{"client": client.ID}, nil); e != nil {
+	if e = device.Post(ctx, server.URL, h1.Token, "/p2p/pairings/revoke", map[string]string{"client": client.ID}, nil); e != nil {
 		t.Fatal(e)
 	}
 	if _, _, e = clientWS.Read(ctx); e == nil {

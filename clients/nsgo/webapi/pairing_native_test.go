@@ -11,7 +11,7 @@ func TestPairingEnvelopesWithExistingHost(t *testing.T) {
 	client, _ := device.NewIdentity("browser")
 	host, _ := device.NewIdentity("host")
 	identity := Object{"private": client.Private}
-	context := "agenthub/pair/request/fixture"
+	context := "reign/pair/request/fixture"
 	packet, e := seal(identity, host.Public, context, Object{"password": "fixture"})
 	if e != nil {
 		t.Fatal(e)

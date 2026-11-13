@@ -81,7 +81,7 @@ func newCryptor(secret string) (*cryptor, error) {
 	if err != nil || len(raw) != 32 {
 		return nil, errors.New("invalid pairing key")
 	}
-	key := sha256.Sum256(append([]byte("agenthub/v1/aead/"), raw...))
+	key := sha256.Sum256(append([]byte("reign/p2p/aead/"), raw...))
 	block, err := aes.NewCipher(key[:])
 	if err != nil {
 		return nil, err

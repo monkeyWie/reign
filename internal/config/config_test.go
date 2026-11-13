@@ -55,7 +55,6 @@ func TestSQLiteSettingsSurviveReload(t *testing.T) {
 		t.Fatal(err)
 	}
 	c.ServiceURL = "https://instance.example"
-	c.CloudflareEnabled = true
 	c.DeviceName = "Reign desktop"
 	if err = c.Save(); err != nil {
 		t.Fatal(err)
@@ -68,7 +67,7 @@ func TestSQLiteSettingsSurviveReload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if again.ServiceURL != c.ServiceURL || again.DeviceName != c.DeviceName || !again.CloudflareEnabled {
+	if again.ServiceURL != c.ServiceURL || again.DeviceName != c.DeviceName {
 		t.Fatal("lost saved settings")
 	}
 	raw, err := os.ReadFile(filepath.Join(dir, "settings.db"))

@@ -14,7 +14,6 @@ import (
 	"github.com/monkeyWie/reign/internal/provider"
 	"github.com/monkeyWie/reign/internal/remote"
 	"github.com/monkeyWie/reign/internal/store"
-	"github.com/monkeyWie/reign/internal/tunnel"
 	"golang.org/x/crypto/bcrypt"
 	"os"
 	"os/exec"
@@ -43,20 +42,18 @@ type Intent struct {
 	Remember bool   `json:"remember"`
 }
 type Manager struct {
-	mu           sync.Mutex
-	activation   sync.Mutex
-	cfg          config.Config
-	state        saved
-	pending      map[string]deviceservice.Pair
-	intents      map[string]Intent
-	status       string
-	tunnel       *tunnel.Host
-	tunnelStatus tunnel.Status
-	network      *remote.HostStatus
-	d            *control.Dispatcher
-	ice          func(config.Config) remote.Options
-	path         string
-	attempts     map[string][]time.Time
+	mu         sync.Mutex
+	activation sync.Mutex
+	cfg        config.Config
+	state      saved
+	pending    map[string]deviceservice.Pair
+	intents    map[string]Intent
+	status     string
+	network    *remote.HostStatus
+	d          *control.Dispatcher
+	ice        func(config.Config) remote.Options
+	path       string
+	attempts   map[string][]time.Time
 }
 
 func New(c config.Config, d *control.Dispatcher, ice func(config.Config) remote.Options) *Manager {
@@ -74,12 +71,8 @@ func saveIdentity(path string, s saved) error {
 func (m *Manager) Network() control.NetworkStatus {
 	m.mu.Lock()
 	n := m.network
-	h := m.tunnel
 	m.mu.Unlock()
 	out := n.Snapshot()
-	if h != nil {
-		out.Peers = append(out.Peers, h.Status.Snapshot().Peers...)
-	}
 	return out
 }
 
@@ -120,7 +113,7 @@ func (m *Manager) Run(ctx context.Context) {
 		m.mu.Lock()
 		c := m.cfg
 		m.mu.Unlock()
-		signature := fmt.Sprintf("%s|%t|%s|%s|%s|%s", c.ServiceURL, c.CloudflareEnabled, c.CloudflaredPath, c.CloudflareTokenFile, c.CloudflarePublicURL, c.CloudflareListen)
+		signature := c.ServiceURL
 		if c.ServiceURL != "" && signature != current {
 			if cancel != nil {
 				cancel()
@@ -148,19 +141,15 @@ func (m *Manager) Run(ctx context.Context) {
 				life, stop := context.WithCancel(ctx)
 				cancel = stop
 				opts := m.ice(c)
-				if !opts.RelayOnly {
+				opts.GrantRequired = true
+				{
 					policy := device.Network(life, i.Service)
+					opts.GrantPublicKey = policy.GrantPublicKey
+					opts.ServiceID = policy.ServiceID
 					opts.ICEServers = policy.Servers()
 					opts.TCPSTUN = policy.TCPSTUN
 				}
 				opts.ResolveKey = m.key
-				m.mu.Lock()
-				m.tunnel = nil
-				m.tunnelStatus = tunnel.Status{State: "disabled"}
-				m.mu.Unlock()
-				if c.CloudflareEnabled {
-					go m.startTunnel(life, c, i, opts)
-				}
 				go remote.RunHostObserved(life, remote.Pairing{Relay: "ws" + strings.TrimPrefix(i.Service, "http"), Host: i.ID, Key: device.Random(), RelayToken: i.Token}, opts, m.d, n)
 			}
 		}
@@ -242,14 +231,14 @@ func (m *Manager) poll(ctx context.Context) {
 	if i.ID == "" {
 		return
 	}
-	if e := device.Post(ctx, i.Service, i.Token, "/v2/presence", map[string]any{"name": i.Name, "tunnelUrl": m.publicTunnel()}, nil); e != nil {
+	if e := device.Post(ctx, i.Service, i.Token, "/p2p/devices/presence", map[string]any{"name": i.Name}, nil); e != nil {
 		m.mu.Lock()
 		m.status = e.Error()
 		m.mu.Unlock()
 		return
 	}
 	var pairs []deviceservice.Pair
-	if device.Post(ctx, i.Service, i.Token, "/v2/pair/pending", map[string]any{}, &pairs) != nil {
+	if device.Post(ctx, i.Service, i.Token, "/p2p/pairings/pending", map[string]any{}, &pairs) != nil {
 		return
 	}
 	active := map[string]bool{}
@@ -262,7 +251,7 @@ func (m *Manager) poll(ctx context.Context) {
 			continue
 		}
 		var in Intent
-		if e := device.Open(i.Private, p.Public, "agenthub/pair/request/"+p.ID, p.Envelope, &in); e != nil {
+		if e := device.Open(i.Private, p.Public, "reign/pair/request/"+p.ID, p.Envelope, &in); e != nil {
 			continue
 		}
 		m.mu.Lock()
@@ -323,7 +312,7 @@ func (m *Manager) respond(ctx context.Context, id string, allow bool) error {
 			g.Expires = time.Now().Add(8 * time.Hour).Unix()
 		}
 		var e error
-		reply, e = device.Seal(i.Private, p.Public, "agenthub/pair/reply/"+p.ID, map[string]any{"key": g.Key, "host": i.ID, "public": i.Public, "expires": g.Expires})
+		reply, e = device.Seal(i.Private, p.Public, "reign/pair/reply/"+p.ID, map[string]any{"key": g.Key, "host": i.ID, "public": i.Public, "expires": g.Expires})
 		if e != nil {
 			return e
 		}
@@ -343,7 +332,7 @@ func (m *Manager) respond(ctx context.Context, id string, allow bool) error {
 			return e
 		}
 	}
-	if e := device.Post(ctx, i.Service, i.Token, "/v2/pair/respond", map[string]any{"id": id, "allow": allow, "reply": reply}, nil); e != nil {
+	if e := device.Post(ctx, i.Service, i.Token, "/p2p/pairings/respond", map[string]any{"id": id, "allow": allow, "reply": reply}, nil); e != nil {
 		return e
 	}
 	m.mu.Lock()
@@ -358,8 +347,6 @@ func (m *Manager) Local(ctx context.Context, r control.Request) (any, error) {
 		Allow                                            bool
 		Remember                                         bool
 		ClearPassword                                    bool
-		CloudflareEnabled                                *bool
-		CloudflaredPath                                  string
 	}
 	if len(r.Params) > 0 {
 		if e := json.Unmarshal(r.Params, &in); e != nil {
@@ -380,7 +367,7 @@ func (m *Manager) Local(ctx context.Context, r control.Request) (any, error) {
 			grants = append(grants, map[string]any{"client": g.Client, "name": g.Name, "fingerprint": device.Fingerprint(g.Public), "expires": g.Expires})
 		}
 		sort.Slice(pending, func(a, b int) bool { return pending[a]["id"].(string) < pending[b]["id"].(string) })
-		return map[string]any{"deviceId": i.ID, "connectionId": i.ConnectionID, "public": i.Public, "name": i.Name, "serviceUrl": m.cfg.ServiceURL, "status": m.status, "cloudflareEnabled": m.cfg.CloudflareEnabled, "cloudflaredPath": m.cfg.CloudflaredPath, "tunnel": m.tunnelStatus, "passwordEnabled": m.state.PasswordHash != "", "pending": pending, "grants": grants, "qr": map[string]any{"version": 2, "service": i.Service, "connectionId": i.ConnectionID, "public": i.Public}}, nil
+		return map[string]any{"deviceId": i.ID, "connectionId": i.ConnectionID, "public": i.Public, "name": i.Name, "serviceUrl": m.cfg.ServiceURL, "status": m.status, "passwordEnabled": m.state.PasswordHash != "", "pending": pending, "grants": grants, "qr": map[string]any{"version": 2, "service": i.Service, "connectionId": i.ConnectionID, "public": i.Public}}, nil
 	case "host.configure":
 		url, e := device.ServiceURL(in.ServiceURL)
 		if e != nil {
@@ -390,12 +377,6 @@ func (m *Manager) Local(ctx context.Context, r control.Request) (any, error) {
 		defer m.mu.Unlock()
 		m.cfg.ServiceURL = url
 		m.cfg.DeviceName = in.Name
-		if in.CloudflareEnabled != nil {
-			m.cfg.CloudflareEnabled = *in.CloudflareEnabled
-		}
-		if in.CloudflaredPath != "" {
-			m.cfg.CloudflaredPath = in.CloudflaredPath
-		}
 		if m.path != "" && m.state.Identity.Service == url && in.Name != "" {
 			m.state.Identity.Name = in.Name
 			if e := m.save(); e != nil {
@@ -428,7 +409,6 @@ func (m *Manager) Local(ctx context.Context, r control.Request) (any, error) {
 		m.mu.Lock()
 		i := m.state.Identity
 		network := m.network
-		tunnelHost := m.tunnel
 		delete(m.state.Grants, in.Client)
 		e := m.save()
 		m.mu.Unlock()
@@ -436,11 +416,7 @@ func (m *Manager) Local(ctx context.Context, r control.Request) (any, error) {
 			return nil, e
 		}
 		network.DisconnectDevice(in.Client)
-		if tunnelHost != nil {
-			tunnelHost.Relay.DisconnectDevice(i.ID, in.Client)
-			tunnelHost.Status.DisconnectDevice(in.Client)
-		}
-		return nil, device.Post(ctx, i.Service, i.Token, "/v2/revoke", map[string]string{"client": in.Client}, nil)
+		return nil, device.Post(ctx, i.Service, i.Token, "/p2p/pairings/revoke", map[string]string{"client": in.Client}, nil)
 	case "host.enable", "host.activate":
 		m.activation.Lock()
 		defer m.activation.Unlock()
@@ -473,5 +449,3 @@ func (m *Manager) Local(ctx context.Context, r control.Request) (any, error) {
 		return nil, fmt.Errorf("unknown host method")
 	}
 }
-
-func (m *Manager) publicTunnel() string { m.mu.Lock(); defer m.mu.Unlock(); return m.tunnelStatus.URL }

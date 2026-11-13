@@ -12,19 +12,16 @@ import (
 )
 
 type Client struct {
-	routes      []*Client
-	routeCtx    context.Context
-	routeCancel context.CancelFunc
-	wire        *wire
-	mu          sync.Mutex
-	pending     map[string]chan control.Response
-	done        chan struct{}
-	cache       map[string]snapshot
-	cacheBytes  int
+	wire       *wire
+	mu         sync.Mutex
+	pending    map[string]chan control.Response
+	done       chan struct{}
+	cache      map[string]snapshot
+	cacheBytes int
 }
 
 func Connect(ctx context.Context, p Pairing, opts Options) (*Client, error) {
-	ws, peer, err := dial(ctx, p, "client")
+	ws, dataWS, peer, err := dial(ctx, p, "client")
 	if err != nil {
 		return nil, err
 	}
@@ -49,6 +46,8 @@ func Connect(ctx context.Context, p Pairing, opts Options) (*Client, error) {
 		return nil, err
 	}
 	c.wire = w
+	w.dataWS = dataWS
+	go drainRelay(w.ctx, dataWS)
 	go keepAlive(w.ctx, ws)
 	go func() {
 		defer close(c.done)
@@ -79,12 +78,6 @@ func Connect(ctx context.Context, p Pairing, opts Options) (*Client, error) {
 	return c, nil
 }
 func (c *Client) Path() string {
-	if c.routeCancel != nil {
-		if r := c.route(); r != nil {
-			return r.Path()
-		}
-		return "Disconnected"
-	}
 	select {
 	case <-c.done:
 		return "Disconnected"
@@ -93,28 +86,13 @@ func (c *Client) Path() string {
 	}
 }
 func (c *Client) Close() error {
-	if c.routeCancel != nil {
-		c.routeCancel()
-		c.mu.Lock()
-		rs := append([]*Client(nil), c.routes...)
-		c.mu.Unlock()
-		for _, r := range rs {
-			if r != nil {
-				r.Close()
-			}
-		}
-		return nil
+	if c.wire.dataWS != nil {
+		c.wire.dataWS.CloseNow()
 	}
 	c.wire.close()
 	return c.wire.ws.CloseNow()
 }
 func (c *Client) Call(ctx context.Context, r control.Request, out any) error {
-	if c.routeCancel != nil {
-		if child := c.route(); child != nil {
-			return child.Call(ctx, r, out)
-		}
-		return errors.New("所有连接均已断开，请等待重连")
-	}
 	cacheKey := ""
 	var cached snapshot
 	if control.ReadOnly(r.Method) {

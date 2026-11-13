@@ -20,11 +20,13 @@ import (
 )
 
 type Options struct {
-	DiscoverTunnel func(context.Context) (Pairing, error) `json:"-"`
+	GrantRequired  bool
+	GrantPublicKey string
+	ServiceID      string
 	RelayName      string
 	TCPTrace       func(string, ...any) `json:"-"`
 	ICEServers     []webrtc.ICEServer
-	TCPSTUN        []string // TCP STUN host:port endpoints, discovered via /v2/network
+	TCPSTUN        []string // TCP STUN host:port endpoints, discovered via /p2p/config
 	DisableTCP     bool
 	DisableWebRTC  bool
 	ResolveKey     func(string) (string, bool) `json:"-"`
@@ -32,6 +34,9 @@ type Options struct {
 }
 type wire struct {
 	ws               *websocket.Conn
+	dataWS           *websocket.Conn
+	grantMu          sync.RWMutex
+	grant            string
 	crypto           *cryptor
 	base             *cryptor
 	key, clientNonce string
@@ -71,12 +76,12 @@ type assembly struct {
 	created time.Time
 }
 
-func dial(ctx context.Context, p Pairing, role string) (*websocket.Conn, string, error) {
+func dial(ctx context.Context, p Pairing, role string) (*websocket.Conn, *websocket.Conn, string, error) {
 	if err := p.Validate(); err != nil {
-		return nil, "", err
+		return nil, nil, "", err
 	}
 	u, _ := url.Parse(p.Relay)
-	u.Path = "/relay"
+	u.Path = "/p2p/signal"
 	q := u.Query()
 	q.Set("role", role)
 	q.Set("id", p.Host)
@@ -86,23 +91,49 @@ func dial(ctx context.Context, p Pairing, role string) (*websocket.Conn, string,
 		if resp != nil && resp.Body != nil {
 			resp.Body.Close()
 		}
-		return nil, "", err
+		return nil, nil, "", err
 	}
 	ws.SetReadLimit(2 << 20)
 	_, raw, err := ws.Read(ctx)
 	if err != nil {
 		ws.CloseNow()
-		return nil, "", err
+		return nil, nil, "", err
 	}
 	var f relay.Frame
 	if json.Unmarshal(raw, &f) != nil || f.Kind != "welcome" || f.Peer == "" {
 		ws.CloseNow()
-		return nil, "", errors.New("invalid relay handshake")
+		return nil, nil, "", errors.New("invalid relay handshake")
 	}
-	return ws, f.Peer, nil
+	if f.Protocol != 1 {
+		ws.CloseNow()
+		return nil, nil, "", errors.New("unsupported service protocol")
+	}
+	var data *websocket.Conn
+	if f.AllowRelay {
+		u.Path = "/p2p/relay"
+		q.Set("peer", f.Peer)
+		u.RawQuery = q.Encode()
+		data, resp, err = websocket.Dial(ctx, u.String(), &websocket.DialOptions{HTTPHeader: http.Header{"Authorization": []string{"Bearer " + p.RelayToken}}})
+		if err != nil {
+			if resp != nil && resp.Body != nil {
+				resp.Body.Close()
+			}
+			ws.CloseNow()
+			return nil, nil, "", err
+		}
+		data.SetReadLimit(2 << 20)
+		_, raw, err = data.Read(ctx)
+		var welcome relay.Frame
+		if err != nil || json.Unmarshal(raw, &welcome) != nil || welcome.Kind != "welcome" || welcome.Peer != f.Peer {
+			data.CloseNow()
+			ws.CloseNow()
+			return nil, nil, "", errors.New("invalid relay handshake")
+		}
+	}
+	return ws, data, f.Peer, nil
 }
 func newWire(ctx context.Context, ws *websocket.Conn, peer, key string, host bool, opts Options, onData func([]byte)) (*wire, error) {
-	derived := sha256.Sum256([]byte("agenthub/v1/peer/" + peer + "/" + key))
+	derived := sha256.Sum256([]byte("reign/p2p/peer/" + peer + "/" + key))
 	crypto, err := newCryptor(hex.EncodeToString(derived[:]))
 	if err != nil {
 		return nil, err
@@ -119,7 +150,7 @@ func (w *wire) aad(kind string, out bool) string {
 	if w.host == out {
 		direction = "h2c"
 	}
-	return "agenthub/v1/" + w.peer + "/" + direction + "/" + kind
+	return "reign/p2p/" + w.peer + "/" + direction + "/" + kind
 }
 func (w *wire) relaySend(kind string, data []byte) error {
 	crypto := w.cipher(kind)
@@ -177,6 +208,9 @@ func (w *wire) path() string {
 	if w.opts.RelayName != "" {
 		return "Relay · " + w.opts.RelayName
 	}
+	if w.dataWS == nil {
+		return "Connecting · direct only"
+	}
 	return "Relay · encrypted"
 }
 
@@ -200,6 +234,26 @@ func (w *wire) send(data []byte) error {
 	}
 	w.sendMu.Lock()
 	defer w.sendMu.Unlock()
+	// P2P-only accounts must establish a direct path before any business RPC.
+	if w.dataWS == nil {
+		deadline := time.NewTimer(25 * time.Second)
+		defer deadline.Stop()
+		for {
+			w.mu.Lock()
+			direct := w.direct
+			w.mu.Unlock()
+			if direct || w.tcpSnapshot() != nil {
+				break
+			}
+			select {
+			case <-w.ctx.Done():
+				return w.ctx.Err()
+			case <-deadline.C:
+				return errors.New("直连失败，当前服务未提供中继权限")
+			case <-time.After(20 * time.Millisecond):
+			}
+		}
+	}
 	w.mu.Lock()
 	dc, direct, crypto := w.dc, w.direct, w.crypto
 	w.mu.Unlock()
@@ -231,9 +285,12 @@ func (w *wire) send(data []byte) error {
 			continue
 		}
 		if !direct {
+			if w.dataWS == nil {
+				return errors.New("直连不可用；当前权益不包含中继，请检查网络或升级套餐")
+			}
 			frame, _ := json.Marshal(relay.Frame{Peer: w.peer, Kind: "chunk", Body: sealed})
 			sendCtx, cancel := context.WithTimeout(w.ctx, 10*time.Second)
-			err := w.ws.Write(sendCtx, websocket.MessageText, frame)
+			err := w.dataWS.Write(sendCtx, websocket.MessageText, frame)
 			cancel()
 			if err != nil {
 				return err
@@ -342,7 +399,7 @@ func (w *wire) setup() (*webrtc.PeerConnection, error) {
 	return pc, nil
 }
 func (w *wire) attach(dc *webrtc.DataChannel) {
-	if dc.Label() != "agenthub-v1" {
+	if dc.Label() != "reign.p2p" {
 		_ = dc.Close()
 		return
 	}
@@ -365,7 +422,7 @@ func (w *wire) offer() {
 	if err != nil {
 		return
 	}
-	dc, err := pc.CreateDataChannel("agenthub-v1", nil)
+	dc, err := pc.CreateDataChannel("reign.p2p", nil)
 	if err != nil {
 		return
 	}
@@ -516,7 +573,7 @@ func (w *wire) hello(raw []byte) {
 	}
 	w.crypto = crypto
 	w.tcpMu.Lock()
-	w.tcpKey = sha256.Sum256([]byte("agenthub/v1/tcp/" + w.key + "/" + w.peer + "/" + hello.ClientNonce + "/" + hello.HostNonce))
+	w.tcpKey = sha256.Sum256([]byte("reign/p2p/tcp/" + w.key + "/" + w.peer + "/" + hello.ClientNonce + "/" + hello.HostNonce))
 	w.tcpMu.Unlock()
 	close(w.ready)
 	w.mu.Unlock()
@@ -526,7 +583,7 @@ func (w *wire) hello(raw []byte) {
 	}
 }
 func sessionCryptor(key, peer string, hello helloMessage, host bool) (*cryptor, error) {
-	derived := sha256.Sum256([]byte("agenthub/v1/session/" + key + "/" + peer + "/" + hello.ClientNonce + "/" + hello.HostNonce))
+	derived := sha256.Sum256([]byte("reign/p2p/session/" + key + "/" + peer + "/" + hello.ClientNonce + "/" + hello.HostNonce))
 	crypto, err := newCryptor(hex.EncodeToString(derived[:]))
 	if err != nil {
 		return nil, err
@@ -550,11 +607,27 @@ func keepAlive(ctx context.Context, ws *websocket.Conn) {
 		case <-tick.C:
 			probe, cancel := context.WithTimeout(ctx, 10*time.Second)
 			err := ws.Ping(probe)
+			if err == nil {
+				err = ws.Write(probe, websocket.MessageText, []byte(`{"kind":"renew"}`))
+			}
 			cancel()
 			if err != nil {
 				_ = ws.CloseNow()
 				return
 			}
+		}
+	}
+}
+
+// Relay is a write-only business ingress; its reader consumes control frames.
+func drainRelay(ctx context.Context, ws *websocket.Conn) {
+	if ws == nil {
+		return
+	}
+	defer ws.CloseNow()
+	for {
+		if _, _, err := ws.Read(ctx); err != nil {
+			return
 		}
 	}
 }

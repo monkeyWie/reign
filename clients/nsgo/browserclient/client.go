@@ -19,16 +19,16 @@ import (
 
 type Object = map[string]any
 type Pairing struct {
-	DiscoverTunnel          func(context.Context) (Pairing, error)
 	Relay, Host, Key, Token string
 	RouteName               string
 	ICE                     []string
 	RelayOnly               bool
 }
 type frame struct {
-	Peer string `json:"peer"`
-	Kind string `json:"kind"`
-	Body []byte `json:"body"`
+	AllowRelay bool   `json:"allowRelay"`
+	Peer       string `json:"peer"`
+	Kind       string `json:"kind"`
+	Body       []byte `json:"body"`
 }
 type chunk struct {
 	ID    string `json:"id"`
@@ -54,11 +54,11 @@ type cached struct {
 	bytes    int
 }
 type Client struct {
-	routes       []*Client
 	mu, sending  sync.Mutex
 	ctx          context.Context
 	cancel       context.CancelFunc
 	ws           *websocket.Conn
+	dataWS       *websocket.Conn
 	p            Pairing
 	id, nonce    string
 	base, crypto *cryptor
@@ -85,9 +85,9 @@ func Connect(ctx context.Context, p Pairing) (*Client, error) {
 	if e != nil || u.User != nil || u.Host == "" || u.Scheme != "wss" && !(u.Scheme == "ws" && CleartextAllowed(u.Hostname())) || ke != nil || len(rawKey) != 32 || len(p.Host) < 16 || p.Token == "" {
 		return nil, errors.New("无效或不安全的配对信息")
 	}
-	u.Path = "/relay"
+	u.Path = "/p2p/signal"
 	u.RawQuery = url.Values{"id": {p.Host}, "role": {"client"}}.Encode()
-	ws, _, e := websocket.Dial(ctx, u.String(), &websocket.DialOptions{Subprotocols: []string{"agenthub.v1", "auth." + base64.RawURLEncoding.EncodeToString([]byte(p.Token))}})
+	ws, _, e := websocket.Dial(ctx, u.String(), &websocket.DialOptions{Subprotocols: []string{"reign.p2p", "auth." + base64.RawURLEncoding.EncodeToString([]byte(p.Token))}})
 	if e != nil {
 		return nil, e
 	}
@@ -101,7 +101,29 @@ func Connect(ctx context.Context, p Pairing) (*Client, error) {
 	// Connection lifetime must outlive the short pairing HTTP request.
 	life, cancel := context.WithCancel(context.Background())
 	c := &Client{ctx: life, cancel: cancel, ws: ws, p: p, id: f.Peer, nonce: id() + id(), ready: make(chan struct{}), pending: map[string]chan Object{}, chunks: map[string]*assembly{}, cache: map[string]cached{}}
-	c.base, e = newCryptor(sum("agenthub/v1/peer/" + c.id + "/" + p.Key))
+	if f.AllowRelay {
+		u.Path = "/p2p/relay"
+		q := u.Query()
+		q.Set("peer", f.Peer)
+		u.RawQuery = q.Encode()
+		c.dataWS, _, e = websocket.Dial(ctx, u.String(), &websocket.DialOptions{Subprotocols: []string{"reign.p2p", "auth." + base64.RawURLEncoding.EncodeToString([]byte(p.Token))}})
+		if e != nil {
+			c.Close()
+			return nil, e
+		}
+		if _, _, e = c.dataWS.Read(ctx); e != nil {
+			c.Close()
+			return nil, e
+		}
+		go func() {
+			for {
+				if _, _, e := c.dataWS.Read(life); e != nil {
+					return
+				}
+			}
+		}()
+	}
+	c.base, e = newCryptor(sum("reign/p2p/peer/" + c.id + "/" + p.Key))
 	if e != nil {
 		c.Close()
 		return nil, e
@@ -151,7 +173,7 @@ func (c *Client) aad(kind string, out bool) string {
 	if out {
 		direction = "c2h"
 	}
-	return "agenthub/v1/" + c.id + "/" + direction + "/" + kind
+	return "reign/p2p/" + c.id + "/" + direction + "/" + kind
 }
 func (c *Client) relaySend(kind string, b []byte) error {
 	c.mu.Lock()
@@ -170,7 +192,14 @@ func (c *Client) relaySend(kind string, b []byte) error {
 	raw, _ := json.Marshal(frame{Peer: c.id, Kind: kind, Body: packet})
 	ctx, cancel := context.WithTimeout(c.ctx, 10*time.Second)
 	defer cancel()
-	return c.ws.Write(ctx, websocket.MessageText, raw)
+	socket := c.ws
+	if kind == "chunk" || kind == "data" {
+		socket = c.dataWS
+		if socket == nil {
+			return errors.New("直连失败，服务未提供中继权限")
+		}
+	}
+	return socket.Write(ctx, websocket.MessageText, raw)
 }
 func (c *Client) readLoop() {
 	defer c.Close()
@@ -198,7 +227,7 @@ func (c *Client) readLoop() {
 			if _, e = hex.DecodeString(hello.HostNonce); e != nil {
 				continue
 			}
-			next, e := newCryptor(sum("agenthub/v1/session/" + c.p.Key + "/" + c.id + "/" + c.nonce + "/" + hello.HostNonce))
+			next, e := newCryptor(sum("reign/p2p/session/" + c.p.Key + "/" + c.id + "/" + c.nonce + "/" + hello.HostNonce))
 			if e != nil {
 				continue
 			}
@@ -314,12 +343,6 @@ func (c *Client) response(b []byte) {
 	}
 }
 func (c *Client) Call(ctx context.Context, request Object) (any, error) {
-	if c.routes != nil {
-		if child := c.route(); child != nil {
-			return child.Call(ctx, request)
-		}
-		return nil, errors.New("所有连接均已断开，请等待重连")
-	}
 	ctx, cancel := context.WithTimeout(ctx, 40*time.Second)
 	defer cancel()
 	r := Object{}
@@ -427,12 +450,6 @@ func (c *Client) send(raw []byte) error {
 	return nil
 }
 func (c *Client) Path() string {
-	if c.routes != nil {
-		if r := c.route(); r != nil {
-			return r.Path()
-		}
-		return "Disconnected"
-	}
 	if c.ctx.Err() != nil {
 		return "Disconnected"
 	}
@@ -448,24 +465,10 @@ func (c *Client) Path() string {
 	return "Relay · encrypted"
 }
 func (c *Client) Connected() bool {
-	if c.routes != nil {
-		return c.ctx.Err() == nil && c.route() != nil
-	}
 	return c.ctx.Err() == nil
 }
 func (c *Client) Close() {
 	c.cancel()
-	if c.routes != nil {
-		c.mu.Lock()
-		rs := append([]*Client(nil), c.routes...)
-		c.mu.Unlock()
-		for _, r := range rs {
-			if r != nil {
-				r.Close()
-			}
-		}
-		return
-	}
 	c.ws.CloseNow()
 	c.mu.Lock()
 	pc := c.pc

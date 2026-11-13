@@ -23,7 +23,7 @@ func Network(ctx context.Context, service string) connectivity.Policy {
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 	var policy connectivity.Policy
-	if err := Post(ctx, service, "", "/v2/network", map[string]any{}, &policy); err != nil {
+	if err := Post(ctx, service, "", "/p2p/config", map[string]any{}, &policy); err != nil {
 		return connectivity.DefaultPolicy()
 	}
 	return policy
@@ -79,7 +79,7 @@ func Post(ctx context.Context, service, token, path string, in, out any) error {
 }
 func Register(ctx context.Context, service string, i Identity, host bool) (Identity, error) {
 	var r struct{ ID, ConnectionID, Token string }
-	if e := Post(ctx, service, "", "/v2/register", map[string]any{"name": i.Name, "public": i.Public, "isHost": host}, &r); e != nil {
+	if e := Post(ctx, service, "", "/p2p/devices/register", map[string]any{"name": i.Name, "public": i.Public, "isHost": host}, &r); e != nil {
 		return i, e
 	}
 	i.ID = r.ID

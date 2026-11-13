@@ -3,11 +3,14 @@ package deviceservice
 
 import (
 	"context"
+	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/monkeyWie/reign/pkg/access"
 	"math/big"
 	"net"
 	"net/http"
@@ -20,7 +23,6 @@ import (
 	"github.com/monkeyWie/reign/internal/device"
 	"github.com/monkeyWie/reign/internal/relay"
 	"github.com/monkeyWie/reign/pkg/database"
-	"github.com/monkeyWie/reign/pkg/link"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -33,7 +35,6 @@ type Device struct {
 	TokenHash    string `json:"tokenHash,omitempty" gorm:"uniqueIndex;size:64"`
 	Host         bool   `json:"host"`
 	Seen         int64  `json:"seen"`
-	TunnelURL    string `json:"tunnelUrl,omitempty"`
 }
 type Pair struct {
 	ID       string `json:"id"`
@@ -109,6 +110,18 @@ func NewWithDB(db *gorm.DB, origins []string) (*Server, error) {
 	s := &Server{DB: db, pairs: map[string]Pair{}, rates: map[string]bucket{}, Network: connectivity.DefaultPolicy(), ServiceID: meta.Value}
 	s.relay = relay.New("")
 	s.relay.Origins = origins
+	public, private, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return nil, err
+	}
+	s.Network.ServiceID = s.ServiceID
+	s.Network.GrantPublicKey = base64.RawURLEncoding.EncodeToString(public)
+	s.Network.Deployment = "self-hosted"
+	s.relay.Grant = func(host, client, role string) string {
+		now := time.Now().Unix()
+		ticket, _ := access.Sign(private, access.Grant{Audience: access.Audience, Namespace: s.ServiceID, HostID: host, DeviceID: client, Role: role, Scopes: []string{"connect", "relay"}, IssuedAt: now, ExpiresAt: now + 180, ID: relay.ID()})
+		return ticket
+	}
 	s.relay.AuthorizeContext = func(ctx context.Context, token, host, role string) (string, bool) {
 		id := s.identity(token)
 		if id == "" {
@@ -167,13 +180,13 @@ func (s *Server) allow(k string, limit int) bool {
 	return b.N <= limit
 }
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path == "/v1/capabilities" && r.Method == "GET" {
+	if r.URL.Path == "/p2p/capabilities" && r.Method == "GET" {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
-		json.NewEncoder(w).Encode(map[string]any{"protocolVersion": 2, "deployment": "self-hosted", "accountRequired": false, "billingEnabled": false, "managedTunnel": false})
+		json.NewEncoder(w).Encode(map[string]any{"protocolVersion": 2, "deployment": "self-hosted", "accountRequired": false, "billingEnabled": false})
 		return
 	}
-	if r.URL.Path == "/relay" {
+	if r.URL.Path == "/p2p/signal" || r.URL.Path == "/p2p/relay" {
 		s.relay.ServeHTTP(w, r)
 		return
 	}
@@ -203,9 +216,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in struct {
-		Name, Public, ConnectionID, Host, ID, Envelope, Reply, Client, TunnelURL string
-		IsHost                                                                   bool
-		Allow                                                                    bool
+		Name, Public, ConnectionID, Host, ID, Envelope, Reply, Client string
+		IsHost                                                        bool
+		Allow                                                         bool
 	}
 	if e := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&in); e != nil {
 		http.Error(w, "invalid request", 400)
@@ -225,7 +238,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	write := func(v any) { w.Header().Set("Content-Type", "application/json"); json.NewEncoder(w).Encode(v) }
-	if r.URL.Path == "/v2/network" {
+	if r.URL.Path == "/p2p/config" {
 		policy := s.Network
 		if len(policy.SelfSTUN) == 0 {
 			if endpoint := connectivity.STUNURL(r.Host, s.STUNPort); endpoint != "" {
@@ -240,7 +253,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		write(policy)
 		return
 	}
-	if r.URL.Path == "/v2/register" {
+	if r.URL.Path == "/p2p/devices/register" {
 		var count int64
 		if s.DB.Model(&Device{}).Count(&count).Error != nil {
 			http.Error(w, "database unavailable", 503)
@@ -308,17 +321,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	switch r.URL.Path {
-	case "/v2/presence":
+	case "/p2p/devices/presence":
 		if in.Name != "" && len(in.Name) <= 100 {
 			me.Name = in.Name
 		}
 		if me.Host {
-			endpoint, err := link.PublicEndpoint(in.TunnelURL)
-			if err != nil {
-				http.Error(w, err.Error(), 400)
-				return
-			}
-			me.TunnelURL = endpoint
+
 		}
 		me.Seen = now
 		if e := s.DB.Save(&me).Error; e != nil {
@@ -326,7 +334,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		write(map[string]bool{"ok": true})
-	case "/v2/resolve":
+	case "/p2p/devices/resolve":
 		code := strings.ReplaceAll(strings.ReplaceAll(in.ConnectionID, " ", ""), "-", "")
 		var d Device
 		if s.DB.First(&d, "connection_id = ? AND host = ?", code, true).Error != nil {
@@ -334,14 +342,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		d.TokenHash = ""
-		// A tunnel endpoint is disclosed only to an already paired controller.
-		var grant DeviceGrant
-		if s.DB.First(&grant, "host = ? AND client = ?", d.ID, id).Error != nil {
-			d.TunnelURL = ""
-		}
+
 		write(map[string]any{"device": d, "online": now-d.Seen < 45})
 
-	case "/v2/pair/request":
+	case "/p2p/pairings/request":
 		var host Device
 		err := s.DB.First(&host, "id = ?", in.Host).Error
 		if err != nil || !host.Host || len(in.Envelope) > 32000 || len(in.ID) != 32 {
@@ -359,7 +363,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		p := Pair{ID: in.ID, Host: host.ID, Client: id, Name: me.Name, Public: me.Public, Envelope: in.Envelope, State: "pending", Expires: now + 120}
 		s.pairs[p.ID] = p
 		write(p)
-	case "/v2/pair/pending":
+	case "/p2p/pairings/pending":
 		out := []Pair{}
 		for _, p := range s.pairs {
 			if p.Host == id && p.State == "pending" {
@@ -367,14 +371,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		write(out)
-	case "/v2/pair/result":
+	case "/p2p/pairings/result":
 		p, ok := s.pairs[in.ID]
 		if !ok || p.Client != id {
 			http.Error(w, "pairing expired", 404)
 			return
 		}
 		write(p)
-	case "/v2/pair/respond":
+	case "/p2p/pairings/respond":
 		p, ok := s.pairs[in.ID]
 		if !ok || p.Host != id || p.State != "pending" {
 			http.Error(w, "request unavailable", 409)
@@ -395,7 +399,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		s.pairs[p.ID] = p
 		write(p)
-	case "/v2/revoke":
+	case "/p2p/pairings/revoke":
 		if e := s.DB.Delete(&DeviceGrant{}, "host = ? AND client = ?", id, in.Client).Error; e != nil {
 			http.Error(w, "persistence failed", 500)
 			return

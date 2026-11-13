@@ -1,0 +1,2 @@
+import {defineConfig} from 'vitest/config';import {cloudflareTest,readD1Migrations} from '@cloudflare/vitest-pool-workers';
+export default defineConfig({plugins:[cloudflareTest({main:'./test/worker.ts',miniflare:{compatibilityDate:'2026-03-17',compatibilityFlags:['nodejs_compat'],d1Databases:['DB'],durableObjects:{ROOMS:{className:'RelayRoom',useSQLite:true}},bindings:{TEST_MIGRATIONS:await readD1Migrations('./migrations')}}})],test:{include:['test/**/*.test.ts']}});

@@ -20,6 +20,7 @@ type Grant struct {
 	DeviceID  string   `json:"deviceId"`
 	Role      string   `json:"role"`
 	Scopes    []string `json:"scopes"`
+	Products  []string `json:"products"`
 	IssuedAt  int64    `json:"iat"`
 	ExpiresAt int64    `json:"exp"`
 	ID        string   `json:"jti"`
@@ -74,6 +75,23 @@ func (g Grant) Allows(namespace, host, device, scope string) bool {
 	}
 	for _, s := range g.Scopes {
 		if s == scope {
+			return true
+		}
+	}
+	return false
+}
+
+// nil means unrestricted (self-hosted); an empty array permits no Agent.
+func (g Grant) AllowsProduct(provider string) bool {
+	if g.Products == nil {
+		return true
+	}
+	product := provider
+	if strings.HasPrefix(product, "codex") {
+		product = "codex"
+	}
+	for _, v := range g.Products {
+		if v == product {
 			return true
 		}
 	}

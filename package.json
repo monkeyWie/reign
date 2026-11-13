@@ -1,0 +1,11 @@
+{
+  "name": "reign", "private": true, "packageManager": "pnpm@10.34.5",
+  "scripts": {
+    "check": "pnpm -r --if-present check",
+    "test": "pnpm -r --if-present test",
+    "build:web": "pnpm --filter @reign/site build",
+    "build:worker": "pnpm --filter @reign/site build:worker",
+    "dev": "pnpm --filter @reign/site dev"
+  },
+  "devDependencies": {"typescript":"5.9.3", "tsx":"4.21.0", "@types/node":"^24.10.0", "@cloudflare/workers-types":"5.20261110.1", "wrangler":"4.160.0"}
+}

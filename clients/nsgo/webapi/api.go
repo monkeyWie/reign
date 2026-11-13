@@ -10,7 +10,6 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/monkeyWie/reign/clients/nsgo/browserclient"
-	"github.com/monkeyWie/reign/pkg/link"
 	"strings"
 	"sync"
 	"time"
@@ -91,7 +90,7 @@ func (a *API) loadIdentity(ctx context.Context, service, name string) (Object, e
 	if v != nil {
 		i := obj(v)
 		if name != "" && name != str(i, "name") {
-			if _, e = post(ctx, service, str(i, "token"), "/v2/presence", Object{"name": name}); e != nil {
+			if _, e = post(ctx, service, str(i, "token"), "/p2p/devices/presence", Object{"name": name}); e != nil {
 				return nil, e
 			}
 			i["name"] = name
@@ -106,7 +105,7 @@ func (a *API) loadIdentity(ctx context.Context, service, name string) (Object, e
 		return nil, e
 	}
 	pub := hex.EncodeToString(k.PublicKey().Bytes())
-	r, e := post(ctx, service, "", "/v2/register", Object{"name": name, "public": pub, "isHost": false})
+	r, e := post(ctx, service, "", "/p2p/devices/register", Object{"name": name, "public": pub, "isHost": false})
 	if e != nil {
 		return nil, e
 	}
@@ -131,7 +130,7 @@ func (a *API) connect(ctx context.Context, p Object) (any, error) {
 		return nil, e
 	}
 	token := str(i, "token")
-	r, e := post(ctx, service, token, "/v2/resolve", Object{"connectionId": p["code"]})
+	r, e := post(ctx, service, token, "/p2p/devices/resolve", Object{"connectionId": p["code"]})
 	if e != nil {
 		return nil, e
 	}
@@ -172,11 +171,11 @@ func (a *API) connect(ctx context.Context, p Object) (any, error) {
 	}
 	if str(s, "key") == "" || expired {
 		request := randomHex(16)
-		envelope, e := seal(i, str(d, "public"), "agenthub/pair/request/"+request, Object{"password": p["password"], "remember": p["remember"] != false})
+		envelope, e := seal(i, str(d, "public"), "reign/pair/request/"+request, Object{"password": p["password"], "remember": p["remember"] != false})
 		if e != nil {
 			return nil, e
 		}
-		if _, e = post(ctx, service, token, "/v2/pair/request", Object{"id": request, "host": d["id"], "envelope": envelope}); e != nil {
+		if _, e = post(ctx, service, token, "/p2p/pairings/request", Object{"id": request, "host": d["id"], "envelope": envelope}); e != nil {
 			return nil, e
 		}
 		until := time.Now().Add(125 * time.Second)
@@ -185,7 +184,7 @@ func (a *API) connect(ctx context.Context, p Object) (any, error) {
 			if !a.current(id, g) {
 				return nil, errors.New("连接已取消")
 			}
-			result, e = post(ctx, service, token, "/v2/pair/result", Object{"id": request})
+			result, e = post(ctx, service, token, "/p2p/pairings/result", Object{"id": request})
 			if e != nil {
 				return nil, e
 			}
@@ -204,7 +203,7 @@ func (a *API) connect(ctx context.Context, p Object) (any, error) {
 		if result["state"] != "approved" {
 			return nil, errors.New("等待主机确认超时")
 		}
-		reply, e := openEnvelope(i, str(d, "public"), "agenthub/pair/reply/"+request, str(result, "reply"))
+		reply, e := openEnvelope(i, str(d, "public"), "reign/pair/reply/"+request, str(result, "reply"))
 		if e != nil {
 			return nil, e
 		}
@@ -216,32 +215,10 @@ func (a *API) connect(ctx context.Context, p Object) (any, error) {
 	policy := Object{}
 	if p["relayOnly"] != true {
 		short, cancel := context.WithTimeout(ctx, 3*time.Second)
-		policy, _ = post(short, service, "", "/v2/network", Object{})
+		policy, _ = post(short, service, "", "/p2p/config", Object{})
 		cancel()
 	}
-	fresh, err := post(ctx, service, token, "/v2/resolve", Object{"connectionId": str(d, "connectionId")})
-	var alternate browserclient.Pairing
-	if err == nil {
-		if endpoint, err := link.PublicEndpoint(str(obj(fresh["device"]), "tunnelUrl")); err == nil && endpoint != "" {
-			alternate = browserclient.Pairing{Relay: strings.Replace(endpoint, "https", "wss", 1), Host: str(d, "id"), Key: str(s, "key"), Token: link.TunnelToken(str(s, "key"), str(d, "id"), str(i, "id")), ICE: browserclient.STUN(policy), RelayOnly: p["relayOnly"] == true}
-		}
-	}
-	discover := func(ctx context.Context) (browserclient.Pairing, error) {
-		fresh, err := post(ctx, service, token, "/v2/resolve", Object{"connectionId": str(d, "connectionId")})
-		if err != nil {
-			return browserclient.Pairing{}, err
-		}
-		target := obj(fresh["device"])
-		if str(target, "id") != str(d, "id") || str(target, "public") != str(d, "public") {
-			return browserclient.Pairing{}, errors.New("设备身份已变化")
-		}
-		endpoint, err := link.PublicEndpoint(str(target, "tunnelUrl"))
-		if err != nil || endpoint == "" {
-			return browserclient.Pairing{}, err
-		}
-		return browserclient.Pairing{Relay: strings.Replace(endpoint, "https", "wss", 1), Host: str(d, "id"), Key: str(s, "key"), Token: link.TunnelToken(str(s, "key"), str(d, "id"), str(i, "id")), ICE: browserclient.STUN(policy), RelayOnly: p["relayOnly"] == true}, nil
-	}
-	c, e := browserclient.ConnectRoutes(ctx, browserclient.Pairing{DiscoverTunnel: discover, Relay: strings.Replace(service, "http", "ws", 1), Host: str(d, "id"), Key: str(s, "key"), Token: token, ICE: browserclient.STUN(policy), RelayOnly: p["relayOnly"] == true}, alternate)
+	c, e := browserclient.Connect(ctx, browserclient.Pairing{Relay: strings.Replace(service, "http", "ws", 1), Host: str(d, "id"), Key: str(s, "key"), Token: token, ICE: browserclient.STUN(policy), RelayOnly: p["relayOnly"] == true})
 	if e != nil {
 		return nil, e
 	}

@@ -39,7 +39,7 @@ func TestSQLiteReopenAndPolicy(t *testing.T) {
 	if err = s.DB.Create(&DeviceGrant{Host: h.ID, Client: c.ID}).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err = device.Post(ctx, httpServer.URL, h.Token, "/v2/presence", map[string]string{"name": "renamed", "tunnelUrl": "https://demo.trycloudflare.com"}, nil); err != nil {
+	if err = device.Post(ctx, httpServer.URL, h.Token, "/p2p/devices/presence", map[string]string{"name": "renamed"}, nil); err != nil {
 		t.Fatal(err)
 	}
 	sid := s.ServiceID
@@ -56,7 +56,7 @@ func TestSQLiteReopenAndPolicy(t *testing.T) {
 		t.Fatal("lost service identity or pairing on reopen")
 	}
 	got, ok := s.Authenticate(h.Token)
-	if !ok || got.Name != "renamed" || got.TunnelURL != "https://demo.trycloudflare.com" || got.TokenHash != "" {
+	if !ok || got.Name != "renamed" || got.TokenHash != "" {
 		t.Fatalf("incorrect restored identity: %+v", got)
 	}
 	for _, suffix := range []string{"", "-wal"} {
@@ -71,7 +71,7 @@ func TestSQLiteReopenAndPolicy(t *testing.T) {
 	s.Policy = func(context.Context, Admission) error { return errors.New("denied") }
 	httpServer = httptest.NewServer(s)
 	defer httpServer.Close()
-	ws, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(httpServer.URL, "http")+"/relay?id="+h.ID+"&role=host", &websocket.DialOptions{HTTPHeader: map[string][]string{"Authorization": {"Bearer " + h.Token}}})
+	ws, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(httpServer.URL, "http")+"/p2p/signal?id="+h.ID+"&role=host", &websocket.DialOptions{HTTPHeader: map[string][]string{"Authorization": {"Bearer " + h.Token}}})
 	if err == nil {
 		ws.CloseNow()
 		t.Fatal("relay bypassed admission policy")

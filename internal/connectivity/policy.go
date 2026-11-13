@@ -12,9 +12,12 @@ import (
 const DefaultSTUNPort = "26330"
 
 type Policy struct {
-	PublicSTUN []string `json:"publicStun"`
-	SelfSTUN   []string `json:"selfStun"`
-	TCPSTUN    []string `json:"tcpStun,omitempty"` // host:port, TCP transport (not ICE URLs)
+	Deployment     string   `json:"deployment"`
+	ServiceID      string   `json:"serviceId"`
+	GrantPublicKey string   `json:"grantPublicKey"`
+	PublicSTUN     []string `json:"publicStun"`
+	SelfSTUN       []string `json:"selfStun"`
+	TCPSTUN        []string `json:"tcpStun,omitempty"` // host:port, TCP transport (not ICE URLs)
 }
 
 func DefaultPolicy() Policy {

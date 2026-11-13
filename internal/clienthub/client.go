@@ -11,7 +11,6 @@ import (
 	"github.com/monkeyWie/reign/internal/deviceservice"
 	"github.com/monkeyWie/reign/internal/remote"
 	"github.com/monkeyWie/reign/internal/store"
-	"github.com/monkeyWie/reign/pkg/link"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -65,7 +64,7 @@ func (h *Hub) identity(ctx context.Context, service, name string) (device.Identi
 	k := "identity:" + service
 	if e := h.DB.Get(k, &i); e == nil {
 		if name != "" && name != i.Name {
-			if e := device.Post(ctx, service, i.Token, "/v2/presence", map[string]any{"name": name}, nil); e != nil {
+			if e := device.Post(ctx, service, i.Token, "/p2p/devices/presence", map[string]any{"name": name}, nil); e != nil {
 				return i, e
 			}
 			i.Name = name
@@ -135,7 +134,7 @@ func (h *Hub) connect(ctx context.Context, service, code, public, password, name
 		Device deviceservice.Device
 		Online bool
 	}
-	if e = device.Post(ctx, service, i.Token, "/v2/resolve", map[string]any{"connectionId": code}, &r); e != nil {
+	if e = device.Post(ctx, service, i.Token, "/p2p/devices/resolve", map[string]any{"connectionId": code}, &r); e != nil {
 		return Saved{}, e
 	}
 	d := r.Device
@@ -162,11 +161,11 @@ func (h *Hub) connect(ctx context.Context, service, code, public, password, name
 	}
 	if s.Key == "" || (s.Expires > 0 && s.Expires <= time.Now().Unix()) {
 		reqID := device.Random()[:32]
-		envelope, e := device.Seal(i.Private, d.Public, "agenthub/pair/request/"+reqID, map[string]any{"password": password, "remember": remember})
+		envelope, e := device.Seal(i.Private, d.Public, "reign/pair/request/"+reqID, map[string]any{"password": password, "remember": remember})
 		if e != nil {
 			return s, e
 		}
-		if e = device.Post(ctx, service, i.Token, "/v2/pair/request", map[string]any{"host": d.ID, "id": reqID, "envelope": envelope}, nil); e != nil {
+		if e = device.Post(ctx, service, i.Token, "/p2p/pairings/request", map[string]any{"host": d.ID, "id": reqID, "envelope": envelope}, nil); e != nil {
 			return s, e
 		}
 		deadline := time.NewTimer(125 * time.Second)
@@ -175,7 +174,7 @@ func (h *Hub) connect(ctx context.Context, service, code, public, password, name
 		defer tick.Stop()
 		for {
 			var result deviceservice.Pair
-			if e = device.Post(ctx, service, i.Token, "/v2/pair/result", map[string]string{"id": reqID}, &result); e != nil {
+			if e = device.Post(ctx, service, i.Token, "/p2p/pairings/result", map[string]string{"id": reqID}, &result); e != nil {
 				return s, e
 			}
 			if result.State == "denied" {
@@ -186,7 +185,7 @@ func (h *Hub) connect(ctx context.Context, service, code, public, password, name
 					Key, Host, Public string
 					Expires           int64
 				}
-				if e = device.Open(i.Private, d.Public, "agenthub/pair/reply/"+reqID, result.Reply, &reply); e != nil {
+				if e = device.Open(i.Private, d.Public, "reign/pair/reply/"+reqID, result.Reply, &reply); e != nil {
 					return s, e
 				}
 				if reply.Host != d.ID || reply.Public != d.Public {
@@ -215,28 +214,7 @@ func (h *Hub) connect(ctx context.Context, service, code, public, password, name
 		opts.ICEServers = policy.Servers()
 		opts.TCPSTUN = policy.TCPSTUN
 	}
-	// Refresh after the grant exists; the directory hides routes from unpaired devices.
-	_ = device.Post(connectCtx, service, i.Token, "/v2/resolve", map[string]any{"connectionId": code}, &r)
-	var alt remote.Pairing
-	if endpoint, err := link.PublicEndpoint(r.Device.TunnelURL); err == nil && endpoint != "" {
-		alt = remote.Pairing{Relay: strings.Replace(endpoint, "https", "wss", 1), Host: d.ID, Key: s.Key, RelayToken: link.TunnelToken(s.Key, d.ID, i.ID)}
-	}
-	opts.DiscoverTunnel = func(ctx context.Context) (remote.Pairing, error) {
-		var response struct{ Device deviceservice.Device }
-		if err := device.Post(ctx, service, i.Token, "/v2/resolve", map[string]any{"connectionId": code}, &response); err != nil {
-			return remote.Pairing{}, err
-		}
-		endpoint, err := link.PublicEndpoint(response.Device.TunnelURL)
-		if err != nil || endpoint == "" {
-			return remote.Pairing{}, err
-		}
-		// Device identity must remain pinned even when an address is rediscovered.
-		if response.Device.ID != d.ID || response.Device.Public != d.Public {
-			return remote.Pairing{}, fmt.Errorf("设备身份已变化")
-		}
-		return remote.Pairing{Relay: strings.Replace(endpoint, "https", "wss", 1), Host: d.ID, Key: s.Key, RelayToken: link.TunnelToken(s.Key, d.ID, i.ID)}, nil
-	}
-	c, e := remote.ConnectRoutes(connectCtx, remote.Pairing{Relay: "ws" + strings.TrimPrefix(service, "http"), Host: d.ID, Key: s.Key, RelayToken: i.Token}, alt, opts)
+	c, e := remote.Connect(connectCtx, remote.Pairing{Relay: "ws" + strings.TrimPrefix(service, "http"), Host: d.ID, Key: s.Key, RelayToken: i.Token}, opts)
 	if e != nil {
 		return s, e
 	}

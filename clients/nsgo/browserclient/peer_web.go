@@ -70,7 +70,7 @@ func newPeer(c *Client, urls []string) (result peer, err error) {
 		servers = append(servers, map[string]any{"urls": []any{u}})
 	}
 	p := &jsPeer{client: c, pc: ctor.New(map[string]any{"iceServers": servers})}
-	p.dc = p.pc.Call("createDataChannel", "agenthub-v1", map[string]any{"ordered": true})
+	p.dc = p.pc.Call("createDataChannel", "reign.p2p", map[string]any{"ordered": true})
 	p.dc.Set("binaryType", "arraybuffer")
 	p.bind(p.pc, "onicecandidate", func(e js.Value) {
 		candidate := e.Get("candidate")

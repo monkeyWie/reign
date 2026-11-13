@@ -79,23 +79,19 @@ func (s *State) dialogView(cx *core.Scope, kind string) core.Node {
 		service := core.NewSignal(cx, url)
 		name := core.NewSignal(cx, str(s.host, "name"))
 		password := core.NewSignal(cx, "")
-		cloudflare := core.NewSignal(cx, s.host["cloudflareEnabled"] == true)
 		if kind == "password" {
 			title = "设置访问密码"
 			children = append(children, field("access-password", "8–72 字节的访问密码", password, true))
 		} else {
 			title = "本机服务设置"
-			children = append(children, field("server-url", "服务地址", service, false), field("device-name", "设备名称", name, false), ui.Checkbox{TestID: "cloudflare-fallback", Text: "启用备用云线路（Cloudflare）", Checked: cloudflare.Get, OnChange: cloudflare.Set}, label(cx, "直连优先，备用云线路不可用时自动使用自建中继。首次启用会下载连接组件。", 12, true))
-			if detail := str(object(s.host["tunnel"]), "detail"); detail != "" {
-				children = append(children, label(cx, detail, 12, true))
-			}
+			children = append(children, field("server-url", "服务地址", service, false), field("device-name", "设备名称", name, false), label(cx, "优先尝试 P2P 直连；允许中继时自动回退到所选服务的 WSS 中继。", 12, true))
 		}
 		footer = append(footer, button(cx, "dialog-save", "保存", nil, "primary", func() {
 			close()
 			if kind == "password" {
 				s.call("host.password", Object{"password": password.Get()}, nil)
 			} else {
-				s.call("host.configure", Object{"serviceUrl": strings.TrimSpace(service.Get()), "name": strings.TrimSpace(name.Get()), "cloudflareEnabled": cloudflare.Get()}, nil)
+				s.call("host.configure", Object{"serviceUrl": strings.TrimSpace(service.Get()), "name": strings.TrimSpace(name.Get())}, nil)
 			}
 		}))
 	case kind == "qr":

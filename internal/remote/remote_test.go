@@ -261,7 +261,7 @@ func TestRelayRejectsCredentials(t *testing.T) {
 	p := Pairing{Relay: "ws" + strings.TrimPrefix(server.URL, "http"), Host: relay.ID(), Key: strings.Repeat("ab", 32), RelayToken: "wrong"}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	if _, _, err := dial(ctx, p, "host"); err == nil {
+	if _, _, _, err := dial(ctx, p, "host"); err == nil {
 		t.Fatal("relay accepted invalid credentials")
 	}
 }

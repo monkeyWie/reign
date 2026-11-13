@@ -88,7 +88,7 @@ func TestDevicePairingControlAndRevocation(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	ws, resp, e := websocket.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http")+"/relay?role=client&id="+hostID, &websocket.DialOptions{HTTPHeader: map[string][]string{"Authorization": {"Bearer " + intruder.Token}}})
+	ws, resp, e := websocket.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http")+"/p2p/signal?role=client&id="+hostID, &websocket.DialOptions{HTTPHeader: map[string][]string{"Authorization": {"Bearer " + intruder.Token}}})
 	if e == nil {
 		ws.CloseNow()
 		t.Fatal("unpaired controller was allowed")

@@ -36,16 +36,20 @@ func serveHost(ctx context.Context, p Pairing, opts Options, d *control.Dispatch
 }
 func serveHostObserved(ctx context.Context, p Pairing, opts Options, d *control.Dispatcher, status *HostStatus) error {
 	dialCtx, stop := context.WithTimeout(ctx, 15*time.Second)
-	ws, _, err := dial(dialCtx, p, "host")
+	ws, dataWS, _, err := dial(dialCtx, p, "host")
 	stop()
 	if err != nil {
 		return err
 	}
 	defer ws.CloseNow()
+	if dataWS != nil {
+		defer dataWS.CloseNow()
+	}
 	status.set("connected", "中继已连接，等待移动端配对")
 	life, cancel := context.WithCancel(ctx)
 	defer cancel()
 	go keepAlive(life, ws)
+	go drainRelay(life, dataWS)
 	peers := map[string]*wire{}
 	defer func() {
 		for _, w := range peers {
@@ -97,6 +101,11 @@ func serveHostObserved(ctx context.Context, p Pairing, opts Options, d *control.
 				if len(data) > 1<<20 || json.Unmarshal(data, &req) != nil || req.ID == "" {
 					return
 				}
+				if err := peer.authorize(p.Host, deviceID, req); err != nil {
+					encoded, _ := json.Marshal(control.Response{ID: req.ID, Error: err.Error()})
+					go peer.send(encoded)
+					return
+				}
 				callCtx, stop := context.WithTimeout(peer.ctx, 40*time.Second)
 				watch := req.Method == "watch"
 				if watch {
@@ -143,9 +152,16 @@ func serveHostObserved(ctx context.Context, p Pairing, opts Options, d *control.
 				continue
 			}
 			peer.device = deviceID
+			peer.dataWS = dataWS
+			peer.grant = f.Grant
 			w = peer
 			peers[f.Peer] = w
 			status.track(f.Peer, w)
+		}
+		if f.Grant != "" {
+			w.grantMu.Lock()
+			w.grant = f.Grant
+			w.grantMu.Unlock()
 		}
 		w.receive(f)
 	}

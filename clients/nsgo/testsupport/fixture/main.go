@@ -36,7 +36,7 @@ func main() {
 	r := relay.New(p.RelayToken)
 	r.Origins = []string{"127.0.0.1:*", "localhost:*"}
 	mux := http.NewServeMux()
-	mux.Handle("/relay", r)
+	mux.Handle("/p2p/signal", r)
 	mux.HandleFunc("/fixture", func(w http.ResponseWriter, req *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		json.NewEncoder(w).Encode(map[string]any{"Relay": p.Relay, "Host": p.Host, "Key": p.Key, "Token": p.RelayToken})

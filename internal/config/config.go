@@ -14,14 +14,9 @@ import (
 )
 
 type Config struct {
-	CloudflareEnabled   bool   `json:"cloudflareEnabled,omitempty"`
-	CloudflaredPath     string `json:"cloudflaredPath,omitempty"`
-	CloudflareTokenFile string `json:"cloudflareTokenFile,omitempty"`
-	CloudflarePublicURL string `json:"cloudflarePublicUrl,omitempty"`
-	CloudflareListen    string `json:"cloudflareListen,omitempty"`
-	UIPath              string `json:"uiPath,omitempty"`
-	ServiceURL          string `json:"serviceUrl,omitempty"`
-	DeviceName          string `json:"deviceName,omitempty"`
+	UIPath     string `json:"uiPath,omitempty"`
+	ServiceURL string `json:"serviceUrl,omitempty"`
+	DeviceName string `json:"deviceName,omitempty"`
 	// ManagedAgents remembers explicit backend setup; it is not an access permission.
 	ManagedAgents map[string]bool `json:"managedAgents,omitempty"`
 	DataDir       string          `json:"-"`

@@ -67,7 +67,7 @@ func Run() {
 	mux.Handle("/v2/", s)
 	mux.Handle("/v1/", s)
 	mux.Handle("/cloud/", http.NotFoundHandler())
-	mux.Handle("/relay", s)
+	mux.Handle("/p2p/signal", s)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) })
 	if !*noWeb {
 		if *web != "" {

@@ -1,0 +1,1 @@
+{"name":"@reign/self-hosted","version":"0.1.0","private":true,"type":"module","dependencies":{"@reign/worker-core":"workspace:*"},"scripts":{"dev":"wrangler dev --port 18787","deploy":"wrangler d1 migrations apply DB --remote && wrangler deploy","build":"wrangler deploy --dry-run --outdir dist","check":"tsc --noEmit"}}

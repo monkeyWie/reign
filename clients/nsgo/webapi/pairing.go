@@ -127,7 +127,7 @@ func pairingCipher(identity Object, public, context string) (cipher.AEAD, error)
 	if e != nil {
 		return nil, e
 	}
-	extract := hmac.New(sha256.New, []byte("agenthub/pairing/v2"))
+	extract := hmac.New(sha256.New, []byte("reign/pairing"))
 	extract.Write(shared)
 	expand := hmac.New(sha256.New, extract.Sum(nil))
 	expand.Write([]byte(context))

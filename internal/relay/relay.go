@@ -17,14 +17,18 @@ import (
 )
 
 type Frame struct {
-	Peer   string `json:"peer,omitempty"`
-	Device string `json:"device,omitempty"`
-	Kind   string `json:"kind"`
-	Body   []byte `json:"body,omitempty"`
+	Protocol   int    `json:"protocol,omitempty"`
+	AllowRelay bool   `json:"allowRelay,omitempty"`
+	Grant      string `json:"grant,omitempty"`
+	Peer       string `json:"peer,omitempty"`
+	Device     string `json:"device,omitempty"`
+	Kind       string `json:"kind"`
+	Body       []byte `json:"body,omitempty"`
 }
 type connection struct {
 	ws     *websocket.Conn
 	device string
+	data   *websocket.Conn
 }
 
 func (c *connection) send(f Frame) error {
@@ -44,13 +48,14 @@ type Server struct {
 	rooms            map[string]*relayRoom
 	Authorize        func(credential, host, role string) (string, bool)
 	AuthorizeContext func(context.Context, string, string, string) (string, bool)
+	Grant            func(host, device, role string) string
 	Origins          []string
 }
 
 func New(token string) *Server { return &Server{token: token, rooms: make(map[string]*relayRoom)} }
 func ID() string               { var b [16]byte; _, _ = rand.Read(b[:]); return hex.EncodeToString(b[:]) }
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/relay" {
+	if r.URL.Path != "/p2p/signal" && r.URL.Path != "/p2p/relay" {
 		http.NotFound(w, r)
 		return
 	}
@@ -62,7 +67,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		version := false
 		for _, p := range protocols {
-			if p == "agenthub.v1" {
+			if p == "reign.p2p" {
 				version = true
 			}
 		}
@@ -97,13 +102,66 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid route", 400)
 		return
 	}
-	ws, err := websocket.Accept(w, r, &websocket.AcceptOptions{Subprotocols: []string{"agenthub.v1"}, OriginPatterns: s.Origins})
+	ws, err := websocket.Accept(w, r, &websocket.AcceptOptions{Subprotocols: []string{"reign.p2p"}, OriginPatterns: s.Origins})
 	if err != nil {
 		return
 	}
 	defer ws.CloseNow()
 	ws.SetReadLimit(2 << 20)
+	if r.URL.Path == "/p2p/relay" {
+		peer := r.URL.Query().Get("peer")
+		s.mu.Lock()
+		room := s.rooms[id]
+		var attached *connection
+		if room != nil {
+			if role == "host" {
+				attached = room.host
+			} else {
+				attached = room.clients[peer]
+			}
+		}
+		if attached == nil || attached.device != deviceID || attached.data != nil {
+			s.mu.Unlock()
+			return
+		}
+		attached.data = ws
+		s.mu.Unlock()
+		defer func() { s.mu.Lock(); attached.data = nil; s.mu.Unlock() }()
+		_ = (&connection{ws: ws}).send(Frame{Peer: peer, Kind: "welcome", Protocol: 1, AllowRelay: true})
+		for {
+			_, raw, err := ws.Read(r.Context())
+			if err != nil {
+				return
+			}
+			var f Frame
+			if json.Unmarshal(raw, &f) != nil || (f.Kind != "chunk" && f.Kind != "data") {
+				return
+			}
+			s.mu.Lock()
+			target := room.host
+			if role == "host" {
+				target = room.clients[f.Peer]
+				f.Device = ""
+			} else {
+				f.Peer = peer
+				f.Device = deviceID
+				if s.Grant != nil {
+					f.Grant = s.Grant(id, deviceID, role)
+				}
+			}
+			s.mu.Unlock()
+			if target != nil {
+				if target.send(f) != nil {
+					return
+				}
+			}
+		}
+	}
 	c := &connection{ws: ws, device: deviceID}
+	ticket := ""
+	if s.Grant != nil {
+		ticket = s.Grant(id, deviceID, role)
+	}
 	peer := ID()
 	s.mu.Lock()
 	room := s.rooms[id]
@@ -125,6 +183,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Unlock()
 	defer func() {
+		if c.data != nil {
+			c.data.CloseNow()
+		}
 		s.mu.Lock()
 		if role == "host" {
 			delete(s.rooms, id)
@@ -144,7 +205,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			_ = room.host.send(Frame{Peer: peer, Kind: "bye"})
 		}
 	}()
-	if err = c.send(Frame{Peer: peer, Kind: "welcome"}); err != nil {
+	if err = c.send(Frame{Peer: peer, Kind: "welcome", Protocol: 1, AllowRelay: true}); err != nil {
 		return
 	}
 	// Ping bounds half-open connections and keeps common reverse proxies alive.
@@ -187,7 +248,16 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if json.Unmarshal(raw, &f) != nil {
 			return
 		}
-		if f.Kind != "data" && f.Kind != "signal" && f.Kind != "chunk" && f.Kind != "hello" {
+		if f.Kind == "renew" {
+			if s.Grant != nil {
+				ticket = s.Grant(id, deviceID, role)
+			}
+			if role == "client" {
+				_ = room.host.send(Frame{Kind: "lease", Peer: peer, Device: deviceID, Grant: ticket})
+			}
+			continue
+		}
+		if f.Kind != "signal" && f.Kind != "hello" {
 			return
 		}
 		s.mu.Lock()
@@ -198,6 +268,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		} else {
 			f.Peer = peer
 			f.Device = deviceID
+			f.Grant = ticket
 		}
 		s.mu.Unlock()
 		if target != nil {

@@ -17,7 +17,7 @@ func TestNetworkDiscoveryAdvertisesReachableSTUNHost(t *testing.T) {
 	}
 	s.STUNPort = "26330"
 	s.TCPSTUNPort = "26330"
-	request := httptest.NewRequest("POST", "https://hub.example:26330/v2/network", strings.NewReader(`{}`))
+	request := httptest.NewRequest("POST", "https://hub.example:26330/p2p/config", strings.NewReader(`{}`))
 	response := httptest.NewRecorder()
 	s.ServeHTTP(response, request)
 	var policy connectivity.Policy
@@ -32,7 +32,7 @@ func TestNetworkDiscoveryAdvertisesReachableSTUNHost(t *testing.T) {
 	}
 	s.Network.SelfSTUN = []string{"stun:udp.example:26330"}
 	s.Network.TCPSTUN = []string{"tcp.example:26332"}
-	request = httptest.NewRequest("POST", "https://hub.example/v2/network", strings.NewReader(`{}`))
+	request = httptest.NewRequest("POST", "https://hub.example/p2p/config", strings.NewReader(`{}`))
 	response = httptest.NewRecorder()
 	s.ServeHTTP(response, request)
 	_ = json.Unmarshal(response.Body.Bytes(), &policy)

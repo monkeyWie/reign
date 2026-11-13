@@ -1,0 +1,9 @@
+packages:
+  - packages/*
+  - apps/site
+  - apps/self-hosted
+
+onlyBuiltDependencies:
+  - esbuild
+  - workerd
+  - sharp
