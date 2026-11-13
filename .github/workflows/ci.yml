@@ -181,7 +181,7 @@ jobs:
       - name: Verify packaged APK version and signature
         run: |
           python3 - <<'PY'
-          import os, subprocess
+          import hashlib, os, re, ssl, subprocess
           from pathlib import Path
           tools = Path(os.environ['ANDROID_HOME']) / 'build-tools/35.0.0'
           apk = Path('clients/nsgo/dist/releases') / ('reign-' + os.environ['VERSION'] + '-android-arm64.apk')
@@ -189,7 +189,15 @@ jobs:
           assert "versionName='" + os.environ['VERSION'] + "'" in badging
           assert "versionCode='" + os.environ['BUILD_NUMBER'] + "'" in badging
           assert "name='dev.agenthub.ras.RasActivity'" in badging
-          subprocess.run([str(tools / 'apksigner'), 'verify', str(apk)], check=True)
+          signature = subprocess.check_output([str(tools / 'apksigner'), 'verify', '--print-certs', str(apk)], text=True)
+          print(signature)
+          if os.environ.get('REIGN_ANDROID_STABLE_SIGNING'):
+              identity = Path('clients/nsgo/.nsgo/android/debug.pem').read_text()
+              certificate = re.search(r'-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----', identity, re.S).group(0)
+              expected = hashlib.sha256(ssl.PEM_cert_to_DER_cert(certificate)).hexdigest()
+              actual = re.search(r'Signer #1 certificate SHA-256 digest: ([0-9a-fA-F]+)', signature).group(1).lower()
+              assert actual == expected, 'APK certificate does not match the configured signing identity'
+              print('APK certificate matches the configured persistent signing identity')
           PY
       - name: Collect APK
         run: |
