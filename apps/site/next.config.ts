@@ -14,7 +14,8 @@ for (let dir = workspaceRoot; ; dir = dirname(dir)) {
 if (process.env.NODE_ENV === "development") void initOpenNextCloudflareForDev();
 const config: NextConfig = {
   turbopack: { root: workspaceRoot },
-  outputFileTracingRoot: workspaceRoot,
+  outputFileTracingRoot:
+    process.env.NEXT_PRIVATE_OUTPUT_TRACE_ROOT || workspaceRoot,
   transpilePackages: [
     "@reign/web-client",
     "@reign/client-sdk",
