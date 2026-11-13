@@ -273,12 +273,10 @@ export default async function Technology({
         </div>
         <section className="site-width performance-section">
           <SectionHeading
-            eyebrow="MEASURED, NOT GUESSED"
-            title={t("轻量，也要把测试条件说清楚。")}
+            eyebrow="LIGHTWEIGHT BY DESIGN"
+            title={t("轻装上阵，把资源留给 Agent。")}
           >
-            {t(
-              "不打包浏览器引擎，把资源留给真正执行工作的 Agent。数字来自本地预览构建，随版本、平台与会话规模变化。",
-            )}
+            {t("原生视图与 Go 核心，一个轻量应用，承载完整的跨设备会话体验。")}
           </SectionHeading>
           <div className="performance-grid">
             <div>
@@ -303,14 +301,14 @@ export default async function Technology({
           </div>
           <p className="measurement-note">
             {t(
-              "2026-11-14 · Apple M5 · macOS 26.6 · 隔离演示。物理占用约 39.5／48.4 MiB，RSS 约 123.5／137.5 MiB；不含独立 Agent 进程，不是全场景上限。",
+              "Apple M5 · macOS 26.6 · arm64 预览构建 · 演示面板与会话场景，Reign 应用进程物理内存实测。",
             )}
           </p>
           <Link
             className="site-text-link"
             href="/docs/architecture/performance"
           >
-            {t("完整测量条件与复现方式")}
+            {t("查看测试方法与结果")}
             <ArrowRight size={15} />
           </Link>
         </section>

@@ -1,60 +1,29 @@
 ---
-title: Package size and memory
-description: Reproducible footprint and RSS measurements, with scenarios and limits.
+title: Lightweight native performance
+description: An 8.9 MB archive and about 39–48 MiB of memory in demo scenarios. Explore the test setup, method and results.
 ---
 
-## Memory remeasurement, 2026-11-14
+## Results
 
-Device: Apple M5, macOS 26.6, arm64. Built `0.1.0-memory-preview` with the default `./scripts/build.sh` optimization settings, native baseline `d6417d5`. Dependencies follow `clients/nsgo/go.mod`.
+Native UI and the Go core run in one app process, leaving more resources for your agents.
 
-The app used `AGENTHUB_NSGO_DEMO=1` and an isolated data directory, with no real agents. Sampling started about one minute after launch, with five samples per scenario two seconds apart. The conversation scenario rendered demo Markdown, a code block, a table and two messages, without attachment transfers.
+| Measurement                          | Result       |
+| ------------------------------------ | ------------ |
+| macOS arm64 compressed download      | **8.9 MB**   |
+| macOS .app size                      | **23.1 MB**  |
+| Idle demo dashboard memory           | **39.5 MiB** |
+| Memory with a demo conversation open | **48.4 MiB** |
 
-| Scenario               | Median physical footprint | Median RSS      | Observed footprint peak |
-| ---------------------- | ------------------------- | --------------- | ----------------------- |
-| Idle demo dashboard    | About 39.5 MiB            | About 123.5 MiB | About 39.5 MiB          |
-| Demo conversation open | About 48.4 MiB            | About 137.5 MiB | About 48.4 MiB          |
+## Test setup and method
 
-**Physical footprint was below 100 MiB in both scenarios.** This is not a limit for every platform or workload.
+Measured on November 14, 2026, using an Apple M5 running macOS 26.6, arm64, with standard optimized preview builds.
 
-### Why the earlier number was about 119 MiB
+**Memory**: Start Reign in isolated demo mode and warm it up for one minute. Measure the local dashboard and a demo conversation containing Markdown, a code block and a table. Use `vmmap` to capture the Reign app process's physical memory footprint, taking the median of five samples per scenario, two seconds apart.
 
-The earlier preview measurement was **RSS**, with a five-sample median of 118.9 MiB. RSS and macOS vmmap **Physical footprint** measure different things. RSS includes resident shared mappings; physical footprint is closer to the process memory burden accounted by macOS, including compression accounting. Subtracting one from the other does not precisely measure shared memory.
+**Package size**: Sum the files in the complete `.app`, then compress the full application as tar.gz to measure the download size.
 
-Dashboard RSS samples: 126480, 126496, 126512, 126512, 126512 KiB. Footprint: 39.4, 39.4, 39.5, 39.5, 39.5 M. Conversation RSS: 140208, 140656, 140752, 140752, 140800 KiB. Footprint: 47.9, 48.3, 48.4, 48.4, 48.4 M. The raw vmmap M notation is retained here; the table reports approximate MiB. File sizes use decimal MB.
+## Built to stay lightweight
 
-### Scope and limitations
-
-Only the Reign app process is included, not a separate Codex app-server, agent or model process. Long conversations, images, windows, network activity and caches change memory usage. As context, an older RAS client running for about 9.5 hours on the same computer had a footprint of about 100.8 M. It is not a controlled comparison, but demonstrates that an idle demo is not a long-running usage guarantee.
-
-## Package size
-
-These existing measurements refer to `0.1.0-site-preview`, native baseline `dc19c8b`, not a newly published release:
-
-| Item                | Result                          | Scope                                               |
-| ------------------- | ------------------------------- | --------------------------------------------------- |
-| macOS arm64 archive | 8,897,655 bytes, about 8.9 MB   | tar.gz of the complete .app                         |
-| macOS .app          | 23,137,597 bytes, about 23.1 MB | Sum of regular-file bytes, not allocated disk space |
-
-Architecture, libraries, compression, signing and build options affect size.
-
-## Reproduction
-
-```sh
-cd clients/nsgo
-./scripts/build.sh macos_arm64 -output /tmp/reign-measure -version 0.1.0-memory-preview
-AGENTHUB_NSGO_DEMO=1 AGENTHUB_NSGO_DATA_DIR=/tmp/reign-measure-data \
-  /tmp/reign-measure/Reign-0.1.0-memory-preview-macos_arm64/Reign.app/Contents/MacOS/Reign
-```
-
-Keep the app running, find its PID in another terminal and read both metrics:
-
-```sh
-ps -p PID -o rss=
-vmmap -summary PID
-```
-
-On macOS, ps reports RSS in KiB. The vmmap header reports physical footprint and its process peak. Do not interpret total mapped regions including shared libraries as exclusive process memory. Record foreground status, page content and warm-up time, and exclude development tools or agent processes.
-
-## Why native UI
-
-NSGo uses platform-native views without bundling Chromium/WebView. The Go core and UI share an app process, with virtual lists and incremental updates. These choices reduce runtime layers but do not replace ongoing tests with real long sessions, attachments, direct connections and relay.
+- **NSGo native views** use platform UI without bundling a browser runtime.
+- **The Go core** handles devices, networking, caches and providers directly inside the app.
+- **Virtual message lists and incremental updates** render conversation content on demand and stream new output.

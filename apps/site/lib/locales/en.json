@@ -161,11 +161,8 @@
   "优先直连 / 按服务权益回退中继": "Direct first / Relay subject to service access",
   "被控电脑 · Go 核心": "Host computer · Go core",
   "Provider → Codex App / CLI → 本地项目": "Provider → Codex App / CLI → Local project",
-  "轻量，也要把测试条件说清楚。": "Lightweight, with the measurements to explain it.",
-  "不打包浏览器引擎，把资源留给真正执行工作的 Agent。数字来自本地预览构建，随版本、平台与会话规模变化。": "No bundled browser engine leaves resources for the agents doing the work. These local preview measurements vary by version, platform and session size.",
   "macOS arm64 压缩下载体积": "macOS arm64 compressed download",
   "macOS .app 文件总大小": "macOS .app file size",
-  "完整测量条件与复现方式": "Full conditions and reproduction steps",
   "价格 · Reign": "Pricing · Reign",
   "比较 Reign 官方免费、付费与开源自建方案，了解设备额度、Agent 产品和中继权益。": "Compare Reign's official free, paid and open-source self-hosted options, including device limits, agent products and relay access.",
   "Free 和 Pro 的区别是什么？": "What is the difference between Free and Pro?",
@@ -308,5 +305,8 @@
   "此服务尚未公布可用套餐，请以账号页的开放状态为准。": "This service has not published any plans. Check the account page for availability.",
   "官方套餐实时读取自当前服务。登录与支付能力按实际开放状态显示；Reign 不包含 Agent 模型订阅或 API 用量费用。": "Official plans are loaded from the current service. Sign-in and payment follow actual availability; agent model subscriptions and API usage are not included.",
   "演示面板／会话物理占用": "Demo dashboard / conversation footprint",
-  "2026-11-14 · Apple M5 · macOS 26.6 · 隔离演示。物理占用约 39.5／48.4 MiB，RSS 约 123.5／137.5 MiB；不含独立 Agent 进程，不是全场景上限。": "2026-11-14 · Apple M5 · macOS 26.6 · Isolated demo. Footprint: about 39.5 / 48.4 MiB; RSS: about 123.5 / 137.5 MiB. Excludes separate agents and is not a workload limit."
+  "轻装上阵，把资源留给 Agent。": "Lightweight. More room for your agents.",
+  "原生视图与 Go 核心，一个轻量应用，承载完整的跨设备会话体验。": "Native views and a Go core bring your cross-device sessions together in one lightweight app.",
+  "Apple M5 · macOS 26.6 · arm64 预览构建 · 演示面板与会话场景，Reign 应用进程物理内存实测。": "Apple M5 · macOS 26.6 · arm64 preview build · Reign app physical memory measured in demo dashboard and conversation scenarios.",
+  "查看测试方法与结果": "See test methods and results"
 }
