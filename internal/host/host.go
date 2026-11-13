@@ -3,7 +3,9 @@ package host
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/monkeyWie/reign/internal/config"
 	"github.com/monkeyWie/reign/internal/control"
@@ -11,6 +13,8 @@ import (
 	"github.com/monkeyWie/reign/internal/deviceservice"
 	"github.com/monkeyWie/reign/internal/provider"
 	"github.com/monkeyWie/reign/internal/remote"
+	"github.com/monkeyWie/reign/internal/store"
+	"github.com/monkeyWie/reign/internal/tunnel"
 	"golang.org/x/crypto/bcrypt"
 	"os"
 	"os/exec"
@@ -39,29 +43,44 @@ type Intent struct {
 	Remember bool   `json:"remember"`
 }
 type Manager struct {
-	mu         sync.Mutex
-	activation sync.Mutex
-	cfg        config.Config
-	state      saved
-	pending    map[string]deviceservice.Pair
-	intents    map[string]Intent
-	status     string
-	network    *remote.HostStatus
-	d          *control.Dispatcher
-	ice        func(config.Config) remote.Options
-	path       string
-	attempts   map[string][]time.Time
+	mu           sync.Mutex
+	activation   sync.Mutex
+	cfg          config.Config
+	state        saved
+	pending      map[string]deviceservice.Pair
+	intents      map[string]Intent
+	status       string
+	tunnel       *tunnel.Host
+	tunnelStatus tunnel.Status
+	network      *remote.HostStatus
+	d            *control.Dispatcher
+	ice          func(config.Config) remote.Options
+	path         string
+	attempts     map[string][]time.Time
 }
 
 func New(c config.Config, d *control.Dispatcher, ice func(config.Config) remote.Options) *Manager {
 	return &Manager{cfg: c, d: d, ice: ice, pending: map[string]deviceservice.Pair{}, intents: map[string]Intent{}, attempts: map[string][]time.Time{}, status: "尚未配置设备服务"}
 }
-func (m *Manager) save() error { return device.Save(m.path, m.state) }
+func (m *Manager) save() error { return saveIdentity(m.path, m.state) }
+func saveIdentity(path string, s saved) error {
+	db, err := store.Open(path)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	return db.Put("host:"+device.Fingerprint(s.Identity.Service), s)
+}
 func (m *Manager) Network() control.NetworkStatus {
 	m.mu.Lock()
 	n := m.network
+	h := m.tunnel
 	m.mu.Unlock()
-	return n.Snapshot()
+	out := n.Snapshot()
+	if h != nil {
+		out.Peers = append(out.Peers, h.Status.Snapshot().Peers...)
+	}
+	return out
 }
 
 // Reconcile attachable Agents independently of device registration and pairing.
@@ -101,7 +120,8 @@ func (m *Manager) Run(ctx context.Context) {
 		m.mu.Lock()
 		c := m.cfg
 		m.mu.Unlock()
-		if c.ServiceURL != "" && c.ServiceURL != current {
+		signature := fmt.Sprintf("%s|%t|%s|%s|%s|%s", c.ServiceURL, c.CloudflareEnabled, c.CloudflaredPath, c.CloudflareTokenFile, c.CloudflarePublicURL, c.CloudflareListen)
+		if c.ServiceURL != "" && signature != current {
 			if cancel != nil {
 				cancel()
 				cancel = nil
@@ -118,7 +138,7 @@ func (m *Manager) Run(ctx context.Context) {
 				m.status = e.Error()
 				m.mu.Unlock()
 			} else {
-				current = c.ServiceURL
+				current = signature
 				m.mu.Lock()
 				i := m.state.Identity
 				n := remote.NewHostStatus(i.Service)
@@ -134,6 +154,13 @@ func (m *Manager) Run(ctx context.Context) {
 					opts.TCPSTUN = policy.TCPSTUN
 				}
 				opts.ResolveKey = m.key
+				m.mu.Lock()
+				m.tunnel = nil
+				m.tunnelStatus = tunnel.Status{State: "disabled"}
+				m.mu.Unlock()
+				if c.CloudflareEnabled {
+					go m.startTunnel(life, c, i, opts)
+				}
 				go remote.RunHostObserved(life, remote.Pairing{Relay: "ws" + strings.TrimPrefix(i.Service, "http"), Host: i.ID, Key: device.Random(), RelayToken: i.Token}, opts, m.d, n)
 			}
 		}
@@ -152,9 +179,26 @@ func (m *Manager) register(ctx context.Context, c config.Config) error {
 	if e != nil {
 		return e
 	}
-	path := filepath.Join(c.DataDir, "host-"+device.Fingerprint(service)[:16]+".json")
+	path := filepath.Join(c.DataDir, "identity.db")
 	s := saved{Grants: map[string]Grant{}}
-	if e = device.Load(path, &s); e != nil && !os.IsNotExist(e) {
+	db, e := store.Open(path)
+	if e != nil {
+		return e
+	}
+	e = db.Get("host:"+device.Fingerprint(service), &s)
+	_ = db.Close()
+	if errors.Is(e, sql.ErrNoRows) {
+		legacy := filepath.Join(c.DataDir, "host-"+device.Fingerprint(service)[:16]+".json")
+		if err := device.Load(legacy, &s); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		if s.Identity.Token != "" {
+			if err := saveIdentity(path, s); err != nil {
+				return err
+			}
+		}
+	}
+	if e != nil && !errors.Is(e, sql.ErrNoRows) {
 		return e
 	}
 	if s.Identity.Token == "" {
@@ -170,7 +214,7 @@ func (m *Manager) register(ctx context.Context, c config.Config) error {
 		if e != nil {
 			return e
 		}
-		if e = device.Save(path, s); e != nil {
+		if e = saveIdentity(path, s); e != nil {
 			return e
 		}
 	}
@@ -198,7 +242,7 @@ func (m *Manager) poll(ctx context.Context) {
 	if i.ID == "" {
 		return
 	}
-	if e := device.Post(ctx, i.Service, i.Token, "/v2/presence", map[string]any{"name": i.Name}, nil); e != nil {
+	if e := device.Post(ctx, i.Service, i.Token, "/v2/presence", map[string]any{"name": i.Name, "tunnelUrl": m.publicTunnel()}, nil); e != nil {
 		m.mu.Lock()
 		m.status = e.Error()
 		m.mu.Unlock()
@@ -314,6 +358,8 @@ func (m *Manager) Local(ctx context.Context, r control.Request) (any, error) {
 		Allow                                            bool
 		Remember                                         bool
 		ClearPassword                                    bool
+		CloudflareEnabled                                *bool
+		CloudflaredPath                                  string
 	}
 	if len(r.Params) > 0 {
 		if e := json.Unmarshal(r.Params, &in); e != nil {
@@ -334,7 +380,7 @@ func (m *Manager) Local(ctx context.Context, r control.Request) (any, error) {
 			grants = append(grants, map[string]any{"client": g.Client, "name": g.Name, "fingerprint": device.Fingerprint(g.Public), "expires": g.Expires})
 		}
 		sort.Slice(pending, func(a, b int) bool { return pending[a]["id"].(string) < pending[b]["id"].(string) })
-		return map[string]any{"deviceId": i.ID, "connectionId": i.ConnectionID, "public": i.Public, "name": i.Name, "serviceUrl": m.cfg.ServiceURL, "status": m.status, "passwordEnabled": m.state.PasswordHash != "", "pending": pending, "grants": grants, "qr": map[string]any{"version": 2, "service": i.Service, "connectionId": i.ConnectionID, "public": i.Public}}, nil
+		return map[string]any{"deviceId": i.ID, "connectionId": i.ConnectionID, "public": i.Public, "name": i.Name, "serviceUrl": m.cfg.ServiceURL, "status": m.status, "cloudflareEnabled": m.cfg.CloudflareEnabled, "cloudflaredPath": m.cfg.CloudflaredPath, "tunnel": m.tunnelStatus, "passwordEnabled": m.state.PasswordHash != "", "pending": pending, "grants": grants, "qr": map[string]any{"version": 2, "service": i.Service, "connectionId": i.ConnectionID, "public": i.Public}}, nil
 	case "host.configure":
 		url, e := device.ServiceURL(in.ServiceURL)
 		if e != nil {
@@ -344,6 +390,12 @@ func (m *Manager) Local(ctx context.Context, r control.Request) (any, error) {
 		defer m.mu.Unlock()
 		m.cfg.ServiceURL = url
 		m.cfg.DeviceName = in.Name
+		if in.CloudflareEnabled != nil {
+			m.cfg.CloudflareEnabled = *in.CloudflareEnabled
+		}
+		if in.CloudflaredPath != "" {
+			m.cfg.CloudflaredPath = in.CloudflaredPath
+		}
 		if m.path != "" && m.state.Identity.Service == url && in.Name != "" {
 			m.state.Identity.Name = in.Name
 			if e := m.save(); e != nil {
@@ -376,6 +428,7 @@ func (m *Manager) Local(ctx context.Context, r control.Request) (any, error) {
 		m.mu.Lock()
 		i := m.state.Identity
 		network := m.network
+		tunnelHost := m.tunnel
 		delete(m.state.Grants, in.Client)
 		e := m.save()
 		m.mu.Unlock()
@@ -383,6 +436,10 @@ func (m *Manager) Local(ctx context.Context, r control.Request) (any, error) {
 			return nil, e
 		}
 		network.DisconnectDevice(in.Client)
+		if tunnelHost != nil {
+			tunnelHost.Relay.DisconnectDevice(i.ID, in.Client)
+			tunnelHost.Status.DisconnectDevice(in.Client)
+		}
 		return nil, device.Post(ctx, i.Service, i.Token, "/v2/revoke", map[string]string{"client": in.Client}, nil)
 	case "host.enable", "host.activate":
 		m.activation.Lock()
@@ -416,3 +473,5 @@ func (m *Manager) Local(ctx context.Context, r control.Request) (any, error) {
 		return nil, fmt.Errorf("unknown host method")
 	}
 }
+
+func (m *Manager) publicTunnel() string { m.mu.Lock(); defer m.mu.Unlock(); return m.tunnelStatus.URL }

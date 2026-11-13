@@ -70,7 +70,7 @@ func Post(ctx context.Context, service, token, path string, in, out any) error {
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 1000))
-		return fmt.Errorf("%s: %s", resp.Status, strings.TrimSpace(string(b)))
+		return &HTTPError{StatusCode: resp.StatusCode, Detail: strings.TrimSpace(string(b))}
 	}
 	if out == nil {
 		return nil
@@ -88,3 +88,12 @@ func Register(ctx context.Context, service string, i Identity, host bool) (Ident
 	i.Service = service
 	return i, nil
 }
+
+// HTTPError allows optional extensions to distinguish unsupported endpoints
+// from authentication or network failures without parsing error strings.
+type HTTPError struct {
+	StatusCode int
+	Detail     string
+}
+
+func (e *HTTPError) Error() string { return fmt.Sprintf("HTTP %d: %s", e.StatusCode, e.Detail) }

@@ -1,15 +1,15 @@
-# Install the extracted bundle at /opt/ras, then install this file in /etc/systemd/system/.
+# Install the extracted bundle at /opt/reign, then install this file in /etc/systemd/system/.
 [Unit]
-Description=RAS device, signaling, relay and NSGo Web service
+Description=Reign device, signaling, relay and NSGo Web service
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=/opt/ras
-ExecStart=/opt/ras/ras-server --state /var/lib/ras/devices.json
+WorkingDirectory=/opt/reign
+ExecStart=/opt/reign/reign-server --state /var/lib/reign/reign.db
 DynamicUser=yes
-StateDirectory=ras
+StateDirectory=reign
 StateDirectoryMode=0700
 NoNewPrivileges=yes
 ProtectSystem=strict

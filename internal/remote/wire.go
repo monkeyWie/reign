@@ -20,13 +20,15 @@ import (
 )
 
 type Options struct {
-	TCPTrace      func(string, ...any) `json:"-"`
-	ICEServers    []webrtc.ICEServer
-	TCPSTUN       []string // TCP STUN host:port endpoints, discovered via /v2/network
-	DisableTCP    bool
-	DisableWebRTC bool
-	ResolveKey    func(string) (string, bool) `json:"-"`
-	RelayOnly     bool
+	DiscoverTunnel func(context.Context) (Pairing, error) `json:"-"`
+	RelayName      string
+	TCPTrace       func(string, ...any) `json:"-"`
+	ICEServers     []webrtc.ICEServer
+	TCPSTUN        []string // TCP STUN host:port endpoints, discovered via /v2/network
+	DisableTCP     bool
+	DisableWebRTC  bool
+	ResolveKey     func(string) (string, bool) `json:"-"`
+	RelayOnly      bool
 }
 type wire struct {
 	ws               *websocket.Conn
@@ -171,6 +173,9 @@ func (w *wire) path() string {
 	}
 	if w.tcpSnapshot() != nil {
 		return "P2P · TCP"
+	}
+	if w.opts.RelayName != "" {
+		return "Relay · " + w.opts.RelayName
 	}
 	return "Relay · encrypted"
 }

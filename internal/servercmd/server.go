@@ -23,9 +23,9 @@ func Run() {
 	tcpSTUNListen := flag.String("tcp-stun-listen", ":26330", "TCP STUN listen address; empty disables TCP probing")
 	tcpSTUNPublic := flag.String("tcp-stun-public", "", "comma-separated TCP STUN host:port endpoints; default uses request hostname and TCP STUN port")
 	publicSTUN := flag.String("public-stun", strings.Join(connectivity.DefaultPolicy().PublicSTUN, ","), "comma-separated public STUN URLs; empty uses only self-hosted STUN")
-	state := flag.String("state", "./data/devices.json", "private persistent device registry")
+	state := flag.String("state", "./data/reign.db", "SQLite database path")
 	origins := flag.String("origins", "http://localhost:7357,http://127.0.0.1:7357", "exact permitted Web origins")
-	web := flag.String("web", "", "optional external Web directory overriding embedded RAS Web")
+	web := flag.String("web", "", "optional external Web directory overriding embedded Reign Web")
 	noWeb := flag.Bool("no-web", false, "disable embedded and external Web hosting")
 	tlsCert := flag.String("tls-cert", "", "optional HTTPS certificate PEM (otherwise use a TLS reverse proxy)")
 	tlsKey := flag.String("tls-key", "", "HTTPS private key PEM")
@@ -37,6 +37,7 @@ func Run() {
 	if e != nil {
 		log.Fatal(e)
 	}
+	defer s.Close()
 	s.Network.PublicSTUN = split(*publicSTUN)
 	if *stunPublic != "" {
 		s.Network.SelfSTUN = split(*stunPublic)
@@ -51,7 +52,7 @@ func Run() {
 		}
 		defer tcpSTUN.Close()
 		_, s.TCPSTUNPort, _ = net.SplitHostPort(tcpSTUN.Addr().String())
-		log.Printf("RAS STUN TCP %s", tcpSTUN.Addr())
+		log.Printf("Reign STUN TCP %s", tcpSTUN.Addr())
 	}
 	if *stunListen != "" {
 		stun, err := connectivity.ListenSTUN(*stunListen)
@@ -60,10 +61,12 @@ func Run() {
 		}
 		defer stun.Close()
 		_, s.STUNPort, _ = net.SplitHostPort(stun.Addr().String())
-		log.Printf("RAS STUN UDP %s", stun.Addr())
+		log.Printf("Reign STUN UDP %s", stun.Addr())
 	}
 	mux := http.NewServeMux()
 	mux.Handle("/v2/", s)
+	mux.Handle("/v1/", s)
+	mux.Handle("/cloud/", http.NotFoundHandler())
 	mux.Handle("/relay", s)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) })
 	if !*noWeb {
@@ -73,7 +76,7 @@ func Run() {
 			mux.Handle("/", webui.Handler())
 		}
 	}
-	log.Printf("RAS device service http://%s", *listen)
+	log.Printf("Reign device service http://%s", *listen)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	server := &http.Server{Addr: *listen, Handler: mux, ReadHeaderTimeout: 5 * time.Second}

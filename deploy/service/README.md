@@ -1,4 +1,4 @@
-# RAS connection service
+# Reign connection service
 
 Current deployment instructions: [NSGo server package](../../clients/nsgo/deploy/service/README.md).
 
@@ -13,12 +13,12 @@ HTTP/WS and HTTPS/WSS are supported. A public IP works without certificates. TCP
 ```sh
 python3 clients/nsgo/scripts/package-service.py --domain ras.lihuipeng.love
 # Extract a release, then run the embedded-Web executable:
-./ras-server
+./reign-server
 ```
 
 Native clients attempt WebRTC/UDP and native TCP in parallel. TCP includes mapping discovery, port reuse, simultaneous open, authenticated connection selection, encrypted framing, heartbeats and relay fallback. Strict NATs can still prevent direct connections. No TURN, DERP or Tailcat is required. See [TCP P2P validation](../../docs/tcp-p2p.md).
 
-`/v2/network` provides UDP `publicStun` / `selfStun` and separate TCP `tcpStun` endpoints. Override external addresses using `--stun-public` and `--tcp-stun-public` when a proxy/CDN cannot forward STUN. Keep the registry file persistent; multiple processes must not share-write it. No database or Redis is required.
+`/v2/network` provides UDP `publicStun` / `selfStun` and separate TCP `tcpStun` endpoints. Override external addresses using `--stun-public` and `--tcp-stun-public` when a proxy/CDN cannot forward STUN. Persist the SQLite database (`data/reign.db`). GORM provides the database interface. Online routes and approval mailboxes are still in memory; this version runs as one service instance. No external database or Redis is required.
 
 Build the current NSGo package:
 

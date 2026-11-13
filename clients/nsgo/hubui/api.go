@@ -15,7 +15,7 @@ type API interface {
 	Close()
 }
 
-var DefaultService = "https://ras.lihuipeng.love"
+var DefaultService = "http://127.0.0.1:26331"
 
 func object(v any) Object {
 	if m, ok := v.(map[string]any); ok && m != nil {

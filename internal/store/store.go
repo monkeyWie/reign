@@ -19,6 +19,13 @@ func Open(path string) (*DB, error) {
 	if e := os.MkdirAll(filepath.Dir(path), 0700); e != nil {
 		return nil, e
 	}
+	f, e := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600)
+	if e != nil {
+		return nil, e
+	}
+	if e = f.Close(); e != nil {
+		return nil, e
+	}
 	d, e := sql.Open("sqlite", path)
 	if e != nil {
 		return nil, e
@@ -32,7 +39,10 @@ CREATE TABLE IF NOT EXISTS commands(id TEXT PRIMARY KEY,request BLOB NOT NULL,re
 		d.Close()
 		return nil, e
 	}
-	os.Chmod(path, 0600)
+	if e = os.Chmod(path, 0600); e != nil {
+		d.Close()
+		return nil, e
+	}
 	return &DB{DB: d}, nil
 }
 func (d *DB) Put(k string, v any) error {

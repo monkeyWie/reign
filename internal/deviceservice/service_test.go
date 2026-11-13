@@ -67,9 +67,9 @@ func TestIdentityAndDeviceRouteIsolation(t *testing.T) {
 		ws.CloseNow()
 		t.Fatal("client registered host role")
 	}
-	service.mu.Lock()
-	service.state.Grants[h1.ID+":"+client.ID] = true
-	service.mu.Unlock()
+	if err := service.DB.Create(&DeviceGrant{Host: h1.ID, Client: client.ID}).Error; err != nil {
+		t.Fatal(err)
+	}
 	if ws, e := dial(client, h2.ID, "client"); e == nil {
 		ws.CloseNow()
 		t.Fatal("grant crossed host boundary")
@@ -101,9 +101,8 @@ func TestIdentityAndDeviceRouteIsolation(t *testing.T) {
 	if e = device.Post(ctx, server.URL, h2.Token, "/v2/revoke", map[string]string{"client": client.ID}, nil); e != nil {
 		t.Fatal(e)
 	}
-	service.mu.Lock()
-	still := service.state.Grants[h1.ID+":"+client.ID]
-	service.mu.Unlock()
+	var grant DeviceGrant
+	still := service.DB.First(&grant, "host = ? AND client = ?", h1.ID, client.ID).Error == nil
 	if !still {
 		t.Fatal("another host revoked grant")
 	}

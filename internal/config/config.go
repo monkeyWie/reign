@@ -2,18 +2,26 @@ package config
 
 import (
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"github.com/monkeyWie/reign/pkg/localstate"
 	"os"
 	"path/filepath"
 	"sync"
 )
 
 type Config struct {
-	UIPath     string `json:"uiPath,omitempty"`
-	ServiceURL string `json:"serviceUrl,omitempty"`
-	DeviceName string `json:"deviceName,omitempty"`
+	CloudflareEnabled   bool   `json:"cloudflareEnabled,omitempty"`
+	CloudflaredPath     string `json:"cloudflaredPath,omitempty"`
+	CloudflareTokenFile string `json:"cloudflareTokenFile,omitempty"`
+	CloudflarePublicURL string `json:"cloudflarePublicUrl,omitempty"`
+	CloudflareListen    string `json:"cloudflareListen,omitempty"`
+	UIPath              string `json:"uiPath,omitempty"`
+	ServiceURL          string `json:"serviceUrl,omitempty"`
+	DeviceName          string `json:"deviceName,omitempty"`
 	// ManagedAgents remembers explicit backend setup; it is not an access permission.
 	ManagedAgents map[string]bool `json:"managedAgents,omitempty"`
 	DataDir       string          `json:"-"`
@@ -41,24 +49,21 @@ func Load(dir string) (Config, error) {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return c, err
 	}
-	data, err := os.ReadFile(filepath.Join(dir, "config.json"))
-	if err == nil {
-		if err = json.Unmarshal(data, &c); err != nil {
-			return c, fmt.Errorf("invalid config: %w", err)
-		}
-		// Older builds stored an enable switch. Preserve backend setup intent only;
-		// readiness now decides access, and a legacy false never blocks attachment.
-		if c.ManagedAgents == nil {
-			var legacy struct {
-				EnabledAgents map[string]bool `json:"enabledAgents"`
+	err := localstate.Get(filepath.Join(dir, "settings.db"), "config", &c)
+	if errors.Is(err, sql.ErrNoRows) {
+		// Preserve explicit settings from older builds without deleting their file.
+		data, readErr := os.ReadFile(filepath.Join(dir, "config.json"))
+		if readErr == nil {
+			if err = json.Unmarshal(data, &c); err != nil {
+				return c, fmt.Errorf("invalid legacy config: %w", err)
 			}
-			if json.Unmarshal(data, &legacy) == nil {
-				c.ManagedAgents = legacy.EnabledAgents
-			}
+		} else if !os.IsNotExist(readErr) {
+			return c, readErr
 		}
-	} else if !os.IsNotExist(err) {
+	} else if err != nil {
 		return c, err
 	}
+
 	c.DataDir = dir
 	return c, nil
 }
@@ -68,27 +73,7 @@ var saveMu sync.Mutex
 func (c Config) Save() error {
 	saveMu.Lock()
 	defer saveMu.Unlock()
-	data, err := json.MarshalIndent(c, "", "  ")
-	if err != nil {
-		return err
-	}
-	p := filepath.Join(c.DataDir, "config.json")
-	f, err := os.CreateTemp(c.DataDir, ".config-*")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(f.Name())
-	if err = f.Chmod(0600); err == nil {
-		_, err = f.Write(data)
-	}
-	closeErr := f.Close()
-	if err != nil {
-		return err
-	}
-	if closeErr != nil {
-		return closeErr
-	}
-	return os.Rename(f.Name(), p)
+	return localstate.Put(filepath.Join(c.DataDir, "settings.db"), "config", c)
 }
 
 func AccessKey(dir string) (string, error) {

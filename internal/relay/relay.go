@@ -39,11 +39,12 @@ type relayRoom struct {
 	clients map[string]*connection
 }
 type Server struct {
-	token     string
-	mu        sync.Mutex
-	rooms     map[string]*relayRoom
-	Authorize func(credential, host, role string) (string, bool)
-	Origins   []string
+	token            string
+	mu               sync.Mutex
+	rooms            map[string]*relayRoom
+	Authorize        func(credential, host, role string) (string, bool)
+	AuthorizeContext func(context.Context, string, string, string) (string, bool)
+	Origins          []string
 }
 
 func New(token string) *Server { return &Server{token: token, rooms: make(map[string]*relayRoom)} }
@@ -79,6 +80,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	authorized := s.token != "" && subtle.ConstantTimeCompare([]byte(credential), []byte(s.token)) == 1
 	if s.Authorize != nil {
 		deviceID, authorized = s.Authorize(credential, r.URL.Query().Get("id"), r.URL.Query().Get("role"))
+	}
+	if s.AuthorizeContext != nil {
+		deviceID, authorized = s.AuthorizeContext(r.Context(), credential, r.URL.Query().Get("id"), r.URL.Query().Get("role"))
 	}
 	if !authorized {
 		http.Error(w, "unauthorized", 401)
@@ -154,6 +158,16 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			case <-ctx.Done():
 				return
 			case <-t.C:
+				authorized := true
+				if s.AuthorizeContext != nil {
+					_, authorized = s.AuthorizeContext(ctx, credential, id, role)
+				} else if s.Authorize != nil {
+					_, authorized = s.Authorize(credential, id, role)
+				}
+				if !authorized {
+					_ = ws.Close(websocket.StatusPolicyViolation, "authorization expired or revoked")
+					return
+				}
 				pc, stop := context.WithTimeout(ctx, 10*time.Second)
 				err := ws.Ping(pc)
 				stop()

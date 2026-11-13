@@ -19,7 +19,9 @@ import (
 
 type Object = map[string]any
 type Pairing struct {
+	DiscoverTunnel          func(context.Context) (Pairing, error)
 	Relay, Host, Key, Token string
+	RouteName               string
 	ICE                     []string
 	RelayOnly               bool
 }
@@ -52,6 +54,7 @@ type cached struct {
 	bytes    int
 }
 type Client struct {
+	routes       []*Client
 	mu, sending  sync.Mutex
 	ctx          context.Context
 	cancel       context.CancelFunc
@@ -311,6 +314,12 @@ func (c *Client) response(b []byte) {
 	}
 }
 func (c *Client) Call(ctx context.Context, request Object) (any, error) {
+	if c.routes != nil {
+		if child := c.route(); child != nil {
+			return child.Call(ctx, request)
+		}
+		return nil, errors.New("所有连接均已断开，请等待重连")
+	}
 	ctx, cancel := context.WithTimeout(ctx, 40*time.Second)
 	defer cancel()
 	r := Object{}
@@ -418,6 +427,12 @@ func (c *Client) send(raw []byte) error {
 	return nil
 }
 func (c *Client) Path() string {
+	if c.routes != nil {
+		if r := c.route(); r != nil {
+			return r.Path()
+		}
+		return "Disconnected"
+	}
 	if c.ctx.Err() != nil {
 		return "Disconnected"
 	}
@@ -427,11 +442,30 @@ func (c *Client) Path() string {
 	if pc != nil && pc.Direct() {
 		return "P2P · WebRTC"
 	}
+	if c.p.RouteName != "" {
+		return "Relay · " + c.p.RouteName
+	}
 	return "Relay · encrypted"
 }
-func (c *Client) Connected() bool { return c.ctx.Err() == nil }
+func (c *Client) Connected() bool {
+	if c.routes != nil {
+		return c.ctx.Err() == nil && c.route() != nil
+	}
+	return c.ctx.Err() == nil
+}
 func (c *Client) Close() {
 	c.cancel()
+	if c.routes != nil {
+		c.mu.Lock()
+		rs := append([]*Client(nil), c.routes...)
+		c.mu.Unlock()
+		for _, r := range rs {
+			if r != nil {
+				r.Close()
+			}
+		}
+		return
+	}
 	c.ws.CloseNow()
 	c.mu.Lock()
 	pc := c.pc

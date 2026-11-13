@@ -1,4 +1,4 @@
-name: RAS
+name: Reign
 id: dev.agenthub.nsgo
 version: 0.1.0
 build_number: 1
@@ -13,4 +13,4 @@ android:
   permissions: [android.permission.INTERNET, android.permission.CAMERA]
 apple:
   info:
-    NSCameraUsageDescription: 扫描 RAS 设备二维码以连接电脑。
+    NSCameraUsageDescription: 扫描 Reign 设备二维码以连接电脑。

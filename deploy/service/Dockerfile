@@ -8,6 +8,7 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY internal/ ./internal/
+COPY pkg/ ./pkg/
 COPY cmd/agenthub-service/ ./cmd/agenthub-service/
 RUN mkdir -p /data && chown 65532:65532 /data
 RUN CGO_ENABLED=0 go build -trimpath -o /agenthub-service ./cmd/agenthub-service
@@ -19,4 +20,4 @@ COPY --from=ui /src/build/web /web
 VOLUME /data
 EXPOSE 26331/tcp 26330/tcp 26330/udp
 ENTRYPOINT ["/agenthub-service"]
-CMD ["--listen","0.0.0.0:26331","--state","/data/devices.json","--web","/web"]
+CMD ["--listen","0.0.0.0:26331","--state","/data/reign.db","--web","/web"]

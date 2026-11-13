@@ -27,3 +27,7 @@
 *.pem
 *.key
 /cloudflared-token
+
+# Python build helpers
+**/__pycache__/
+*.pyc

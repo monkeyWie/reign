@@ -47,3 +47,32 @@ func TestAccessKeyIsAtomicPrivateAndStable(t *testing.T) {
 		t.Fatal("empty authentication key accepted")
 	}
 }
+
+func TestSQLiteSettingsSurviveReload(t *testing.T) {
+	dir := t.TempDir()
+	c, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.ServiceURL = "https://instance.example"
+	c.CloudflareEnabled = true
+	c.DeviceName = "Reign desktop"
+	if err = c.Save(); err != nil {
+		t.Fatal(err)
+	}
+	// SQLite is authoritative; a stale JSON file must not reset saved settings.
+	if err = os.WriteFile(filepath.Join(dir, "config.json"), []byte(`{"serviceUrl":"https://old.example"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	again, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.ServiceURL != c.ServiceURL || again.DeviceName != c.DeviceName || !again.CloudflareEnabled {
+		t.Fatal("lost saved settings")
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, "settings.db"))
+	if err != nil || len(raw) < 16 || string(raw[:16]) != "SQLite format 3\x00" {
+		t.Fatal("settings are not SQLite", err)
+	}
+}

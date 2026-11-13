@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build a single RAS binary containing a fresh NSGo Web client and TCP/UDP STUN."""
+"""Build a single Reign binary containing a fresh NSGo Web client and TCP/UDP STUN."""
 import argparse
 import hashlib
 import json
@@ -17,8 +17,8 @@ ROOT = CLIENT.parents[1]
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--domain', default='ras.lihuipeng.love')
-    parser.add_argument('--version', default='0.1.0-ras.embedded.20261113')
+    parser.add_argument('--domain', default='reign.example.com')
+    parser.add_argument('--version', default='0.1.0-reign.embedded.20261113')
     args = parser.parse_args()
     if not re.fullmatch(r'[a-zA-Z0-9](?:[a-zA-Z0-9.-]*[a-zA-Z0-9])?', args.domain):
         parser.error('domain must be an ASCII hostname without scheme, port or path')
@@ -31,7 +31,7 @@ def main():
     for key in ('GOOS', 'GOARCH', 'GOAMD64', 'CGO_ENABLED', 'AGENTHUB_SERVICE'):
         env.pop(key, None)
     checksums = []
-    with tempfile.TemporaryDirectory(prefix='ras-public-build-') as temp:
+    with tempfile.TemporaryDirectory(prefix='reign-public-build-') as temp:
         work = Path(temp)
         output = work / 'nsgo'
         subprocess.run(['sh', 'scripts/build.sh', 'web', '-output', str(output)],
@@ -51,27 +51,28 @@ def main():
         for filename in ('go.mod', 'go.sum'):
             shutil.copy2(ROOT / filename, stage / filename)
         shutil.copytree(ROOT / 'internal', stage / 'internal')
-        shutil.copytree(ROOT / 'cmd/ras-server', stage / 'cmd/ras-server')
+        shutil.copytree(ROOT / 'pkg', stage / 'pkg')
+        shutil.copytree(ROOT / 'cmd/reign-server', stage / 'cmd/reign-server')
         embedded = stage / 'internal/webui/assets'
         shutil.rmtree(embedded)
         shutil.copytree(web, embedded)
         for arch in ('amd64', 'arm64'):
-            name = f'ras-server-{args.version}-linux-{arch}'
+            name = f'reign-server-{args.version}-linux-{arch}'
             bundle = work / name
             bundle.mkdir()
             buildenv = dict(env, GOOS='linux', GOARCH=arch, GOAMD64='v1', CGO_ENABLED='0')
-            subprocess.run(['go', 'build', '-trimpath', '-ldflags=-s -w', '-o', str(bundle / 'ras-server'), './cmd/ras-server'],
+            subprocess.run(['go', 'build', '-trimpath', '-ldflags=-s -w', '-o', str(bundle / 'reign-server'), './cmd/reign-server'],
                            cwd=stage, env=buildenv, check=True)
-            for template in ('README.md', 'nginx.conf.example', 'ras-server.service'):
+            for template in ('README.md', 'nginx.conf.example', 'reign-server.service'):
                 source = CLIENT / 'deploy/service' / template
                 (bundle / template).write_text(source.read_text().replace('@DOMAIN@', args.domain))
-            (bundle / 'ras-server').chmod(0o755)
+            (bundle / 'reign-server').chmod(0o755)
             (bundle / 'release.json').write_text(json.dumps({
                 'version': args.version, 'os': 'linux', 'arch': arch, 'web': 'NSGo',
                 'domain': args.domain, 'defaultListen': ':26331',
                 'applicationTCPPort': 26331, 'stunTCPPort': 26330, 'stunUDPPort': 26330,
                 'tlsRequired': False, 'directTransports': ['webrtc-udp', 'native-tcp'],
-                'product': 'RAS', 'executable': 'ras-server', 'webEmbedded': True,
+                'product': 'Reign', 'executable': 'reign-server', 'webEmbedded': True,
                 'webSHA256': hashlib.sha256((web / manifest['wasm']).read_bytes()).hexdigest(),
             }, indent=2) + '\n')
             files = sorted(p for p in bundle.rglob('*') if p.is_file())
@@ -83,7 +84,7 @@ def main():
             digest = hashlib.sha256(archive.read_bytes()).hexdigest()
             checksums.append(f'{digest}  {archive.name}\n')
             print(f'Built {archive} ({archive.stat().st_size / (1 << 20):.1f} MiB)', flush=True)
-    (releases / f'ras-server-{args.version}-SHA256SUMS').write_text(''.join(checksums))
+    (releases / f'reign-server-{args.version}-SHA256SUMS').write_text(''.join(checksums))
 
 
 if __name__ == '__main__':

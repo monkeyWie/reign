@@ -1,4 +1,4 @@
-# RAS · NSGo 客户端
+# Reign · NSGo 客户端
 
 这是独立于 `../flutter` 的原生 Go UI 实现。旧 Flutter UI 保留；复用根模块 Go 后端。网络层增加了原生 TCP P2P 与 TCP STUN，Provider 和 Agent 接入逻辑没有变更。
 
@@ -35,12 +35,12 @@ AGENTHUB_NSGO_DEMO=1 GOWORK=off go tool nsgo dev
 也可以直接启动已构建的 macOS 包：
 
 ```sh
-'dist/RAS-0.1.0-macos_arm64/RAS.app/Contents/MacOS/RAS'
+'dist/Reign-0.1.0-macos_arm64/Reign.app/Contents/MacOS/Reign'
 ```
 
 NSGo 应用 ID 是 `dev.agenthub.nsgo`，其本地设备身份和缓存与旧 Flutter 应用隔离。开发时可用 `AGENTHUB_NSGO_DATA_DIR` 指定独立测试目录。
 
-原生客户端默认服务为 `https://ras.lihuipeng.love`。可以在界面里改服务，或在第一次启动前设置运行环境变量 `AGENTHUB_SERVER_URL`。改变默认构建值：
+原生客户端默认服务为 `http://127.0.0.1:26331`（本机自部署）。可以在界面里改服务，或在第一次启动前设置运行环境变量 `AGENTHUB_SERVER_URL`。改变默认构建值：
 
 ```sh
 AGENTHUB_SERVER_URL=https://example.com ./scripts/build.sh macos_arm64,android_arm64
@@ -72,13 +72,13 @@ Android 构建中，现有 Pion 依赖 `anet` 引用 Go 私有 zone cache，和�
 - iOS IPA 已构建但未签名；安装到真机、TestFlight 或发布需要 Apple 签名配置。
 - Windows、Linux 包已交叉构建，尚未在对应真机运行。
 
-发布版 `ras-server` 默认内嵌 RAS Web，执行 `./ras-server` 即可使用。`--no-web` 可关闭页面。以下外部目录方式仅用于开发时覆盖内嵌资源：
+发布版 `reign-server` 默认内嵌 Reign Web，执行 `./reign-server` 即可使用。`--no-web` 可关闭页面。以下外部目录方式仅用于开发时覆盖内嵌资源：
 
 ```sh
-ras-server -listen :26331 -stun-listen :26330 -tcp-stun-listen :26330 \
-  -state ./data/devices.json \
-  -origins https://ras.lihuipeng.love \
-  -web '/path/to/RAS-0.1.0-web'
+reign-server -listen :26331 -stun-listen :26330 -tcp-stun-listen :26330 \
+  -state ./data/reign.db \
+  -origins https://reign.example.com \
+  -web '/path/to/Reign-0.1.0-web'
 ```
 
 HTTP/WS 可直接访问，也可用 Nginx 提供 HTTPS/WSS 并反代 26331。TCP 和 UDP STUN 的 26330 端口单独直达，不走普通 HTTP 反代。
@@ -89,7 +89,7 @@ HTTP/WS 可直接访问，也可用 Nginx 提供 HTTPS/WSS 并反代 26331。TCP
 python3 scripts/package-service.py --domain ras.lihuipeng.love
 ```
 
-输出在 `dist/server-releases/`，有 amd64 和 arm64 两种架构，Web 已内嵌在 `ras-server`，包含 Nginx、systemd 示例和 SHA256 清单，不需要启动脚本或外部 Web 目录。客户端填写 `http://公网IP:26331`，或配置反代后填写 `https://ras.lihuipeng.love`。TCP/UDP 26330 均单独直达。详见 [服务部署说明](deploy/service/README.md)。
+输出在 `dist/server-releases/`，有 amd64 和 arm64 两种架构，Web 已内嵌在 `reign-server`，包含 Nginx、systemd 示例和 SHA256 清单，不需要启动脚本或外部 Web 目录。客户端填写 `http://公网IP:26331`，或配置反代后填写 `https://reign.example.com`。TCP/UDP 26330 均单独直达。详见 [服务部署说明](deploy/service/README.md)。
 
 ## 界面和同步
 

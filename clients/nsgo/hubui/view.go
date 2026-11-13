@@ -231,7 +231,7 @@ func (s *State) navigation(cx *core.Scope, compact bool) core.Node {
 	if compact {
 		nodes = append(nodes, button(cx, "home", "", lucide.Command, "ghost", func() { s.selectDevice("") }), button(cx, "connect-device", "", lucide.Plus, "ghost", openConnect))
 	} else {
-		title := label(cx, "RAS", 19, false)
+		title := label(cx, "Reign", 19, false)
 		title.Style.FontWeight = core.FontWeightBold
 		nodes = append(nodes, core.View{Style: core.Style{Padding: core.Symmetric(20, 8)}, Children: []core.Node{row(glyph(cx, lucide.Command, 22), title)}})
 		if s.api.CanHost() {

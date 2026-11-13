@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/monkeyWie/reign/clients/nsgo/browserclient"
+	"github.com/monkeyWie/reign/pkg/link"
 	"strings"
 	"sync"
 	"time"
@@ -218,7 +219,29 @@ func (a *API) connect(ctx context.Context, p Object) (any, error) {
 		policy, _ = post(short, service, "", "/v2/network", Object{})
 		cancel()
 	}
-	c, e := browserclient.Connect(ctx, browserclient.Pairing{Relay: strings.Replace(service, "http", "ws", 1), Host: str(d, "id"), Key: str(s, "key"), Token: token, ICE: browserclient.STUN(policy), RelayOnly: p["relayOnly"] == true})
+	fresh, err := post(ctx, service, token, "/v2/resolve", Object{"connectionId": str(d, "connectionId")})
+	var alternate browserclient.Pairing
+	if err == nil {
+		if endpoint, err := link.PublicEndpoint(str(obj(fresh["device"]), "tunnelUrl")); err == nil && endpoint != "" {
+			alternate = browserclient.Pairing{Relay: strings.Replace(endpoint, "https", "wss", 1), Host: str(d, "id"), Key: str(s, "key"), Token: link.TunnelToken(str(s, "key"), str(d, "id"), str(i, "id")), ICE: browserclient.STUN(policy), RelayOnly: p["relayOnly"] == true}
+		}
+	}
+	discover := func(ctx context.Context) (browserclient.Pairing, error) {
+		fresh, err := post(ctx, service, token, "/v2/resolve", Object{"connectionId": str(d, "connectionId")})
+		if err != nil {
+			return browserclient.Pairing{}, err
+		}
+		target := obj(fresh["device"])
+		if str(target, "id") != str(d, "id") || str(target, "public") != str(d, "public") {
+			return browserclient.Pairing{}, errors.New("设备身份已变化")
+		}
+		endpoint, err := link.PublicEndpoint(str(target, "tunnelUrl"))
+		if err != nil || endpoint == "" {
+			return browserclient.Pairing{}, err
+		}
+		return browserclient.Pairing{Relay: strings.Replace(endpoint, "https", "wss", 1), Host: str(d, "id"), Key: str(s, "key"), Token: link.TunnelToken(str(s, "key"), str(d, "id"), str(i, "id")), ICE: browserclient.STUN(policy), RelayOnly: p["relayOnly"] == true}, nil
+	}
+	c, e := browserclient.ConnectRoutes(ctx, browserclient.Pairing{DiscoverTunnel: discover, Relay: strings.Replace(service, "http", "ws", 1), Host: str(d, "id"), Key: str(s, "key"), Token: token, ICE: browserclient.STUN(policy), RelayOnly: p["relayOnly"] == true}, alternate)
 	if e != nil {
 		return nil, e
 	}

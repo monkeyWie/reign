@@ -14,7 +14,7 @@ services:
       - "${AGENTHUB_TCP_STUN_PORT:-26330}:26330/tcp"
     command:
       - "--listen=0.0.0.0:26331"
-      - "--state=/data/devices.json"
+      - "--state=/data/reign.db"
       - "--web=/web"
       - "--stun-public=${AGENTHUB_STUN_URL:-}"
       - "--tcp-stun-public=${AGENTHUB_TCP_STUN_ADDRESS:-}"

@@ -11,6 +11,7 @@ import (
 	"github.com/monkeyWie/reign/internal/deviceservice"
 	"github.com/monkeyWie/reign/internal/remote"
 	"github.com/monkeyWie/reign/internal/store"
+	"github.com/monkeyWie/reign/pkg/link"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -214,7 +215,28 @@ func (h *Hub) connect(ctx context.Context, service, code, public, password, name
 		opts.ICEServers = policy.Servers()
 		opts.TCPSTUN = policy.TCPSTUN
 	}
-	c, e := remote.Connect(connectCtx, remote.Pairing{Relay: "ws" + strings.TrimPrefix(service, "http"), Host: d.ID, Key: s.Key, RelayToken: i.Token}, opts)
+	// Refresh after the grant exists; the directory hides routes from unpaired devices.
+	_ = device.Post(connectCtx, service, i.Token, "/v2/resolve", map[string]any{"connectionId": code}, &r)
+	var alt remote.Pairing
+	if endpoint, err := link.PublicEndpoint(r.Device.TunnelURL); err == nil && endpoint != "" {
+		alt = remote.Pairing{Relay: strings.Replace(endpoint, "https", "wss", 1), Host: d.ID, Key: s.Key, RelayToken: link.TunnelToken(s.Key, d.ID, i.ID)}
+	}
+	opts.DiscoverTunnel = func(ctx context.Context) (remote.Pairing, error) {
+		var response struct{ Device deviceservice.Device }
+		if err := device.Post(ctx, service, i.Token, "/v2/resolve", map[string]any{"connectionId": code}, &response); err != nil {
+			return remote.Pairing{}, err
+		}
+		endpoint, err := link.PublicEndpoint(response.Device.TunnelURL)
+		if err != nil || endpoint == "" {
+			return remote.Pairing{}, err
+		}
+		// Device identity must remain pinned even when an address is rediscovered.
+		if response.Device.ID != d.ID || response.Device.Public != d.Public {
+			return remote.Pairing{}, fmt.Errorf("设备身份已变化")
+		}
+		return remote.Pairing{Relay: strings.Replace(endpoint, "https", "wss", 1), Host: d.ID, Key: s.Key, RelayToken: link.TunnelToken(s.Key, d.ID, i.ID)}, nil
+	}
+	c, e := remote.ConnectRoutes(connectCtx, remote.Pairing{Relay: "ws" + strings.TrimPrefix(service, "http"), Host: d.ID, Key: s.Key, RelayToken: i.Token}, alt, opts)
 	if e != nil {
 		return s, e
 	}
