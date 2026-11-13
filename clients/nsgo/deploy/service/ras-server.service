@@ -1,0 +1,24 @@
+# Install the extracted bundle at /opt/ras, then install this file in /etc/systemd/system/.
+[Unit]
+Description=RAS device, signaling, relay and NSGo Web service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/ras
+ExecStart=/opt/ras/ras-server --state /var/lib/ras/devices.json
+DynamicUser=yes
+StateDirectory=ras
+StateDirectoryMode=0700
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+UMask=0077
+Restart=always
+RestartSec=3
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

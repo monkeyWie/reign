@@ -1,0 +1,2 @@
+# Local only. Copy to .dev.vars and replace this value.
+AGENTHUB_RELAY_TOKEN="replace-with-a-random-token-at-least-32-characters"

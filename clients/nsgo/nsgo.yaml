@@ -1,0 +1,16 @@
+name: RAS
+id: dev.agenthub.nsgo
+version: 0.1.0
+build_number: 1
+dev:
+  target: native
+build:
+  output: dist
+  installers: false
+  jobs: 1
+  targets: [macos_arm64, windows_x64, linux_x64, ios, android_arm64, web]
+android:
+  permissions: [android.permission.INTERNET, android.permission.CAMERA]
+apple:
+  info:
+    NSCameraUsageDescription: 扫描 RAS 设备二维码以连接电脑。

@@ -1,0 +1,5 @@
+/dist/
+/.nsgo/
+/hubui/.nsgo/
+/webapi/.nsgo/
+/browserclient/.nsgo/

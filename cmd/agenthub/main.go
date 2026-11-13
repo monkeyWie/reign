@@ -1,0 +1,33 @@
+// Legacy MyGo UI. The maintained desktop app is clients/flutter.
+package main
+
+import (
+	"context"
+	"flag"
+	"log"
+
+	"github.com/monkeyWie/reign/internal/app"
+	"github.com/monkeyWie/reign/internal/config"
+	"github.com/monkeyWie/reign/internal/desktop"
+)
+
+func main() {
+	dir := flag.String("data-dir", config.DefaultDir(), "private configuration directory")
+	flag.Parse()
+	c, err := config.Load(*dir)
+	if err != nil {
+		log.Fatal(err)
+	}
+	key, err := config.AccessKey(c.DataDir)
+	if err != nil {
+		log.Fatal(err)
+	}
+	embedded, err := app.StartEmbedded(context.Background(), c)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer embedded.Close()
+	if err = desktop.Run(c, key, embedded); err != nil {
+		log.Print(err)
+	}
+}

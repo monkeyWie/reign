@@ -1,0 +1,22 @@
+services:
+  agenthub:
+    build:
+      context: ../..
+      dockerfile: deploy/service/Dockerfile
+    restart: unless-stopped
+    volumes:
+      - device-data:/data
+    expose:
+      - "26331"
+    ports:
+      - "${AGENTHUB_HTTP_PORT:-26331}:26331/tcp"
+      - "${AGENTHUB_STUN_PORT:-26330}:26330/udp"
+      - "${AGENTHUB_TCP_STUN_PORT:-26330}:26330/tcp"
+    command:
+      - "--listen=0.0.0.0:26331"
+      - "--state=/data/devices.json"
+      - "--web=/web"
+      - "--stun-public=${AGENTHUB_STUN_URL:-}"
+      - "--tcp-stun-public=${AGENTHUB_TCP_STUN_ADDRESS:-}"
+volumes:
+  device-data:

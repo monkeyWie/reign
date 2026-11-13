@@ -1,0 +1,12 @@
+.git
+build
+**/build
+**/.dart_tool
+**/Pods
+**/.symlinks
+**/node_modules
+**/jniLibs
+**/*.xcframework
+**/local.properties
+**/.DS_Store
+**/*.log

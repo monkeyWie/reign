@@ -1,0 +1,201 @@
+// Package bridge is a JSON request boundary for Flutter FFI and gomobile.
+package bridge
+
+import (
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/monkeyWie/reign/internal/app"
+	"github.com/monkeyWie/reign/internal/clienthub"
+	"github.com/monkeyWie/reign/internal/config"
+	"github.com/monkeyWie/reign/internal/control"
+)
+
+var mu sync.Mutex
+var hostMu sync.Mutex
+var lifecycle sync.RWMutex
+var bridgeContext, cancelBridge = context.WithCancel(context.Background())
+var hubs = map[string]*clienthub.Hub{}
+var hosts = map[string]*app.Embedded{}
+var shuttingDown bool
+
+func embeddedHost(dir, uiPath string) (*app.Embedded, error) {
+	hostMu.Lock()
+	defer hostMu.Unlock()
+	if shuttingDown {
+		return nil, fmt.Errorf("RAS 已退出")
+	}
+	if h := hosts[dir]; h != nil {
+		return h, nil
+	}
+	c, err := config.Load(dir)
+	if err != nil {
+		return nil, err
+	}
+	if uiPath != "" && runtime.GOOS == "darwin" {
+		c.UIPath = filepath.Clean(uiPath)
+		if err := c.Save(); err != nil {
+			return nil, err
+		}
+	}
+	// The lifetime belongs to the application, never to a short-lived FFI call.
+	h, err := app.StartEmbedded(context.Background(), c)
+	if err != nil {
+		return nil, err
+	}
+	hosts[dir] = h
+	return h, nil
+}
+
+// Shutdown is called once by the native application when it actually quits.
+// Hiding a window does not unload the Go runtime or stop its connections.
+func Shutdown() {
+	cancelBridge()
+	lifecycle.Lock()
+	defer lifecycle.Unlock()
+	hostMu.Lock()
+	shuttingDown = true
+	for _, h := range hosts {
+		_ = h.Close()
+	}
+	hosts = map[string]*app.Embedded{}
+	hostMu.Unlock()
+	mu.Lock()
+	defer mu.Unlock()
+	for _, h := range hubs {
+		_ = h.Close()
+	}
+	hubs = map[string]*clienthub.Hub{}
+}
+
+func Call(raw string) string {
+	lifecycle.RLock()
+	defer lifecycle.RUnlock()
+	if bridgeContext.Err() != nil {
+		return answer(nil, fmt.Errorf("RAS 已退出"))
+	}
+	var in struct {
+		Method, DataDir, HostDir, UIPath, Target string
+		Params                                   json.RawMessage
+		Request                                  control.Request
+	}
+	if e := json.Unmarshal([]byte(raw), &in); e != nil {
+		return answer(nil, e)
+	}
+	if in.DataDir == "" {
+		return answer(nil, fmt.Errorf("missing private data directory"))
+	}
+	mu.Lock()
+	h := hubs[in.DataDir]
+	if h == nil {
+		var e error
+		h, e = clienthub.New(in.DataDir)
+		if e != nil {
+			mu.Unlock()
+			return answer(nil, e)
+		}
+		hubs[in.DataDir] = h
+	}
+	mu.Unlock()
+	ctx, cancel := context.WithTimeout(bridgeContext, 140*time.Second)
+	defer cancel()
+	var p struct {
+		Service, Code, Public, Password, Name, ID, Provider string
+		Remember, RelayOnly                                 bool
+	}
+	if len(in.Params) > 0 {
+		if e := json.Unmarshal(in.Params, &p); e != nil {
+			return answer(nil, e)
+		}
+	}
+	var out any
+	var e error
+	switch in.Method {
+	case "client.assetCache.get", "client.assetCache.put", "client.assetCache.clear":
+		var params struct{ Key, Data string }
+		if err := json.Unmarshal(in.Params, &params); err != nil {
+			return answer(nil, err)
+		}
+		switch in.Method {
+		case "client.assetCache.get":
+			var b []byte
+			b, e = h.Assets.Get(in.Target, params.Key)
+			if e == nil && b != nil {
+				out = map[string]any{"data": base64.StdEncoding.EncodeToString(b)}
+			}
+		case "client.assetCache.put":
+			if len(params.Data) > 70<<20 {
+				return answer(nil, fmt.Errorf("附件超过缓存上限"))
+			}
+			var b []byte
+			b, e = base64.StdEncoding.DecodeString(params.Data)
+			if e == nil {
+				e = h.Assets.Put(in.Target, params.Key, b)
+			}
+		case "client.assetCache.clear":
+			e = h.Assets.Clear(in.Target)
+		}
+	case "client.list":
+		out, e = h.List()
+	case "client.connect":
+		_, e = h.Connect(ctx, p.Service, p.Code, p.Public, p.Password, p.Name, p.Remember, p.RelayOnly)
+		if e == nil {
+			out, e = h.List()
+		}
+	case "client.reconnect":
+		_, e = h.Reconnect(ctx, p.ID)
+		if e == nil {
+			out, e = h.List()
+		}
+	case "client.disconnect":
+		e = h.Disconnect(p.ID)
+	case "client.forget":
+		e = h.Forget(p.ID)
+	case "client.sync":
+		out, e = h.Sync(ctx, in.Target, p.Provider)
+	case "client.call":
+		out, e = h.Call(ctx, in.Target, in.Request)
+	default:
+		if runtime.GOOS == "android" || runtime.GOOS == "ios" {
+			e = fmt.Errorf("移动端只提供远控功能")
+			break
+		}
+		if !strings.HasPrefix(in.Method, "host.") && in.Method != "providers" {
+			e = fmt.Errorf("unknown bridge method")
+			break
+		}
+		dir := in.HostDir
+		if dir == "" {
+			dir = config.DefaultDir()
+		}
+		embedded, err := embeddedHost(dir, in.UIPath)
+		if err != nil {
+			return answer(nil, err)
+		}
+		if in.Method == "host.bootstrap" {
+			out = map[string]any{"ready": true, "pid": os.Getpid(), "transport": "ffi"}
+		} else {
+			r := in.Request
+			r.Method = in.Method
+			r.Params = in.Params
+			e = embedded.Call(ctx, r, &out)
+		}
+	}
+	return answer(out, e)
+}
+func answer(v any, e error) string {
+	out := map[string]any{"result": v}
+	if e != nil {
+		out = map[string]any{"error": e.Error()}
+	}
+	b, _ := json.Marshal(out)
+	return string(b)
+}

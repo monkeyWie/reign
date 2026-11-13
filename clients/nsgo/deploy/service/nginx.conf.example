@@ -1,0 +1,33 @@
+# Include inside Nginx's http block; replace certificate paths before loading.
+map $http_upgrade $ras_connection_upgrade {
+    default upgrade;
+    '' close;
+}
+
+server {
+    listen 443 ssl;
+    server_name @DOMAIN@;
+    ssl_certificate /etc/letsencrypt/live/@DOMAIN@/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/@DOMAIN@/privkey.pem;
+
+    gzip on;
+    gzip_vary on;
+    gzip_min_length 1024;
+    gzip_types application/wasm application/javascript text/javascript application/json;
+
+    location / {
+        proxy_pass http://127.0.0.1:26331;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $ras_connection_upgrade;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+        proxy_buffering off;
+    }
+}
+
+# Both TCP and UDP 26330 are STUN probes, exposed directly (not HTTP proxy).
+# With this proxy, optionally set RAS_LISTEN=127.0.0.1:26331.

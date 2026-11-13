@@ -1,0 +1,160 @@
+package hubui
+
+import (
+	_ "github.com/nsgo-dev/nsgo"
+	"github.com/nsgo-dev/nsgo/core"
+	"github.com/nsgo-dev/nsgo/nsgotest"
+	"testing"
+	"time"
+)
+
+func TestMain(m *testing.M) { nsgotest.Main(m) }
+func startDemo(t *testing.T, w, h core.Points) *nsgotest.App {
+	t.Helper()
+	return nsgotest.Start(t, func(cx *core.Scope) core.Node { return RootWithAPI(cx, newDemoAPI(), true) }, nsgotest.Size(w, h), nsgotest.Environment(core.Environment{OS: core.OSMacOS, Idiom: core.IdiomDesktop, Locale: "zh-CN"}))
+}
+func openDemoChat(t *testing.T, app *nsgotest.App) {
+	t.Helper()
+	app.WaitFor("id:device-demo-device", 3*time.Second)
+	app.Press("id:device-demo-device")
+	app.WaitFor("id:session-demo-chat", 5*time.Second)
+	app.Press("id:session-demo-chat")
+	app.WaitFor("id:chat-input", 3*time.Second)
+	app.WaitFor("id:message-demo-turn|demo-assistant", 5*time.Second)
+}
+func TestDesktopNavigationAndDrafts(t *testing.T) {
+	app := startDemo(t, 1320, 880)
+	app.WaitFor("id:local-dashboard", 3*time.Second)
+	app.Screenshot("desktop-dashboard")
+	openDemoChat(t, app)
+	if width := app.Find("id:session-sidebar").Frame.Size.Width; width != 300 {
+		t.Fatalf("session sidebar width = %v", width)
+	}
+	app.Type("id:chat-input", "未发送的草稿")
+	inputID := app.Find("id:chat-input").ID
+	// The two-second catalogue poll must preserve the mounted input and draft.
+	time.Sleep(2100 * time.Millisecond)
+	app.Settle()
+	if app.Find("id:chat-input").ID != inputID {
+		t.Fatal("poll rebuilt editor")
+	}
+	app.Press("id:session-demo-cli")
+	app.WaitFor("id:chat-input", 3*time.Second)
+	app.Press("id:session-demo-chat")
+	app.WaitUntil(3*time.Second, func() bool { return app.Find("id:chat-input").Text == "未发送的草稿" })
+	app.Screenshot("desktop-conversation")
+	app.Press("id:theme-toggle")
+	app.Screenshot("desktop-dark")
+	app.Press("id:model-selector")
+	app.Find("role:button GPT-5.3 Codex")
+	app.Press("role:button GPT-5.3 Codex")
+	app.Find("text:GPT-5.3 Codex")
+	app.Press("id:connect-device")
+	app.Find("id:dialog-connect")
+	app.Press("id:dialog-cancel")
+}
+func TestPhoneNavigation(t *testing.T) {
+	app := startDemo(t, 390, 844)
+	openDemoChat(t, app)
+	if app.Exists("id:session-sidebar") {
+		t.Fatal("phone shows conversation and sessions at once")
+	}
+	if width := app.Find("id:composer-card").Frame.Size.Width; width > 390 || width < 350 {
+		t.Fatal("composer overflows phone")
+	}
+	if app.Exists("id:device-sidebar") {
+		t.Fatal("phone chat retains device sidebar")
+	}
+	app.Type("id:chat-input", "手机草稿")
+	app.Screenshot("phone-conversation")
+	app.Press("id:back-sessions")
+	app.Find("id:session-sidebar")
+	app.Screenshot("phone-sessions")
+	app.Press("id:session-demo-chat")
+	app.WaitUntil(time.Second, func() bool { return app.Find("id:chat-input").Text == "手机草稿" })
+	app.Back()
+	app.Find("id:session-sidebar")
+	app.Back()
+	app.Find("id:mobile-devices")
+	app.Find("text:工作电脑")
+	app.Find("text:ID 123456")
+	app.Find("text:P2P · WebRTC")
+	// Returning to the same device must reopen its sessions, not silently return.
+	app.Press("id:device-demo-device")
+	app.Find("id:session-sidebar")
+	app.Press("id:back-devices")
+	app.Find("id:mobile-devices")
+}
+func TestComposerSubmit(t *testing.T) {
+	app := startDemo(t, 1320, 880)
+	openDemoChat(t, app)
+	app.Type("id:chat-input", "这是演示测试")
+	app.Submit("id:chat-input")
+	app.WaitUntil(3*time.Second, func() bool { return app.Find("id:chat-input").Text == "" })
+}
+
+func TestDeviceCopyFeedback(t *testing.T) {
+	app := startDemo(t, 1320, 880)
+	app.WaitFor("id:device-code", 3*time.Second)
+	app.WaitUntil(3*time.Second, func() bool { return app.Find("id:device-code").Text == "266 556" })
+	app.Press("id:copy-device-id")
+	if app.Clipboard != "266556" {
+		t.Fatalf("copied %q, want unformatted device ID", app.Clipboard)
+	}
+	if app.Exists("id:notice") {
+		t.Fatal("copy must not show a corner notification")
+	}
+	app.Find("role:button 已复制")
+	app.Screenshot("device-copy-feedback")
+	app.WaitUntil(3*time.Second, func() bool { return app.Exists("role:button 复制 ID") && !app.Exists("id:notice") })
+	app.Press("id:copy-device-id")
+	app.Find("role:button 已复制")
+	app.Press("id:copy-device-id")
+	app.WaitUntil(3*time.Second, func() bool { return app.Exists("role:button 复制 ID") && !app.Exists("id:notice") })
+}
+
+func TestLiveStatusAndEditorStability(t *testing.T) {
+	app := nsgotest.Start(t, func(cx *core.Scope) core.Node {
+		cx.SetTheme(core.DefaultTheme())
+		s := newState(cx, newDemoAPI())
+		s.devices = []Object{{"id": "fixture", "connected": true}}
+		s.target = "fixture"
+		s.selected = Object{"id": "fixture-session", "providerId": "codex-app"}
+		s.models = []Object{{"id": "test", "name": "Test model"}}
+		s.model = "test"
+		turn := Object{"id": "t", "status": "inProgress", "items": []Object{{"id": "u", "role": "user", "text": "测试输入"}}}
+		s.setTranscript(Object{"turns": []Object{turn}})
+		return core.View{Style: fill, Children: []core.Node{button(cx, "fixture-output", "输出正文", nil, "outline", func() {
+			turn["items"] = []Object{{"id": "u", "role": "user", "text": "测试输入"}, {"id": "a", "role": "assistant", "text": "正在检查文件。"}, {"id": "tool", "role": "tool", "status": "inProgress", "activities": []Object{{"kind": "read", "title": "读取文件", "detail": "fixture.go"}}}}
+			s.setTranscript(Object{"turns": []Object{turn}})
+		}), button(cx, "fixture-complete", "完成", nil, "outline", func() { turn["status"] = "completed"; s.setTranscript(Object{"turns": []Object{turn}}) }), s.conversation(cx, false)}}
+	}, nsgotest.Size(900, 800))
+	if !app.Exists("text:Thinking…") {
+		t.Fatal("initial thinking missing")
+	}
+	app.Type("id:chat-input", "保留输入")
+	before := app.Find("id:chat-input").ID
+	app.Press("id:fixture-output")
+	app.Find("id:tool-group")
+	if app.Exists("text:Thinking…") {
+		t.Fatal("thinking persisted after public output")
+	}
+	if app.Exists("id:message-actions-t|a") {
+		t.Fatal("live output has copy footer")
+	}
+	if app.Exists("text:fixture.go") {
+		t.Fatal("tool details are expanded by default")
+	}
+	if app.Find("id:chat-input").ID != before || app.Find("id:chat-input").Text != "保留输入" {
+		t.Fatal("stream rebuilt input")
+	}
+	app.Press("role:button 正在读取文件")
+	app.Find("text:fixture.go")
+	app.Screenshot("live-activity")
+	app.Press("id:fixture-complete")
+	if app.Exists("id:tool-group") {
+		t.Fatal("completed turn retained tool details")
+	}
+	app.Hover("id:message-t|a")
+	app.Find("id:message-actions-t|a")
+}
