@@ -222,7 +222,11 @@ func TestStoppedRuntimeRestoresAddressAndDropsUnmatchedDesktop(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	before.Desktop = []provider.Instance{{PID: 42, StartedAt: "obsolete", Path: "/nonexistent/Agent.app"}}
+	// Backend address restoration is portable; admitting or discarding a
+	// macOS App instance is only supported by the macOS discovery adapter.
+	if runtime.GOOS == "darwin" {
+		before.Desktop = []provider.Instance{{PID: 42, StartedAt: "obsolete", Path: "/nonexistent/Agent.app"}}
+	}
 	if err := device.Save(first.runtimeFile(), before); err != nil {
 		t.Fatal(err)
 	}
