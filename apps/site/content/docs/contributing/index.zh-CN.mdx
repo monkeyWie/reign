@@ -1,0 +1,39 @@
+---
+title: 参与贡献
+description: 从可复现的问题、清晰的边界和可验证的改动开始。
+---
+
+## 贡献什么
+
+欢迎改进文档、无障碍和 UI，修复连接／同步问题，增加测试或接入新的 Provider。较大的产品行为变动请先开 issue 讨论范围；小修复可以直接提交 PR。
+
+开源仓库采用 MIT 许可。请确认你有权贡献代码，不提交第三方私有源码、凭据或用户真实会话。
+
+## 开发入口
+
+<Cards>
+  <Card title="本地开发" href="/docs/contributing/development">
+    Go、原生 UI、Web 和 Worker 的启动与检查。
+  </Card>
+  <Card title="添加 Provider" href="/docs/contributing/providers">
+    扩展 Agent，不复制设备管理与连接逻辑。
+  </Card>
+  <Card title="写文档" href="/docs/contributing/documentation">
+    用 MDX、侧栏元数据和可验证示例维护站点。
+  </Card>
+</Cards>
+
+## 提交与 PR 标准
+
+- 一个 PR 聚焦一个可说明的目标，避免夹带格式化或无关重构。
+- 提交信息说明结果，例如 `Fix reconnect snapshot gaps`，不要只写 `update`。
+- PR 描述包含触发条件、修改后的行为、验证方式，以及已知限制。
+- UI 改动附桌面和窄屏截图；网络改动覆盖直连、回退和断线恢复；协议变动同步两端。
+- 使用隔离 fixture 和临时数据库测试，不运行或改写贡献者的真实 Agent 会话。
+- 不提交构建产物、数据库、签名密钥、OAuth Token 或本地配置。
+
+## 代码与发布
+
+Go 使用 `gofmt`，TypeScript／MDX 使用仓库的 Prettier。修改相关能力后运行对应测试，再运行 CI 规定的检查。仅构建成功不等于真实平台已验证。
+
+main 的 CI 产物是开发预览；维护者创建版本 tag 后才发布 Release。不要移动已经发布的 tag。详细命令见[本地开发](/docs/contributing/development)。

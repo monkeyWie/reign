@@ -1,28 +1,28 @@
 ---
-title: 数据、安全与隐私
-description: 谁持有密钥、云端存什么，以及如何撤销设备。
+title: Data, security and privacy
+description: Who holds the keys, what the cloud stores and how to revoke access.
 ---
 
-## 端到端加密
+## End-to-end encryption
 
-配对使用 X25519、HKDF 和 AES-GCM 建立密钥材料；业务通信使用新鲜的双向 AEAD 密钥并处理重放。配对私钥保存在设备本地。
+Pairing uses X25519, HKDF and AES-GCM to establish key material. Application traffic uses fresh, directional AEAD keys with replay protection. Pairing private keys remain on your devices.
 
-信令服务协调连接，加密中继传递密文。服务不持有解密会话所需的配对私钥，不持久化聊天或附件明文。加密不能阻止已经授权的控制端读取数据，因此要妥善管理设备信任。
+Signaling coordinates connections; relay carries ciphertext. The service does not hold the pairing private keys needed to decrypt sessions or persist plaintext chats and attachments. Authorized controllers can still read data, so manage device trust carefully.
 
-## 云端元数据
+## Cloud metadata
 
-开源服务存储设备公钥、凭据哈希、名称、编号、配对关系、临时加密信封和服务签名身份；连接处理也会暴露必要的网络信息。官方商业层另外保存登录资料、设备归属、套餐、订单和权益记录。
+The open-source service stores device public keys, credential hashes, names, IDs, pairing relationships, temporary encrypted envelopes and service signing identity. Connection handling also exposes necessary network information. The official business layer adds sign-in information, device ownership, plans, orders and entitlements.
 
-D1 不保存聊天明文，不等于服务完全不产生元数据。运营者仍应限制后台访问、备份范围与日志内容。
+No plaintext chat storage in D1 does not mean no metadata exists. Operators should limit administrative access, backups and logs.
 
-## 控制端缓存
+## Controller caches
 
-原生端保存 SQLite 数据与本地附件；Web 使用 IndexedDB。授权后的设备能读取它已经缓存的内容，撤销远程授权不会远程删除这些文件。
+Native clients store SQLite data and local attachments; Web uses IndexedDB. A previously authorized device can read its cached content. Revocation does not remotely erase those files.
 
-公共电脑使用后请清除站点数据，并到被控电脑撤销授权。更换或丢失手机时也应撤销旧设备，而不只退出云端账号。
+After using a shared computer, clear site data and revoke the controller on the host. Revoke lost or replaced phones rather than only signing out of the cloud account.
 
-## 安全问题反馈
+## Reporting security issues
 
-不要在公开 issue 中粘贴漏洞利用细节、配对密钥、登录凭据或私密会话。按仓库 [SECURITY.md](https://github.com/monkeyWie/reign/blob/main/SECURITY.md) 的私密渠道报告安全问题。
+Do not post exploit details, pairing keys, credentials or private conversations in public issues. Follow the private reporting channel in [SECURITY.md](https://github.com/monkeyWie/reign/blob/main/SECURITY.md).
 
-当前开发预览尚未声称通过独立安全审计。本文描述现有技术边界，不代替未来正式服务的隐私政策或法律条款。
+This developer preview does not claim an independent security audit. These technical boundaries do not replace a formal service privacy policy or legal terms.

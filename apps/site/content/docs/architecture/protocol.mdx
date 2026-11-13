@@ -1,31 +1,31 @@
 ---
-title: 协议与扩展边界
-description: 连接层统一使用 /p2p/，Provider 保留 Agent 原生协议。
+title: Protocol and extension boundaries
+description: Connection endpoints use /p2p/; providers retain native agent protocols.
 ---
 
-## 公共连接入口
+## Public connection endpoints
 
-| 入口          | 职责                             |
-| ------------- | -------------------------------- |
-| `/p2p/config` | 服务能力、签名身份与可选探测入口 |
-| `/p2p/signal` | 握手与直连信令                   |
-| `/p2p/relay`  | 端到端加密的业务帧               |
-| `/healthz`    | 服务健康检查                     |
+| Endpoint      | Responsibility                                     |
+| ------------- | -------------------------------------------------- |
+| `/p2p/config` | Capabilities, signing identity and optional probes |
+| `/p2p/signal` | Handshake and direct-connection signaling          |
+| `/p2p/relay`  | End-to-end encrypted application frames            |
+| `/healthz`    | Service health                                     |
 
-完整请求类型和设备注册、配对 API 请以仓库 [`packages/protocol`](https://github.com/monkeyWie/reign/tree/main/packages/protocol) 以及 [`docs/platform/protocol.md`](https://github.com/monkeyWie/reign/blob/main/docs/platform/protocol.md) 为准。
+Use [`packages/protocol`](https://github.com/monkeyWie/reign/tree/main/packages/protocol) and [`docs/platform/protocol.md`](https://github.com/monkeyWie/reign/blob/main/docs/platform/protocol.md) as the source of truth for request types, device registration and pairing APIs.
 
-## 一次连接
+## A connection
 
-设备向同一服务注册身份并取得连接编号；首次配对证明对方控制权，经电脑确认或密码验证建立本地信任。信令交换候选地址，建立直连或回退中继，再通过加密 RPC 调用 Provider。
+Devices register identities with the same service and receive connection IDs. Pairing proves control through host confirmation or password verification and establishes local trust. Signaling exchanges candidates, then encrypted RPC invokes providers over direct or relay transport.
 
-会话快照与增量事件有各自的游标／序号，缺口触发重新同步；客户端不能把传输重放当成新的用户指令。
+Snapshots and incremental events have cursors/sequences. Gaps trigger resynchronization; replayed transport data must not become a new instruction.
 
-## 商业策略
+## Commercial policy
 
-官方服务可下发短期签名租约，绑定设备、控制端、产品与连接权益。被控端在统一调用入口校验，因此直连不会绕过官方设备／产品限制。
+The official service may issue short-lived signed leases bound to host, controller, product and connection entitlements. Hosts verify them at a shared call boundary, preventing direct access from bypassing quotas.
 
-自建服务的同一协议默认不加商业额度。业务策略留在服务组合层，不应把付费判断散落在每一个 Provider 中。
+The same protocol applies no commercial quotas in self-hosted mode. Business policy belongs to composition, not repeated payment checks inside every provider.
 
-## 兼容性
+## Compatibility
 
-当前开发预览不兼容早期 `/v2/` 或旧原型接口。修改协议时同时更新 Go、TypeScript、测试 fixture 与文档，不保留只有一端可以使用的半套链路。
+This developer preview does not support early `/v2/` or prototype APIs. Update Go, TypeScript, fixtures and docs together when changing the protocol. Do not ship a partial connection chain usable by only one side.

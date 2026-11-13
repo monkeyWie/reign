@@ -1,0 +1,58 @@
+---
+title: 本地开发
+description: 在隔离环境运行原生端、Web 与 Worker。
+---
+
+## 环境与目录
+
+需要 Git、Node.js 24、pnpm 10.34.5；Go 版本以根目录及原生模块 `go.mod` 为准。NSGo 还需要对应系统工具链，先执行 doctor，不要把所有平台的工具都装在同一台电脑上。
+
+| 路径                   | 职责                             |
+| ---------------------- | -------------------------------- |
+| `apps/site`            | 官网、Fumadocs 与 Web 路由       |
+| `packages/web-client`  | 浏览器会话 UI                    |
+| `packages/client-sdk`  | 配对、加密 RPC、直连与 IndexedDB |
+| `packages/protocol`    | TypeScript 连接协议与权益接口    |
+| `packages/worker-core` | 自建 Worker、D1、DO              |
+| `clients/nsgo`         | 原生 UI、原生能力与平台构建      |
+| `internal`             | Go Provider、网络和本地存储      |
+| `cmd/reign-probe`      | 可选公网 TCP／UDP 探测器         |
+
+## Web 与本地 Worker
+
+```sh
+pnpm install --frozen-lockfile
+pnpm check
+pnpm test
+pnpm build:web
+pnpm exec wrangler d1 migrations apply DB --local
+pnpm exec wrangler dev --port 8787
+```
+
+打开 `http://localhost:8787/chat`。只改文档或官网时可用 `pnpm dev` 启动 Next 开发服务；完整连接链路请使用上面的 Worker 环境。
+
+## 原生 UI
+
+```sh
+cd clients/nsgo
+go tool nsgo doctor
+AGENTHUB_NSGO_DEMO=1 go tool nsgo dev
+```
+
+演示模式使用隔离数据，不访问真实 Agent。原生构建入口为该目录下的 `./scripts/build.sh`。旧 Flutter 代码保留作历史参考，不参与当前 UI 开发。
+
+## 检查与测试
+
+```sh
+go vet ./...
+go test ./...
+cd clients/nsgo
+go vet ./...
+go test ./...
+# 需要可运行对应平台的环境
+go tool nsgo test -target macos ./hubui
+```
+
+JavaScript workspace 使用 `pnpm check` 和 `pnpm test`；Go 涉及两个 module，需分别检查。Linux 原生 UI 测试需要 GTK 4 和图形测试环境。
+
+CI 覆盖原生多平台构建、React／Worker、隔离主机链路、探测器与发布清单。main 自动产物不创建正式 Release；版本 tag 和商店签名由维护者管理。

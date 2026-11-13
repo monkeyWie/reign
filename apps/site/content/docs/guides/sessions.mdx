@@ -1,28 +1,28 @@
 ---
-title: 会话与消息
-description: 按项目聚合会话，保持你熟悉的工作节奏。
+title: Sessions and messages
+description: Group sessions by project and keep your workflow.
 ---
 
-## 项目与排序
+## Projects and ordering
 
-会话按被控电脑上的完整工作目录分组，最近更新排在前面。不同 Provider 的会话可以出现在同一项目里，通过图标区分来源；切换项目不会改变 Agent 的工作目录。
+Sessions are grouped by the full working directory on the host, with recent updates first. Provider icons identify sessions from different agents in the same project. Switching projects does not change an agent's working directory.
 
-目前只有就绪的 Provider 能处理新消息。看到缓存或历史会话，不代表能够接续另一个独立后端中的正在运行的任务。
+Only ready providers accept new messages. Cached or historical sessions do not imply access to an active task owned by another independent backend.
 
-## 实时输出
+## Live output
 
-消息通过长连接接收增量文本，界面使用虚拟列表和 Markdown 渲染。生成开始、尚无公开输出时显示 Thinking；公开文本出现后显示文本，正在进行的工具操作默认折叠，可点击查看明细。完成后移除临时活动。
+Long-lived connections carry incremental text. The UI uses virtual lists and Markdown rendering. Thinking appears at the start before public output. Public text replaces it; active tool operations are collapsed until expanded. Temporary activity disappears on completion.
 
-结构化问答回复会展示为“已回答”卡片，隐藏传输字段。消息完成后可复制整条文本，悬停显示操作和时间；手机无需悬停。
+Structured question replies render as answered cards, hiding transport fields. Completed messages support whole-message copying, timestamps and desktop hover actions. Mobile does not require hovering.
 
-## 模型、草稿与发送
+## Models, drafts and sending
 
-输入框中可选择 Provider 提供的模型。可用模型和权限由被控 Agent 决定，不由 Reign 提供。Reign 的订阅不包含 Codex 或其他模型服务的费用。
+Choose from models offered by the provider in the composer. The host agent determines model availability and permissions. Reign does not provide model access or include model subscription costs.
 
-桌面和 Web：Enter 发送，Shift + Enter 换行。手机使用发送按钮。未发送草稿按会话保留。
+Desktop and Web: Enter sends, Shift + Enter adds a line. Mobile uses the send button. Unsent drafts are retained per session.
 
-## 断线重连与缓存
+## Reconnection and caches
 
-原生端使用 SQLite，本地保存已同步的会话数据；浏览器使用 IndexedDB。离线时可读缓存，无法提交远程指令。
+Native SQLite and browser IndexedDB retain synchronized content. You can read cached content offline, but cannot submit remote commands.
 
-恢复连接后拉取最新状态；增量事件有缺口时补快照，再继续订阅输出。缓存不是完整备份，也不保证在尚未同步的历史中离线检索。
+Reconnecting fetches current state. Gaps in incremental events trigger a snapshot before subscriptions resume. A cache is not a complete backup or a guarantee of offline access to unsynchronized history.

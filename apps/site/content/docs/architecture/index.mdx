@@ -1,39 +1,39 @@
 ---
-title: 连接与架构
-description: 原生 Agent 留在电脑，云端只协调连接和传递加密帧。
+title: Architecture
+description: Keep agents on your computer; coordinate connections in the cloud.
 ---
 
-## 数据路径
+## Data paths
 
 ```text
-原生／Web 控制端
-   │ 配对、设备发现、信令
+Native / Web controller
+   │ Pairing, discovery, signaling
    ▼
-Cloudflare Worker ── D1 元数据
-   │                Durable Objects 设备房间
+Cloudflare Worker ── D1 metadata
+   │                Durable Object device rooms
    │
-   ├─ 直连成功：控制端 ⇄ 被控电脑 Reign ⇄ Agent Provider
-   └─ 无法直连：控制端 ⇄ Worker 加密中继 ⇄ 被控电脑
+   ├─ Direct: controller ⇄ Host Reign ⇄ Agent provider
+   └─ Relay:  controller ⇄ Worker encrypted relay ⇄ Host
 ```
 
-## 原生端
+## Native clients
 
-NSGo 渲染平台原生视图，Go 在同一个应用进程中处理设备状态、Provider、缓存、配对和网络。不嵌入 Chromium 或 WebView，也不为 UI 再启动一个独立 Hub 后台 CLI。
+NSGo renders platform-native views. Go handles device state, providers, caches, pairing and networking in the same app process. No Chromium/WebView is embedded and no separate Hub CLI daemon is required for UI.
 
-Agent 自己的进程仍独立存在，例如共享 Codex app-server；这与再拆一个 Reign 后台进程不是一回事。
+Agent processes remain independent, such as the shared Codex app-server. They are distinct from an extra Reign background process.
 
-## Web 与云端
+## Web and cloud
 
-Next.js／React 提供官网与浏览器控制台，通过 OpenNext 适配到 Cloudflare Worker。Fumadocs 负责 Markdown／MDX 文档。
+Next.js/React provide the website and Web console, adapted to Workers by OpenNext. Fumadocs builds Markdown/MDX documentation. English and Simplified Chinese routes are rendered with localized content, navigation and metadata.
 
-D1 保存设备、配对和服务身份等元数据；Durable Objects 为设备房间提供有状态协调和可休眠 WebSocket。自建开源部署不需要商业账号系统。
+D1 stores device, pairing and service identity metadata. Durable Objects coordinate device rooms with hibernating WebSockets. Open-source self-hosting does not require a commercial account system.
 
-## 可选探测器
+## Optional probe
 
-Go 探测器在公网监听 TCP／UDP 26330，只增强直连候选发现。地址通过 Worker 的统一配置下发。
+A Go probe listens publicly on TCP/UDP 26330 to enhance direct candidate discovery. Worker configuration publishes its endpoints.
 
-## 开源与商业边界
+## Open-source and commercial boundaries
 
-官网、文档、原生 UI、Web 控制端、协议、SDK、Worker 核心和探测器属于开源核心。官方商业服务复用这些核心，另组合私有的身份、计费和权益策略，并非维护一套分叉的连接协议。
+The site, docs, native UI, Web controller, protocol, SDK, Worker core and probe are in the open-source core. The official business service composes them with private identity, billing and entitlement policies over the same connection protocol.
 
-详细技术选型见[技术栈](/technology)，开发协议见[协议与扩展边界](/docs/architecture/protocol)。
+See [Technology](/technology) and [Protocol boundaries](/docs/architecture/protocol).

@@ -1,0 +1,82 @@
+{
+  "date": "2026-11-14",
+  "platform": "macOS 26.6 arm64",
+  "hardware": "Apple M5",
+  "version": "0.1.0-memory-preview",
+  "nativeBaseline": "d6417d5",
+  "mode": "isolated demo, no real agents",
+  "dashboard": [
+    {
+      "rssKiB": 126480,
+      "footprint": [
+        "Physical footprint:         39.4M",
+        "Physical footprint (peak):  39.5M"
+      ]
+    },
+    {
+      "rssKiB": 126496,
+      "footprint": [
+        "Physical footprint:         39.4M",
+        "Physical footprint (peak):  39.5M"
+      ]
+    },
+    {
+      "rssKiB": 126512,
+      "footprint": [
+        "Physical footprint:         39.5M",
+        "Physical footprint (peak):  39.5M"
+      ]
+    },
+    {
+      "rssKiB": 126512,
+      "footprint": [
+        "Physical footprint:         39.5M",
+        "Physical footprint (peak):  39.5M"
+      ]
+    },
+    {
+      "rssKiB": 126512,
+      "footprint": [
+        "Physical footprint:         39.5M",
+        "Physical footprint (peak):  39.5M"
+      ]
+    }
+  ],
+  "conversation": [
+    {
+      "rssKiB": 140208,
+      "footprint": [
+        "Physical footprint:         47.9M",
+        "Physical footprint (peak):  48.0M"
+      ]
+    },
+    {
+      "rssKiB": 140656,
+      "footprint": [
+        "Physical footprint:         48.3M",
+        "Physical footprint (peak):  48.4M"
+      ]
+    },
+    {
+      "rssKiB": 140752,
+      "footprint": [
+        "Physical footprint:         48.4M",
+        "Physical footprint (peak):  48.4M"
+      ]
+    },
+    {
+      "rssKiB": 140752,
+      "footprint": [
+        "Physical footprint:         48.4M",
+        "Physical footprint (peak):  48.4M"
+      ]
+    },
+    {
+      "rssKiB": 140800,
+      "footprint": [
+        "Physical footprint:         48.4M",
+        "Physical footprint (peak):  48.4M"
+      ]
+    }
+  ]
+}

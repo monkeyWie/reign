@@ -3,7 +3,7 @@ name: CI and Release
 on:
   push:
     branches: [main]
-    tags: ['v*']
+    tags: ["v*"]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -16,7 +16,7 @@ concurrency:
   cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
 env:
-  GOWORK: 'off'
+  GOWORK: "off"
   GOFLAGS: -mod=readonly
 
 jobs:
@@ -153,7 +153,7 @@ jobs:
       - uses: actions/setup-java@v6.2.0
         with:
           distribution: temurin
-          java-version: '21'
+          java-version: "21"
       - name: Set up Android command-line tools
         uses: android-actions/setup-android@v4.0.4
       - name: Install Android SDK packages
@@ -228,12 +228,14 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v6
         with:
-          node-version: '24'
+          node-version: "24"
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
       - run: pnpm test
       - run: pnpm build:web
+        env:
+          SITE_URL: https://reign.example.com
       - name: Verify actual Worker to native host interoperability
         run: |
           pnpm exec wrangler d1 migrations apply DB --local

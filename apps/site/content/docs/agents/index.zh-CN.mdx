@@ -1,0 +1,21 @@
+---
+title: Agent 支持范围
+description: 按 Provider 接入，不把读到历史记录等同于远控。
+---
+
+## 当前支持
+
+| Agent                     | 状态     | 接入条件                                          |
+| ------------------------- | -------- | ------------------------------------------------- |
+| Codex App                 | 已实现   | 通过 Reign 启动并连接共享 app-server              |
+| Codex CLI                 | 已实现   | 可连接兼容的 CLI 后端；独立运行会话需满足接入条件 |
+| Codex VS Code 扩展        | 暂不支持 | 不展示为可控 Provider                             |
+| Claude Code、Pi、ZCode 等 | 待接入   | 尚未提供可用 Provider                             |
+
+Codex App 的实际可用性还取决于该版本的桌面应用及启动能力。Agent 由你自行安装、登录和授权；Reign 不提供模型账号，也不代付模型使用费。
+
+## Provider 能做什么
+
+Provider 把 Agent 的原生协议映射成统一能力：状态、会话列表、历史记录、创建、发送、增量输出、审批、模型与附件。未实现的能力不能只在 UI 显示为可用。
+
+后续可以添加更多 Provider，而无需为每个 Agent 重写设备连接、配对和中继。开发者可从[Provider 接入指南](/docs/contributing/providers)开始。

@@ -1,39 +1,40 @@
 ---
-title: 接入 Codex App
-description: 让 Reign 与桌面 App 连接同一个 Codex app-server。
+title: Connect Codex App
+description: Let Reign and the desktop App share one Codex app-server.
 ---
 
-## 为什么需要通过 Reign 启动
+## Why launch through Reign?
 
-Codex 的本地历史可以被其他客户端读取，但正在运行的会话由对应后端管理。读取记录不等于已经接入那个后端。
+Other clients may read Codex history, but the corresponding backend owns running sessions. Reading a record does not connect to that backend.
 
-Reign 启动共享 Codex app-server，并在启动 Codex App 时传入连接配置；Reign 与 Codex App 直连同一个后端，无需额外 WS 网关。
+Reign starts a shared Codex app-server and passes connection settings when launching Codex App. Both clients connect directly to the same backend, without an extra WebSocket gateway.
 
 ```text
 Codex App ──┐
-            ├── 共享 Codex app-server ── 工作目录 / Agent 任务
+            ├── Shared Codex app-server ── Working directory / Agent task
 Reign ──────┘
 ```
 
-## 操作步骤
+## Steps
 
-1. 安装并登录 Codex App，确认本机独立使用正常。
-2. 在 Reign 本机面板找到 Codex App，查看接入状态。
-3. 若 App 正在独立运行，等待任务结束并退出 App。
-4. 点击面板中的启用／通过 Reign 启动操作，等待状态变为就绪。
-5. 再从控制端进入设备，打开现有会话或创建会话。
+1. Install Codex App, sign in and confirm it works locally.
+2. Find Codex App in the Reign local dashboard and check readiness.
+3. If it is running independently, wait for the task to finish and quit it.
+4. Use Enable / Launch through Reign, and wait for ready status.
+5. Connect from a controller and open an existing session or create one.
 
-<Callout title="先保护正在执行的任务" type="warn">
-  不要为了接入远控强行终止正在工作的 Codex App 或
-  app-server。接入可能需要重新启动 App，请等待当前任务完成。
+<Callout title="Protect running tasks" type="warn">
+  Do not terminate a working Codex App or app-server just to enable remote
+  control. Integration may require restarting the App; wait for the current task
+  to finish.
 </Callout>
 
-## 手动启动与退出 Reign
+## Independent launch and quitting Reign
 
-直接从系统打开的 Codex App 不一定连接到共享后端，会显示需重新接入。状态面板给出操作引导，不能仅凭进程存在就标记为可控。
+An App opened directly through the OS may not use the shared backend and can require reintegration. The dashboard provides instructions; an existing process alone does not establish controllability.
 
-共享后端独立管理生命周期，关闭 Reign 不应主动终止本机 Codex 任务。但结束后端进程、退出系统或网络中断仍会影响连接。
+The shared backend has an independently managed lifecycle. Quitting Reign should not actively terminate local Codex tasks. Killing the backend, logging out or losing connectivity can still disrupt connections.
 
-## 支持边界
+## Compatibility boundaries
 
-该方案依赖 Codex App 的连接和启动能力，版本升级可能改变行为。若共享后端不可用，请先恢复本机正常使用，再附上 App 与 CLI 版本反馈问题。
+This integration depends on Codex App connection and launch capabilities, which may change with upgrades. If the shared backend fails, restore normal local use first, then report the App and CLI versions.

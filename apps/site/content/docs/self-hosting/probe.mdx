@@ -1,45 +1,45 @@
 ---
-title: 部署可选探测器
-description: 一个 Go 二进制，在同一个端口提供 TCP 和 UDP 探测。
+title: Deploy an optional probe
+description: One Go binary for TCP and UDP discovery on the same port.
 ---
 
-## 什么时候需要
+## When you need it
 
-Worker 不能直接监听原始 UDP／TCP 探测 Socket。默认可以使用公共 UDP STUN；如果希望补充自己的候选地址发现、提高公共探测服务不可达时的覆盖，可在有公网地址的服务器运行 `reign-probe`。
+Workers cannot listen on raw UDP/TCP probe sockets. Public UDP STUN works by default. To add your own mapping discovery or cover unreachable public probes, run `reign-probe` on a public server.
 
-探测器只返回地址映射，不保存设备目录、不运行 Agent、不托管网页，也不是业务中继。没有它也可以部署 Worker。
+The probe returns address mappings only. It does not store a device directory, run agents, serve Web pages or relay application traffic. You can deploy the Worker without it.
 
-## 构建并运行
+## Build and run
 
-Go 版本以仓库 `go.mod` 为准，也可以使用发布产物中的 Linux amd64／arm64 探测器。
+Use the Go version in `go.mod`, or Linux amd64/arm64 probe artifacts when available:
 
 ```sh
 go build -o reign-probe ./cmd/reign-probe
 ./reign-probe --listen :26330
 ```
 
-服务器与云安全组同时放行：
+Allow both in the server firewall and cloud security group:
 
-| 端口  | 协议 | 用途                           |
-| ----- | ---- | ------------------------------ |
-| 26330 | UDP  | UDP STUN Binding／地址映射发现 |
-| 26330 | TCP  | 原生 TCP 探测与打洞候选发现    |
+| Port  | Protocol | Purpose                                    |
+| ----- | -------- | ------------------------------------------ |
+| 26330 | UDP      | STUN Binding / mapped-address discovery    |
+| 26330 | TCP      | Native TCP probe and hole-punch candidates |
 
-普通 Nginx HTTP 反代不能转发这两个探测协议。探测域名应设置为 **DNS only**，不能套 Cloudflare HTTP 代理。
+An ordinary Nginx HTTP proxy cannot forward these protocols. Use **DNS only** for the probe hostname, without Cloudflare's HTTP proxy.
 
-## 让 Worker 发布入口
+## Publish endpoints from the Worker
 
-在 Worker 变量中配置并重新部署：
+Set Worker variables and redeploy:
 
 ```text
 SELF_STUN=stun:probe.example.com:26330
 TCP_STUN=probe.example.com:26330
 ```
 
-客户端仍然只填 Worker 的 HTTPS 地址。服务会通过 `/p2p/config` 下发这些入口。
+Clients still configure only the Worker HTTPS URL. `/p2p/config` publishes these endpoints.
 
-公共与自建 STUN 并行尝试，优先得到可用的直连路径；不是先经过公共中继，再来用你的服务器。浏览器没有原始 TCP 能力，TCP 探测主要用于原生端。
+Public and self-hosted STUN run in parallel to find a direct path. This is not public relay followed by your server. Browsers have no raw TCP API; TCP probing is primarily for native clients.
 
-## 运行边界
+## Limits
 
-对称 NAT、运营商网络及企业防火墙可能仍无法打洞；增加探测器并不保证所有网络都能直连。最后的回退由 Worker 加密 WebSocket 中继承担，当前不需要部署 TURN 的 UDP 端口范围。
+Symmetric NAT, carrier networks and enterprise firewalls may still block hole punching. A probe does not guarantee direct access. The final fallback is Worker encrypted WebSocket relay; no TURN UDP allocation range is required.

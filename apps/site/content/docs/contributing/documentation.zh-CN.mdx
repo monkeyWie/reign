@@ -1,0 +1,57 @@
+---
+title: 维护文档
+description: 在仓库内用 Markdown／MDX 编辑，和代码一起审查发布。
+---
+
+## 内容位置
+
+面向用户的正式文档在 `apps/site/content/docs/`，由 Fumadocs MDX 和 Next.js 生成。普通 Markdown 语法可直接写在 `.mdx` 文件中；只有需要卡片、提示等组件时才加入 JSX。
+
+根目录 `docs/platform/` 保留工程实现和协议说明。其他历史方案不应当作当前产品文档引用。
+
+## 多语言约定
+
+英文页面使用 `page.mdx`，简体中文使用 `page.zh-CN.mdx`；侧栏对应 `meta.json` 和 `meta.zh-CN.json`。两种语言保持相同 slug、内容范围和代码示例。没有译文时返回 404，不用另一种语言静默补位。
+
+共享 MDX 组件会自动补上站内文档与官网链接的语言前缀，`/chat`、`/account`、`/p2p/*` 等功能入口保持稳定。新增页面和修改产品行为时一起维护双语标题、描述、正文与导航。
+
+## SEO
+
+构建变量 `SITE_URL` 指定部署自身的域名，用于 canonical、hreflang、分享卡片、robots 与 sitemap。控制台、账号和管理页面不索引；这不代替访问控制。未设置变量时不指向任何外部 canonical 域名。
+
+## 新增页面
+
+新建 `.mdx` 文件，填写 frontmatter，并在同目录 `meta.json`／`meta.zh-CN.json` 的 pages 中确定顺序：
+
+```md
+---
+title: 页面标题
+description: 一句话说明这页解决什么问题。
+---
+
+## 用户的第一步
+
+写具体操作、前置条件和成功时应看到的结果。
+```
+
+侧栏、页内目录和前后篇导航由 Fumadocs 生成；搜索按文档内容建立索引，不需要手工维护另一份关键词列表。
+
+## 写作标准
+
+- 区分当前能力、计划和平台限制；不要把演示数据当成已上线支持。
+- 命令应在当前仓库和指定目录可执行，域名使用 example.com 或明确占位符。
+- 解释软件费用与云资源费用的区别。
+- 性能数字必须注明版本、平台、构建方式和场景，不做没有测量的横向比较。
+- 使用稳定站内链接；重命名路径时处理旧链接，不发布 200 状态的“页面不存在”。
+
+## 预览与验证
+
+```sh
+pnpm dev
+pnpm --filter @reign/site check
+pnpm build:web
+```
+
+完整 Worker 本地运行后，可以执行 `pnpm exec tsx scripts/platform/smoke-site.mts http://localhost:8787`，检查双语官网、文档链接、404、SEO 与浏览器搜索索引。CI 的隔离链路验证也会运行这些检查。
+
+修改导航、代码块或表格时，检查桌面、窄屏、深色模式及搜索。文档 PR 与代码 PR 使用同样的检查流程。

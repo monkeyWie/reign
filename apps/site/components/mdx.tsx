@@ -1,8 +1,26 @@
 import defaultMdxComponents from "fumadocs-ui/mdx";
+import { Card } from "fumadocs-ui/components/card";
+import type { ComponentProps, ComponentType } from "react";
 import type { MDXComponents } from "mdx/types";
+import { localizeHref, type Locale } from "../lib/i18n";
 
-export function getMDXComponents(components?: MDXComponents) {
-  return { ...defaultMdxComponents, ...components } satisfies MDXComponents;
+export function getMDXComponents(
+  components?: MDXComponents,
+  locale: Locale = "en",
+) {
+  const Anchor = (components?.a ??
+    defaultMdxComponents.a ??
+    "a") as ComponentType<ComponentProps<"a">>;
+  return {
+    ...defaultMdxComponents,
+    ...components,
+    a: ({ href, ...props }: ComponentProps<"a">) => (
+      <Anchor {...props} href={href ? localizeHref(href, locale) : href} />
+    ),
+    Card: ({ href, ...props }: ComponentProps<typeof Card>) => (
+      <Card {...props} href={href ? localizeHref(href, locale) : href} />
+    ),
+  } satisfies MDXComponents;
 }
 export const useMDXComponents = getMDXComponents;
 declare global {

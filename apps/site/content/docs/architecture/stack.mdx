@@ -1,41 +1,41 @@
 ---
-title: 技术栈详解
-description: 每一层采用什么、负责什么，以及不负责什么。
+title: Technology stack
+description: What each layer uses and the responsibility it owns.
 ---
 
-## 原生 UI：NSGo
+## Native UI: NSGo
 
-桌面与移动端使用 NSGo，以 Go 编写界面，映射到平台原生视图。设备导航、会话虚拟列表、Markdown 和图片预览在原生 UI 中完成。
+Desktop and mobile UI is written in Go with NSGo and mapped to platform-native views. Device navigation, virtual session lists, Markdown and image previews use native UI.
 
-采用原生视图避免打包完整浏览器运行时；包体积仍取决于目标架构、系统库、签名和构建选项。当前浏览器产品使用 React，不再分发 NSGo WASM 作为官网控制台。
+Native views avoid bundling a browser runtime, but package size still depends on architecture, system libraries, signing and build options. The browser product now uses React, not a distributed NSGo WASM console.
 
-## 应用与 Provider：Go
+## Application and providers: Go
 
-Go 复用设备管理、加密、网络连接和 Agent 适配逻辑；Provider 隔离 Codex 的启动细节及原生协议。应用内直接调用 Go 逻辑，减少 UI 与单独后台服务之间的通信层。
+Go shares device management, cryptography, networking and agent adaptation. Providers isolate Codex launch details and native protocols. The app calls Go logic directly instead of adding a separate UI-to-daemon layer.
 
-## 网络：WebRTC、原生 TCP、WebSocket
+## Networking: WebRTC, native TCP and WebSocket
 
-原生 WebRTC 使用 Pion；浏览器使用标准 RTCPeerConnection 和 DataChannel，无需额外下载 Go WASM 来建立连接。原生端还实现 TCP 候选发现与打洞。
+Native WebRTC uses Pion. Browsers use RTCPeerConnection and DataChannel without Go WASM. Native clients also implement TCP candidate discovery and hole punching.
 
-WebSocket 分为信令和加密业务中继。可选 STUN 探测只辅助获取映射；不部署 TURN／DERP，也不使用 cloudflared 隧道。
+WebSockets serve signaling and encrypted traffic relay. Optional STUN discovers address mappings. No TURN, DERP or cloudflared tunnel is required.
 
-## Web：Next.js、React、OpenNext
+## Web: Next.js, React and OpenNext
 
-官网、文档和 `/chat` 共用 Next.js App Router；React 控制端保留消息虚拟滚动与增量同步。OpenNext 将 Next 构建结果适配到 Worker，客户端默认使用当前页面 origin。
+The website, docs and `/chat` share Next.js App Router. The React controller uses virtual messages and incremental synchronization. OpenNext adapts builds to Workers; clients default to the current page origin.
 
-Fumadocs 用仓库内 MDX 生成文档页面、目录、搜索和前后篇导航；无需另起 CMS 或单独的文档服务。
+Fumadocs generates pages, navigation, search and pagination from repository MDX. English and Simplified Chinese each have real content and a language-specific search filter. No separate CMS or docs service is needed.
 
-## 数据：SQLite、IndexedDB、D1
+## Storage: SQLite, IndexedDB and D1
 
-- 原生端：SQLite 保存配置与会话缓存，附件存放本地文件。
-- 浏览器：IndexedDB 保存配对身份、会话快照和有界附件缓存。
-- Worker：D1 保存服务元数据；官方业务层使用 Drizzle ORM 管理账号、套餐和订单。
-- 现存 Go 数据访问路径使用 SQLite，部分服务存储采用 GORM；不能把云端 D1 和本地 ORM 当成同一个数据库。
+- Native: SQLite for settings and session caches; attachment files on local disk.
+- Browser: IndexedDB for pairing identity, session snapshots and bounded attachment caches.
+- Worker: D1 for service metadata; the official business layer uses Drizzle ORM for accounts, plans and orders.
+- Existing Go storage uses SQLite, with GORM on some service paths. Cloud D1 and local ORM are separate systems.
 
-## 官方业务层
+## Official business layer
 
-Better Auth 负责 GitHub／Google 登录，Waffo 对接支付；最终权益由服务端校验。登录渠道、付费产品和正式售价以线上开放状态为准。开源自建无需部署这套业务层。
+Better Auth integrates GitHub/Google and Waffo handles payments. The server verifies entitlements. Actual provider availability, products and prices follow live service configuration. Open-source deployments do not require this layer.
 
-## 依赖与版本
+## Dependencies and versions
 
-依赖的固定版本以 `go.mod`、`clients/nsgo/go.mod`、`package.json` 和 `pnpm-lock.yaml` 为准。NSGo 是较新的框架，升级需完成平台构建和 UI 回归。[查看贡献要求](/docs/contributing)。
+Pinned versions are in `go.mod`, `clients/nsgo/go.mod`, `package.json` and `pnpm-lock.yaml`. NSGo is a newer framework; upgrades require platform builds and UI regression checks. See [Contributing](/docs/contributing).

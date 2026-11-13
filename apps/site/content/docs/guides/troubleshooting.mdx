@@ -1,32 +1,32 @@
 ---
-title: 常见问题与排查
-description: 从设备在线、授权、Agent 接入和网络路径逐层检查。
+title: Troubleshooting
+description: Check availability, permission, agent integration and transport.
 ---
 
-## 能看到会话，但发送失败
+## Sessions are visible but sending fails
 
-先检查被控端对应 Provider 是否已就绪。Codex App 如果由用户直接启动，可能只是读到了本地历史；需等待任务结束，退出 App 后通过 Reign 启动，让双方连接同一个 app-server。
+Check that the host provider is ready. If Codex App was launched independently, Reign may only be reading history. Wait for the task to finish, quit the App and launch through Reign so both connect to the same app-server.
 
-Codex CLI 会话由不同后端持有时也可能有写入冲突。不要仅凭共享目录中的历史文件判断可以控制正在运行的会话。参见 [Codex CLI](/docs/agents/codex-cli)。
+Codex CLI sessions owned by another backend can also have writer conflicts. Shared history files do not establish control of an active session. See [Codex CLI](/docs/agents/codex-cli).
 
-## 显示设备离线
+## Device appears offline
 
-检查被控电脑是否休眠、Reign 是否运行、网络是否可访问服务，双方是否配置同一个服务根地址。公司 Wi-Fi 可能禁止设备互访，即使使用相同 SSID，也不保证可在局域网直连。
+Check sleep settings, whether Reign is running, network access to the service and whether both sides use the same service root URL. Enterprise Wi-Fi may isolate peers even on the same SSID.
 
-不要删除本地数据来“刷新”网络；这会丢失配对身份。先恢复网络，再重新连接，客户端会同步最新消息状态。
+Do not delete local data to refresh the network: this loses pairing identity. Restore connectivity and reconnect; the client catches up to current message state.
 
-## 只有直连，连接失败后没有回退
+## Direct connection fails with no fallback
 
-检查账号是否拥有中继权益。官方免费方案只允许直连，自建开源服务可使用自建中继。如果是自建，确认 Worker WebSocket 路由、DO 绑定正常。
+Check relay entitlements. Official Free permits direct connections only. Self-hosted services can use their own relay; verify Worker WebSocket routes and Durable Object bindings.
 
-## 浏览器复制、配对或加密失败
+## Browser copying, pairing or encryption fails
 
-使用 HTTPS 的服务地址，或在本机开发使用 localhost；检查剪贴板权限和站点存储权限。无痕模式、存储配额和扩展程序也可能影响本地持久化。
+Use HTTPS, or localhost for local development. Check clipboard and site-storage permissions. Private browsing, storage quotas and extensions may also affect persistence.
 
-## 自建探测器没有作用
+## Self-hosted probe has no effect
 
-同时开放 `26330/TCP` 与 `26330/UDP`，DNS 记录设为 DNS only。普通 Nginx HTTP 反代不支持该探测协议。检查 Worker 是否发布了正确的 `SELF_STUN`／`TCP_STUN`。
+Open both `26330/TCP` and `26330/UDP`, and use DNS-only records. Ordinary Nginx HTTP proxying does not support these probe protocols. Check the Worker `SELF_STUN` and `TCP_STUN` settings.
 
-## 如何报告问题
+## Report an issue
 
-提供客户端版本、系统、Agent 版本、服务类型、直连／中继状态、复现步骤和脱敏后的错误信息。请勿上传访问密码、配对密钥、Cookie、OAuth Token 或完整私密会话。见[贡献指南](/docs/contributing)。
+Include client, OS and agent versions, service type, direct/relay status, reproduction steps and redacted errors. Do not upload passwords, pairing keys, cookies, OAuth tokens or complete private conversations. See [Contributing](/docs/contributing).

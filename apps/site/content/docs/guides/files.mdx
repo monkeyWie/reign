@@ -1,22 +1,22 @@
 ---
-title: 图片与文件
-description: 预览图片、传输附件，并了解本地缓存。
+title: Images and files
+description: Preview images, transfer attachments and understand caches.
 ---
 
-## 上传
+## Uploading
 
-点击输入框内的加号选择图片或文件。桌面和 Web 还支持拖放；剪贴板读取受操作系统和浏览器权限影响，在可用环境中可以直接粘贴图片或文件。手机使用系统选择器。
+Use the plus button in the composer to pick images or files. Desktop and Web also support drag and drop. Clipboard support depends on OS and browser permissions. Mobile uses the system picker.
 
-发送前会显示附件预览，可以删除不需要的项目。图片以缩略图显示，点击可放大，并在同条消息的多张图片之间切换。普通文件提供下载入口。
+Review attachments before sending and remove unwanted items. Images appear as thumbnails; open one to view it full-size and switch between images in the same message. Other files have a download action.
 
-## 大小与有效性
+## Size and availability
 
-当前限制：单文件最多 50 MB，单条消息最多 16 个附件、总计 100 MB。实际传输还受网络和浏览器存储空间影响。
+Current limits: 50 MB per file, 16 attachments and 100 MB total per message. Network and browser storage may impose further limits.
 
-附件必须仍存在于被控端对应会话的资源范围内。历史文件已经删除、临时图片过期时，Reign 无法恢复原文件；请重新选择上传。远端不能以任意文件路径绕过会话资源校验。
+An attachment must still exist within the host session's resource scope. Reign cannot recover deleted files or expired temporary images; upload them again. Remote clients cannot bypass session-resource validation with arbitrary file paths.
 
-## 缓存在哪
+## Cache locations
 
-原生端把附件缓存在本地磁盘。Web 使用 IndexedDB，并按最近使用淘汰附件，原始附件预算为 96 MiB；序列化会带来额外空间占用，浏览器也可能清理站点数据。
+Native clients cache attachments on local disk. Web uses IndexedDB with least-recently-used eviction and a 96 MiB raw attachment budget. Serialization adds overhead and browsers may clear site storage.
 
-连接服务不持久化附件明文。传输经过端到端加密；控制端下载或缓存后的内容由该设备持有。清理缓存会影响离线预览，需要在线重新加载。
+The connection service does not persist plaintext attachments. Transfers are end-to-end encrypted; downloaded or cached data belongs to the controller device. Clearing caches removes offline previews until they are reloaded online.

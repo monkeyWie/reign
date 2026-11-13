@@ -1,0 +1,32 @@
+---
+title: 自建服务概览
+description: 一个 Cloudflare Worker，提供 Web、信令和自己的加密中继。
+---
+
+## 你会部署什么
+
+开源部署包括官网、文档、Web 控制端 `/chat`、连接协议 `/p2p/*`、D1 数据库和设备房间 Durable Object。无需账号体系、OAuth 或支付配置，也不执行官方商业套餐额度。
+
+你只需要 Cloudflare 账号。默认的 `workers.dev` 地址自带 HTTPS，不要求购买域名，也不强制购买公网服务器。
+
+<Cards>
+  <Card title="部署到 Cloudflare" href="/docs/self-hosting/cloudflare">
+    从一键入口或命令行开始。
+  </Card>
+  <Card title="可选 TCP／UDP 探测器" href="/docs/self-hosting/probe">
+    增加自建候选发现能力，仍只填一个服务地址。
+  </Card>
+  <Card title="维护、升级与备份" href="/docs/self-hosting/operations">
+    保存数据库绑定、升级前备份，并检查服务健康。
+  </Card>
+</Cards>
+
+## 费用与限制
+
+开源代码采用 MIT 许可，不收取软件订阅费。Worker、D1、DO 和公网服务器仍受你自己的云账号配额及计费约束，不等于无限免费的基础设施。
+
+官方服务的账号、计费和权益层是闭源业务实现；开源自建服务不会依赖这个业务层才可工作。
+
+## 客户端怎么配置
+
+所有端填写同一个 Worker 根地址，例如 `https://reign.example.workers.dev`。Web 就是该地址下的 `/chat`。探测器地址由服务下发，不需要再配置第二个地址栏。

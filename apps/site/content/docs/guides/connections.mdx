@@ -1,34 +1,34 @@
 ---
-title: 直连与中继
-description: 一个服务地址，自动选择可用的网络路径。
+title: Direct connections and relay
+description: One service URL discovers the available network paths.
 ---
 
-## 连接顺序
+## Connection sequence
 
-1. 通过服务完成设备发现、配对和加密握手。
-2. 收集局域网、IPv6、公共 STUN 与可选自建探测器提供的候选地址。
-3. 原生端并行尝试 WebRTC／UDP 和原生 TCP 路径；浏览器尝试 WebRTC。
-4. 无法直连时，在服务允许的情况下使用该服务的加密 WebSocket 中继。
+1. Complete device discovery, pairing and the encrypted handshake through the service.
+2. Gather LAN, IPv6, public STUN and optional self-hosted probe candidates.
+3. Native clients try WebRTC/UDP and native TCP paths in parallel; browsers try WebRTC.
+4. If direct connection fails, use the service's encrypted WebSocket relay when permitted.
 
-公共和自建探测器并行辅助直连，不是等公共中继失败后才访问自建探测器。打洞成功后的业务数据直接在设备间传输，但信令连接仍用于维持设备状态等能力。
+Public and self-hosted probes assist direct connections in parallel. They are not a fallback after a public relay. Once connected directly, application data flows between devices; signaling still maintains device state.
 
-## 浏览器与原生端的区别
+## Native and browser capabilities
 
-| 能力                       | 原生桌面／手机 | 浏览器                 |
-| -------------------------- | -------------- | ---------------------- |
-| WebRTC 数据通道            | 支持           | 支持，取决于浏览器环境 |
-| 原生 TCP 打洞              | 支持           | 无原始 TCP Socket API  |
-| 加密 WebSocket 中继        | 服务允许时可用 | 服务允许时可用         |
-| 作为被控电脑管理本机 Agent | 桌面端支持     | 不支持                 |
+| Capability                | Native desktop/mobile | Browser                        |
+| ------------------------- | --------------------- | ------------------------------ |
+| WebRTC data channel       | Supported             | Depends on browser environment |
+| Native TCP hole punching  | Supported             | No raw TCP socket API          |
+| Encrypted WebSocket relay | When service permits  | When service permits           |
+| Host local agents         | Desktop only          | Not supported                  |
 
-## HTTPS 与端口
+## HTTPS and ports
 
-客户端只填服务根地址，例如 `https://reign.example.com`，探测器从 `/p2p/config` 自动发现。Cloudflare Worker 提供 HTTPS／WSS。
+Configure the service root URL, such as `https://reign.example.com`. Probes are discovered through `/p2p/config`. Cloudflare Workers provide HTTPS/WSS.
 
-Web 的加密 API、剪贴板和部分连接能力需要安全上下文。公网浏览器应使用 HTTPS；localhost 具有浏览器的开发例外。不要把“HTTP 页面能打开”等同于完整的浏览器远控能力。
+Browser cryptography, clipboard and some connection capabilities require a secure context. Use HTTPS on the public Web; localhost has a development exception. An HTTP page loading does not guarantee full remote-control functionality.
 
-## 无法打洞怎么办
+## When hole punching fails
 
-NAT、防火墙和企业 Wi-Fi 隔离都可能阻止直连。官方免费账号没有官方业务中继权益；付费方案开放后可按套餐回退官方中继。自建开源 Worker 可用自己的中继。
+NAT, firewalls and enterprise Wi-Fi isolation can prevent direct access. Official Free has no official traffic relay entitlement. Paid plans may provide relay when available; an open-source self-hosted Worker provides your own relay.
 
-当前方案不依赖 TURN、DERP、Tailscale 或 Cloudflare Tunnel。可选探测器只帮助发现地址，不能替代中继。[部署探测器](/docs/self-hosting/probe)。
+The current stack does not require TURN, DERP, Tailscale or Cloudflare Tunnel. The optional probe only discovers mappings and cannot replace relay. See [Deploy a probe](/docs/self-hosting/probe).

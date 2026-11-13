@@ -1,39 +1,37 @@
 ---
-title: 参与贡献
-description: 从可复现的问题、清晰的边界和可验证的改动开始。
+title: Contributing
+description: Start with reproducible issues, clear scope and verifiable changes.
 ---
 
-## 贡献什么
+## What to contribute
 
-欢迎改进文档、无障碍和 UI，修复连接／同步问题，增加测试或接入新的 Provider。较大的产品行为变动请先开 issue 讨论范围；小修复可以直接提交 PR。
+Improve docs, accessibility and UI; fix connection or synchronization issues; add tests or providers. Discuss larger product changes in an issue first. Small fixes can go directly to a PR.
 
-开源仓库采用 MIT 许可。请确认你有权贡献代码，不提交第三方私有源码、凭据或用户真实会话。
-
-## 开发入口
+The open-source repository is MIT-licensed. Contribute only code you have the right to share. Never include private third-party source, credentials or real user sessions.
 
 <Cards>
-  <Card title="本地开发" href="/docs/contributing/development">
-    Go、原生 UI、Web 和 Worker 的启动与检查。
+  <Card title="Local development" href="/docs/contributing/development">
+    Run and check Go, native UI, Web and Workers.
   </Card>
-  <Card title="添加 Provider" href="/docs/contributing/providers">
-    扩展 Agent，不复制设备管理与连接逻辑。
+  <Card title="Add a provider" href="/docs/contributing/providers">
+    Extend agents without duplicating device or connection logic.
   </Card>
-  <Card title="写文档" href="/docs/contributing/documentation">
-    用 MDX、侧栏元数据和可验证示例维护站点。
+  <Card title="Maintain documentation" href="/docs/contributing/documentation">
+    Work with MDX, sidebar metadata and verifiable examples.
   </Card>
 </Cards>
 
-## 提交与 PR 标准
+## Commits and pull requests
 
-- 一个 PR 聚焦一个可说明的目标，避免夹带格式化或无关重构。
-- 提交信息说明结果，例如 `Fix reconnect snapshot gaps`，不要只写 `update`。
-- PR 描述包含触发条件、修改后的行为、验证方式，以及已知限制。
-- UI 改动附桌面和窄屏截图；网络改动覆盖直连、回退和断线恢复；协议变动同步两端。
-- 使用隔离 fixture 和临时数据库测试，不运行或改写贡献者的真实 Agent 会话。
-- 不提交构建产物、数据库、签名密钥、OAuth Token 或本地配置。
+- Keep each PR focused on one explainable outcome; avoid unrelated refactors.
+- Describe the result in commit messages, such as `Fix reconnect snapshot gaps`, rather than `update`.
+- Describe triggers, resulting behavior, validation and limitations in the PR.
+- Include desktop/narrow-screen evidence for UI; cover direct, fallback and reconnect paths for networking; update both ends for protocol changes.
+- Use isolated fixtures and temporary databases. Do not modify a contributor's real agent sessions.
+- Keep build outputs, databases, signing keys, OAuth tokens and local configuration out of Git.
 
-## 代码与发布
+## Checks and releases
 
-Go 使用 `gofmt`，TypeScript／MDX 使用仓库的 Prettier。修改相关能力后运行对应测试，再运行 CI 规定的检查。仅构建成功不等于真实平台已验证。
+Use gofmt for Go and repository Prettier for TypeScript/MDX. Run relevant tests and required CI checks. A successful build alone is not device validation.
 
-main 的 CI 产物是开发预览；维护者创建版本 tag 后才发布 Release。不要移动已经发布的 tag。详细命令见[本地开发](/docs/contributing/development)。
+Main CI artifacts are developer previews. Maintainers publish Releases through version tags; never move a published tag. See [Local development](/docs/contributing/development).

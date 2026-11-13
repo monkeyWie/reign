@@ -1,14 +1,17 @@
-import Link from "next/link";
+"use client";
+import { useT } from "./locale";
+import { LocalizedLink as Link } from "./locale";
 import "./site.css";
 import { ArrowUpRight } from "lucide-react";
 import type { ReactNode } from "react";
 import { SiteHeader } from "./site-header";
 
 export function SiteShell({ children }: { children: ReactNode }) {
+  const t = useT();
   return (
     <div className="site-shell">
       <a className="site-skip" href="#main">
-        跳到主要内容
+        {t("跳到主要内容")}
       </a>
       <SiteHeader />
       {children}
@@ -17,6 +20,7 @@ export function SiteShell({ children }: { children: ReactNode }) {
   );
 }
 export function SiteFooter() {
+  const t = useT();
   return (
     <footer className="site-footer site-width">
       <div className="footer-top">
@@ -25,38 +29,38 @@ export function SiteFooter() {
             ♜ Reign
           </Link>
           <p>
-            你的 Agent，你的电脑。
+            {t("你的 Agent，你的电脑。")}
             <br />
-            从任何屏幕，继续你的工作。
+            {t("从任何屏幕，继续你的工作。")}
           </p>
           <span className="footer-caption">Your agents. Anywhere.</span>
         </div>
         {[
           [
-            "产品",
+            t("产品"),
             [
-              ["特性", "/features"],
-              ["技术栈", "/technology"],
-              ["价格", "/pricing"],
-              ["下载", "/download"],
+              [t("特性"), "/features"],
+              [t("技术栈"), "/technology"],
+              [t("价格"), "/pricing"],
+              [t("下载"), "/download"],
             ],
           ],
           [
-            "文档",
+            t("文档"),
             [
-              ["快速开始", "/docs/quick-start"],
-              ["Agent 接入", "/docs/agents"],
-              ["自建服务", "/docs/self-hosting"],
-              ["常见问题", "/docs/guides/troubleshooting"],
+              [t("快速开始"), "/docs/quick-start"],
+              [t("Agent 接入"), "/docs/agents"],
+              [t("自建服务"), "/docs/self-hosting"],
+              [t("常见问题"), "/docs/guides/troubleshooting"],
             ],
           ],
           [
-            "开发者",
+            t("开发者"),
             [
               ["GitHub", "https://github.com/monkeyWie/reign"],
-              ["贡献指南", "/docs/contributing"],
-              ["连接协议", "/docs/architecture/protocol"],
-              ["安全与隐私", "/docs/privacy"],
+              [t("贡献指南"), "/docs/contributing"],
+              [t("连接协议"), "/docs/architecture/protocol"],
+              [t("安全与隐私"), "/docs/privacy"],
             ],
           ],
         ].map(([title, items]) => (
@@ -71,8 +75,11 @@ export function SiteFooter() {
         ))}
       </div>
       <div className="footer-bottom">
-        <span>© {new Date().getFullYear()} Reign · 开源核心采用 MIT 许可</span>
-        <span>原生客户端 · Web 控制台 · 可自行部署</span>
+        <span>
+          © {new Date().getFullYear()}
+          {t("Reign · 开源核心采用 MIT 许可")}
+        </span>
+        <span>{t("原生客户端 · Web 控制台 · 可自行部署")}</span>
       </div>
     </footer>
   );
@@ -112,15 +119,17 @@ export function SectionHeading({
   );
 }
 export function BottomCTA() {
+  const t = useT();
   return (
     <section className="site-cta site-width">
       <div>
         <span className="site-eyebrow">TAKE YOUR WORK WITH YOU</span>
-        <h2>下一次灵感，不必等到回到电脑前。</h2>
-        <p>保留熟悉的 Agent，让你的设备连在一起。</p>
+        <h2>{t("下一次灵感，不必等到回到电脑前。")}</h2>
+        <p>{t("保留熟悉的 Agent，让你的设备连在一起。")}</p>
       </div>
       <Link className="button primary" href="/docs/quick-start">
-        开始使用 <ArrowUpRight size={16} />
+        {t("开始使用")}
+        <ArrowUpRight size={16} />
       </Link>
     </section>
   );

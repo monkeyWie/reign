@@ -1,0 +1,67 @@
+---
+title: 部署到 Cloudflare
+description: 部署开源 Worker，初始化 D1，连接自己的设备。
+---
+
+## 一键部署
+
+打开仓库中的 [Deploy to Cloudflare](https://deploy.workers.cloudflare.com/?url=https://github.com/monkeyWie/reign) 入口，授权你自己的 Cloudflare 账号，按向导创建服务。
+
+部署根仓库，**不要只选择 `apps/site` 子目录**，因为它依赖同一 pnpm workspace 中的连接核心与 SDK。向导需要配置 Worker、一个 D1 数据库和 SQLite Durable Object。
+
+一键入口依赖 Cloudflare 的资源授权。仓库的自动创建资源配置已准备；完整向导仍需在你自己的账号中完成并验证。
+
+## 手动部署
+
+需要 Git、Node.js 24、pnpm 10.34.5 和 Cloudflare 账号。在自己的目录克隆开源仓库：
+
+```sh
+git clone https://github.com/monkeyWie/reign.git
+cd reign
+corepack enable
+pnpm install --frozen-lockfile
+pnpm exec wrangler login
+pnpm build:web
+pnpm run deploy
+```
+
+注意使用 `pnpm run deploy`，避免调用 pnpm 自身的 deploy 子命令。首次资源创建后，部署脚本初始化 D1；初始化完成前请求可能暂时不可用。
+
+## 保存资源绑定
+
+检查 Wrangler 输出，在 `wrangler.jsonc` 中保留这次分配的 D1 数据库 ID。后续发布继续使用同一个数据库，避免重复创建后丢失设备目录和服务身份。
+
+部署后检查：
+
+```sh
+curl https://YOUR-WORKER.YOUR-SUBDOMAIN.workers.dev/healthz
+curl https://YOUR-WORKER.YOUR-SUBDOMAIN.workers.dev/p2p/config
+```
+
+健康检查应返回成功；配置端点应包含这套服务的连接能力和签名身份。打开同源 `/chat` 页面，再把 Worker 根地址填入原生客户端。
+
+## 自定义域名与来源限制
+
+可以在 Cloudflare 中给 Worker 绑定自定义域名，等待 DNS 与证书生效后使用 HTTPS 地址。Web、API、信令和中继保持同源部署。
+
+需要允许额外 Web 来源时，用 `ALLOWED_ORIGINS` 配置精确的逗号分隔 origin。当前服务自身的 origin 默认允许。不要用宽泛通配符替代配对授权。
+
+## 站点语言与 SEO
+
+官网和文档使用 `/en`、`/zh-CN`，控制台继续使用 `/chat`。如果使用固定公网域名，在构建时设置：
+
+```sh
+SITE_URL=https://reign.example.com pnpm build:web
+pnpm run deploy
+```
+
+这会为自己的域名生成 canonical、语言替代链接、分享卡片和站点地图。未设置 `SITE_URL` 时，不生成绝对 canonical，站点地图为空，避免把自建实例指向官方域名。更换域名需要调整构建变量并重新构建。私有实例仍需访问控制，robots.txt 不是鉴权。
+
+## 本地验证
+
+```sh
+pnpm exec wrangler d1 migrations apply DB --local
+pnpm exec wrangler dev --port 8787
+```
+
+访问 `http://localhost:8787/chat`。本地资源与生产 D1 分开，开发时不要指向真实用户的设备状态目录。

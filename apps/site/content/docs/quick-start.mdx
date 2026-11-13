@@ -1,36 +1,39 @@
 ---
-title: 快速开始
-description: 准备一台电脑和一个控制端，完成首次连接。
+title: Quick start
+description: Prepare a host computer and a controller for your first connection.
 ---
 
-## 1. 准备被控电脑
+## 1. Prepare your computer
 
-在安装 Codex 的电脑上打开 Reign 桌面应用。[下载与平台说明](/download)列出了各平台的获取方式。电脑需要保持开机、联网；系统休眠会让它离线。
+Open Reign on the computer where Codex is installed. Check [Downloads](/download) for platform availability. Keep the computer powered on and connected; sleep makes it unavailable.
 
-打开本机状态面板，确认服务地址正确：使用官方服务时是 `https://myreign.cloud`，自建时填写你自己的 Worker 根地址。无需另填 STUN、探测器或中继地址。
+In the local dashboard, check the service URL. Use `https://myreign.cloud` for the official service or your own Worker root URL. You do not need separate STUN, probe or relay settings.
 
-## 2. 让 Agent 就绪
+## 2. Make the agent ready
 
-在 Agent 列表中查看状态：
+Check each agent in the dashboard:
 
-- **已安装、已就绪**：可进入会话。
-- **已安装、需接入**：按面板提示点击启用。
-- **Codex App 需重启接入**：先保存工作，等待当前任务结束，再通过 Reign 启动 Codex App。
+- **Installed and ready**: open its sessions.
+- **Installed, integration required**: follow the enable action.
+- **Codex App needs restart**: save your work, wait for the current task to finish and launch Codex App through Reign.
 
-仅安装 Codex、或能看见本地历史记录，不代表正在运行的会话可以被写入。详见 [Codex App](/docs/agents/codex-app) 和 [Codex CLI](/docs/agents/codex-cli)。
+An installed agent or visible history does not mean a running session is writable. Read [Codex App](/docs/agents/codex-app) and [Codex CLI](/docs/agents/codex-cli).
 
-## 3. 在控制端配对
+## 3. Pair a controller
 
-桌面、手机可输入被控电脑的六位设备编号；手机也可以扫描电脑展示的二维码。浏览器直接打开服务的 `/chat` 页面，再输入设备编号。
+Enter the computer's six-digit device ID on desktop or mobile. Phones can also scan the QR code. In a browser, open the service's `/chat` page and enter the ID.
 
-首次连接有两种方式：被控电脑确认这次请求，或控制端输入被控电脑预先设置的访问密码。**设备编号只是查找入口，不是访问密码。**
+For first access, approve the request on the host or enter its preconfigured access password. **A device ID is a discovery address, not a password.**
 
-<Callout title="官方服务与自建服务">
-  官方服务需要登录并受账号权益约束；登录功能的开放情况以账号页为准。官方免费方案仅提供直连。自建开源服务不需要账号，支持自己的中继。[查看价格与差异](/pricing)。
+<Callout title="Official and self-hosted services">
+  The official service requires sign-in and account entitlements; check the
+  account page for availability. Official Free provides direct connections only.
+  Open-source self-hosting needs no account and includes your own relay.
+  [Compare options](/pricing).
 </Callout>
 
-## 4. 打开会话
+## 4. Open a session
 
-选择已连接设备，在项目分组中打开一个会话，也可以创建新会话。桌面和 Web 用 Enter 发送、Shift + Enter 换行；手机点击发送按钮。
+Select a connected computer and a session in its project group, or create a session. Desktop and Web use Enter to send and Shift + Enter for a new line; mobile has a send button.
 
-右上角的连接状态显示当前使用直连还是中继。失败时先查看[连接排查](/docs/guides/troubleshooting)，不要反复更换设备编号。
+The connection indicator shows direct or relay transport. If it fails, read [Troubleshooting](/docs/guides/troubleshooting) before changing device IDs.

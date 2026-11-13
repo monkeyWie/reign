@@ -1,32 +1,32 @@
 ---
-title: 添加 Agent Provider
-description: 复用连接核心，只实现 Agent 自己的适配层。
+title: Add an agent provider
+description: Reuse the connection core and implement only agent-specific adaptation.
 ---
 
-## 接入边界
+## Integration boundary
 
-Provider 位于 Go 应用层，接口在 `internal/provider/provider.go`。它只处理 Agent 安装／就绪状态、原生协议、会话与命令；不自行实现一套配对、账号或中继。
+Providers live in the Go application layer; the interface is in `internal/provider/provider.go`. Handle installation/readiness, native protocols, sessions and commands. Do not build another pairing, account or relay system.
 
-核心接口包括 Status、Sessions、Transcript、Create、Send、Steer、Interrupt 等。附加接口覆盖模型目录、流式事件、附件和自动连接。以当前源码为准，不复制过时签名。
+Core methods include Status, Sessions, Transcript, Create, Send, Steer and Interrupt. Additional interfaces cover models, events, attachments and auto-connect. Follow the current source rather than copying outdated signatures.
 
-## 能力声明
+## Capability declarations
 
-只给实际实现的能力设置 true。`installed` 表示发现安装，`running` 表示进程存在，`ready`／`connected` 则要求真正接入协议。
+Set capabilities true only when implemented. `installed` means an installation was discovered; `running` means a process exists. `ready`/`connected` requires a working protocol connection.
 
-独立 App、CLI 和编辑器扩展可能各自拥有后端；不要把读取共享历史当成它们均可控。启用动作应给出需要启动、重启或手动配置的明确引导。
+Independent Apps, CLIs and editor extensions may own different backends. Shared history does not prove all are controllable. Enable actions must clearly explain launch, restart or configuration requirements.
 
-## 统一数据模型
+## Shared data model
 
-把原生会话映射为稳定 ID、工作目录、更新时间和可控来源。流式事件必须处理重复、缺口和快照补偿；助手文本与临时工具活动分开，完成后收敛到最终消息状态。
+Map sessions to stable IDs, directories, update times and controllable sources. Streams must handle duplicates, gaps and snapshot recovery. Keep assistant text separate from temporary tool activity and converge on final state after completion.
 
-附件通过会话资源 ID 传递，不能接受远端任意本地路径。工具审批仍由 Agent 的真实请求驱动，不可因为 Reign 已配对就自动批准所有系统操作。
+Pass attachments by session resource ID, never arbitrary remote-supplied paths. Tool approvals must follow real agent requests; pairing is not blanket approval for system actions.
 
-## 验证清单
+## Validation
 
-1. 未安装、已安装未接入、已就绪、后端退出等状态。
-2. 既有会话读取、创建、发送和中断。
-3. 流式文本、重复事件、断线补快照。
-4. 模型、审批和附件等声明过的能力。
-5. 使用隔离 fixture 的原生／浏览器协议测试。
+1. Missing, installed/unconnected, ready and exited-backend states.
+2. Existing history, creation, sending and interruption.
+3. Streaming, duplicates and reconnect snapshots.
+4. Declared model, approval and attachment capabilities.
+5. Native/browser protocol checks using isolated fixtures.
 
-新增 Provider 后更新[支持矩阵](/docs/agents)和官网，不把尚未实现的 Agent 名称直接列入可用能力。
+Update the [support matrix](/docs/agents) and website when adding a provider. Do not list unimplemented agents as available.

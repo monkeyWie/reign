@@ -1,39 +1,39 @@
 ---
-title: 欢迎使用 Reign
-description: 从你口袋里的屏幕，连接电脑上的 AI Agent。
+title: Welcome to Reign
+description: Connect to the AI agents on your computer from any screen.
 ---
 
-Reign 让你在手机、桌面或浏览器里，继续处理自己电脑上的 Agent 会话。代码、工作目录和 Agent 仍在原来的电脑上运行。
+Reign lets you continue your agent sessions from a phone, desktop or browser. Your code, working directories and agents stay on the original computer.
 
-## 从这里开始
+## Start here
 
 <Cards>
-  <Card title="快速开始" href="/docs/quick-start">
-    安装客户端、配对设备，发出第一条远程指令。
+  <Card title="Quick start" href="/docs/quick-start">
+    Install a client, pair devices and send your first remote instruction.
   </Card>
-  <Card title="接入 Codex App" href="/docs/agents/codex-app">
-    了解共享 app-server，以及为什么需要通过 Reign 启动。
+  <Card title="Connect Codex App" href="/docs/agents/codex-app">
+    Understand the shared app-server and why you launch through Reign.
   </Card>
-  <Card title="自建服务" href="/docs/self-hosting">
-    用自己的 Cloudflare 账号部署完整服务。
+  <Card title="Self-hosting" href="/docs/self-hosting">
+    Deploy the complete service in your own Cloudflare account.
   </Card>
-  <Card title="参与贡献" href="/docs/contributing">
-    搭建开发环境、接入新 Provider、提交文档或代码。
+  <Card title="Contributing" href="/docs/contributing">
+    Set up development, add a provider or improve the docs.
   </Card>
 </Cards>
 
-## 三个角色
+## Three roles
 
-| 角色     | 运行位置              | 做什么                                  |
-| -------- | --------------------- | --------------------------------------- |
-| 被控端   | 安装 Agent 的桌面电脑 | 显示 Agent 接入状态，处理配对和远程指令 |
-| 控制端   | 桌面、手机、浏览器    | 连接多台电脑，管理会话、发送消息和附件  |
-| 连接服务 | Cloudflare Worker     | 设备发现、配对信令、可用时提供加密中继  |
+| Role               | Runs on                                | Responsibility                                                   |
+| ------------------ | -------------------------------------- | ---------------------------------------------------------------- |
+| Host               | Desktop computer with agents installed | Agent readiness, pairing and remote commands                     |
+| Controller         | Desktop, phone or browser              | Connect to computers, manage sessions and send messages or files |
+| Connection service | Cloudflare Worker                      | Discovery, pairing signaling and encrypted relay when available  |
 
-桌面应用同时承担控制端和被控端。浏览器和手机作为控制端，不会把你电脑上的 Agent 搬到云端运行。
+The desktop app is both a host and a controller. Phones and browsers are controllers; they do not move your agents into the cloud.
 
-## 当前支持范围
+## Current support
 
-Codex App 和 Codex CLI 已提供 Provider。Claude Code、Pi、ZCode 等属于后续扩展方向，**当前不能作为已支持的 Agent 使用**。Codex VS Code 扩展暂不支持。[查看接入条件](/docs/agents)。
+Codex App and Codex CLI have providers. Claude Code, Pi and ZCode are **not integrated yet**. The Codex VS Code extension is not currently supported. See [integration requirements](/docs/agents).
 
-项目目前处于开发预览阶段。正式安装包、签名和平台验证范围请查看[下载说明](/download)。
+Reign is a developer preview. See [Downloads](/download) for artifact availability, signing and platform validation.

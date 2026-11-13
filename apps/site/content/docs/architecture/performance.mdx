@@ -1,52 +1,60 @@
 ---
-title: 包体积与内存测量
-description: 给出可复现的预览测量，不把原生 UI 的选择等同于性能保证。
+title: Package size and memory
+description: Reproducible footprint and RSS measurements, with scenarios and limits.
 ---
 
-## 预览构建测量
+## Memory remeasurement, 2026-11-14
 
-以下为 **2026-11-14 本地测量**，不是所有平台或正式发行包的保证。
+Device: Apple M5, macOS 26.6, arm64. Built `0.1.0-memory-preview` with the default `./scripts/build.sh` optimization settings, native baseline `d6417d5`. Dependencies follow `clients/nsgo/go.mod`.
 
-| 项目               | 结果                         | 测量范围                                 |
-| ------------------ | ---------------------------- | ---------------------------------------- |
-| macOS arm64 压缩包 | 8,897,655 bytes，约 8.9 MB   | 完整 .app 的 tar.gz                      |
-| macOS .app         | 23,137,597 bytes，约 23.1 MB | 包内常规文件字节数之和，不是磁盘分配大小 |
-| 演示面板空闲 RSS   | 中位数 118.9 MiB             | 5 次样本，每次间隔 2 秒                  |
+The app used `AGENTHUB_NSGO_DEMO=1` and an isolated data directory, with no real agents. Sampling started about one minute after launch, with five samples per scenario two seconds apart. The conversation scenario rendered demo Markdown, a code block, a table and two messages, without attachment transfers.
 
-测试设备：Apple M5，macOS 26.6，arm64。应用版本：`0.1.0-site-preview`；原生代码基线 `dc19c8b`，NSGo 依赖以 `clients/nsgo/go.mod` 为准，使用仓库构建脚本的默认优化设置。
+| Scenario               | Median physical footprint | Median RSS      | Observed footprint peak |
+| ---------------------- | ------------------------- | --------------- | ----------------------- |
+| Idle demo dashboard    | About 39.5 MiB            | About 123.5 MiB | About 39.5 MiB          |
+| Demo conversation open | About 48.4 MiB            | About 137.5 MiB | About 48.4 MiB          |
 
-内存采样值为 121696、121712、121712、121728、121696 KiB。单位 MB 使用十进制，MiB 使用二进制。
+**Physical footprint was below 100 MiB in both scenarios.** This is not a limit for every platform or workload.
 
-## 场景与限制
+### Why the earlier number was about 119 MiB
 
-应用以 `AGENTHUB_NSGO_DEMO=1` 启动，停留在隔离演示面板，未运行真实 Agent，也未传输附件。采样前已完成启动并空闲约一分钟。
+The earlier preview measurement was **RSS**, with a five-sample median of 118.9 MiB. RSS and macOS vmmap **Physical footprint** measure different things. RSS includes resident shared mappings; physical footprint is closer to the process memory burden accounted by macOS, including compression accounting. Subtracting one from the other does not precisely measure shared memory.
 
-RSS 是操作系统报告的该进程驻留集，不是峰值、不等同于独占物理内存，也不包含独立的 Codex app-server、模型服务或被控 Agent 进程。
+Dashboard RSS samples: 126480, 126496, 126512, 126512, 126512 KiB. Footprint: 39.4, 39.4, 39.5, 39.5, 39.5 M. Conversation RSS: 140208, 140656, 140752, 140752, 140800 KiB. Footprint: 47.9, 48.3, 48.4, 48.4, 48.4 M. The raw vmmap M notation is retained here; the table reports approximate MiB. File sizes use decimal MB.
 
-真实会话、Markdown、图片、窗口数量和缓存都会改变内存占用。不能从这个单一场景推断整个工作环境只需 119 MiB，也不能据此宣称比某个竞品快多少。
+### Scope and limitations
 
-## 复现构建
+Only the Reign app process is included, not a separate Codex app-server, agent or model process. Long conversations, images, windows, network activity and caches change memory usage. As context, an older RAS client running for about 9.5 hours on the same computer had a footprint of about 100.8 M. It is not a controlled comparison, but demonstrates that an idle demo is not a long-running usage guarantee.
 
-在仓库根目录进入原生模块：
+## Package size
+
+These existing measurements refer to `0.1.0-site-preview`, native baseline `dc19c8b`, not a newly published release:
+
+| Item                | Result                          | Scope                                               |
+| ------------------- | ------------------------------- | --------------------------------------------------- |
+| macOS arm64 archive | 8,897,655 bytes, about 8.9 MB   | tar.gz of the complete .app                         |
+| macOS .app          | 23,137,597 bytes, about 23.1 MB | Sum of regular-file bytes, not allocated disk space |
+
+Architecture, libraries, compression, signing and build options affect size.
+
+## Reproduction
 
 ```sh
 cd clients/nsgo
-./scripts/build.sh macos_arm64 -output /tmp/reign-measure -version 0.1.0-site-preview
+./scripts/build.sh macos_arm64 -output /tmp/reign-measure -version 0.1.0-memory-preview
+AGENTHUB_NSGO_DEMO=1 AGENTHUB_NSGO_DATA_DIR=/tmp/reign-measure-data \
+  /tmp/reign-measure/Reign-0.1.0-memory-preview-macos_arm64/Reign.app/Contents/MacOS/Reign
 ```
 
-在隔离演示模式启动生成的 `.app` 内可执行文件，然后记录 PID：
+Keep the app running, find its PID in another terminal and read both metrics:
 
 ```sh
-AGENTHUB_NSGO_DEMO=1 AGENTHUB_NSGO_DATA_DIR=/tmp/reign-measure-data \
-  /tmp/reign-measure/Reign-0.1.0-site-preview-macos_arm64/Reign.app/Contents/MacOS/Reign
+ps -p PID -o rss=
+vmmap -summary PID
 ```
 
-另一个终端用 `ps -p PID -o rss=` 采样；macOS 的 RSS 以 KiB 报告。不要把开发工具、旧客户端或真实 Agent 的进程误算成测试进程。
+On macOS, ps reports RSS in KiB. The vmmap header reports physical footprint and its process peak. Do not interpret total mapped regions including shared libraries as exclusive process memory. Record foreground status, page content and warm-up time, and exclude development tools or agent processes.
 
-包体积使用同一构建的完整 `.app` 创建 tar.gz 后测量。不同压缩工具、签名、调试符号和架构会改变结果。
+## Why native UI
 
-## 为什么选择原生 UI
-
-NSGo 使用平台原生视图，不随应用打包 Chromium／WebView 运行时。Go 核心与 UI 在同一应用进程内工作，消息采用虚拟列表和增量更新。
-
-这些设计减少了运行时层次，但不代替持续的性能测量。今后的版本应补充真实长会话、附件和直连／中继场景，再对照相同设备和操作步骤评估。
+NSGo uses platform-native views without bundling Chromium/WebView. The Go core and UI share an app process, with virtual lists and incremental updates. These choices reduce runtime layers but do not replace ongoing tests with real long sessions, attachments, direct connections and relay.

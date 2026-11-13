@@ -1,47 +1,52 @@
 ---
-title: 维护文档
-description: 在仓库内用 Markdown／MDX 编辑，和代码一起审查发布。
+title: Maintain documentation
+description: Edit Markdown/MDX in the repository and review it with code.
 ---
 
-## 内容位置
+## Content location and languages
 
-面向用户的正式文档在 `apps/site/content/docs/`，由 Fumadocs MDX 和 Next.js 生成。普通 Markdown 语法可直接写在 `.mdx` 文件中；只有需要卡片、提示等组件时才加入 JSX。
+User documentation lives in `apps/site/content/docs/`, built with Fumadocs MDX and Next.js. Use ordinary Markdown in `.mdx`; add JSX only for components such as cards and callouts.
 
-根目录 `docs/platform/` 保留工程实现和协议说明。其他历史方案不应当作当前产品文档引用。
+English uses `page.mdx`; Simplified Chinese uses `page.zh-CN.mdx`. Each language has matching sidebar metadata (`meta.json` / `meta.zh-CN.json`). Keep slugs and code examples aligned. Missing translations return 404 rather than silently showing another language.
 
-## 新增页面
+Engineering and protocol notes remain under `docs/platform/`. Historical proposals are not current product documentation.
 
-新建 `.mdx` 文件，填写 frontmatter，并在同目录 `meta.json` 的 pages 中确定顺序：
+## Add a page
+
+Create both language variants with frontmatter, and set sidebar order in each language's meta file:
 
 ```md
 ---
-title: 页面标题
-description: 一句话说明这页解决什么问题。
+title: Page title
+description: A sentence explaining the problem this page solves.
 ---
 
-## 用户的第一步
+## First step
 
-写具体操作、前置条件和成功时应看到的结果。
+Describe the action, prerequisites and expected result.
 ```
 
-侧栏、页内目录和前后篇导航由 Fumadocs 生成；搜索按文档内容建立索引，不需要手工维护另一份关键词列表。
+Fumadocs generates sidebar, TOC, pagination and search. Shared MDX link components localize internal website and docs links while keeping `/chat`, `/account` and protocol endpoints stable. Avoid manually maintaining separate keyword lists.
 
-## 写作标准
+## Writing standards
 
-- 区分当前能力、计划和平台限制；不要把演示数据当成已上线支持。
-- 命令应在当前仓库和指定目录可执行，域名使用 example.com 或明确占位符。
-- 解释软件费用与云资源费用的区别。
-- 性能数字必须注明版本、平台、构建方式和场景，不做没有测量的横向比较。
-- 使用稳定站内链接；重命名路径时处理旧链接，不发布 200 状态的“页面不存在”。
+- Distinguish current behavior, plans and platform limits. Demo data is not proof of shipped support.
+- Make commands runnable in the specified directory; use example.com or explicit placeholders.
+- Explain software fees separately from infrastructure costs.
+- Include version, platform, build and scenario for performance claims. Do not invent competitor comparisons.
+- Maintain stable URLs and redirects. Missing pages must return 404.
+- Translate titles, descriptions, body content and navigation, not just button labels. Review both languages when changing behavior.
 
-## 预览与验证
+## SEO and validation
+
+The build-time `SITE_URL` controls canonical URLs, hreflang, social cards, robots and sitemap output. Set it to the deployment's own origin. Console/account/admin routes are excluded from indexing; robots.txt is not access control.
 
 ```sh
 pnpm dev
 pnpm --filter @reign/site check
-pnpm build:web
+SITE_URL=https://reign.example.com pnpm build:web
 ```
 
-完整 Worker 本地运行后，可以执行 `pnpm exec tsx scripts/platform/smoke-site.mts http://localhost:8787`，检查官网、文档链接、404 与浏览器搜索索引。CI 的隔离链路验证也会运行这些检查。
+With a local Worker running, execute `pnpm exec tsx scripts/platform/smoke-site.mts http://localhost:8787` to check bilingual links, unknown-page 404s, localized search and SEO output. CI runs these checks too.
 
-修改导航、代码块或表格时，检查桌面、窄屏、深色模式及搜索。文档 PR 与代码 PR 使用同样的检查流程。
+Check desktop, narrow screens, dark mode, language switching and search after UI changes. Documentation PRs follow the same checks as code.
