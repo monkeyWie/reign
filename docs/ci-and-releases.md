@@ -25,7 +25,7 @@ Linux 和 macOS 分别运行两个 Go module 的 `go vet`、`go test -race` 与�
 | Web | `.zip` |
 | Linux amd64 / arm64 服务 | `.tar.gz`，一个二进制内嵌最新 Web |
 
-PR 和 main 构建的产物在对应 Actions run 的 Artifacts 中，保留 14 天；覆盖率保留 7 天。tag 发布把公开产物合并，验证 11 个预期安装包/归档及各自 `.sha256`，生成总 `SHA256SUMS`。缺失、额外文件或校验和错误都会阻止发布。
+PR 和 main 构建的产物在对应 Actions run 的 Artifacts 中，保留 14 天；覆盖率保留 7 天。每次完整构建都会把公开产物合并到 `release-bundle` artifact，验证 11 个预期安装包/归档及各自 `.sha256`，生成总 `SHA256SUMS`；tag 发布直接使用这一份已验证的产物。缺失、额外文件或校验和错误都会阻止发布。
 
 服务复用本次客户端 job 构建的 Web，避免重复构建或混入旧开发产物。Linux amd64 服务会用临时数据和随机本地端口实际启动，检查健康端点、内嵌 WASM/JS、SQLite 与 TCP/UDP STUN 地址下发。
 

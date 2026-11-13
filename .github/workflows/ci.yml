@@ -252,18 +252,13 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  release:
-    name: Publish versioned GitHub Release
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+  assemble:
+    name: Verify complete release bundle
     needs: [metadata, test, clients, android, server]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    permissions:
-      contents: write
     env:
-      GH_TOKEN: ${{ github.token }}
       VERSION: ${{ needs.metadata.outputs.version }}
-      TAG: ${{ github.ref_name }}
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/download-artifact@v8.0.2
@@ -277,6 +272,31 @@ jobs:
           path: dist/release
       - name: Verify complete assets and checksums
         run: python3 scripts/ci/release.py verify --version "$VERSION" --output dist/release
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: release-bundle
+          path: dist/release/*
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Publish versioned GitHub Release
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: [metadata, assemble]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ needs.metadata.outputs.version }}
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          name: release-bundle
+          path: dist/release
       - name: Prepare release notes
         run: |
           cat > build-notes.md <<'NOTES'
