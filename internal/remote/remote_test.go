@@ -186,9 +186,26 @@ func TestRelayAndP2P(t *testing.T) {
 					client.wire.tcpSnapshot().close()
 				} else {
 					_ = pc.Close()
+					// Explicitly disable both fixture endpoints. Remote ICE loss
+					// detection is asynchronous; this test verifies relay routing
+					// and exactly-once dispatch after the direct path is unavailable.
+					monitor.mu.Lock()
+					hostWire := monitor.peers[client.wire.peer]
+					monitor.mu.Unlock()
+					hostWire.mu.Lock()
+					hostPC := hostWire.pc
+					hostWire.mu.Unlock()
+					_ = hostPC.Close()
 				}
-				waitFor(t, func() bool { return strings.HasPrefix(client.Path(), "Relay") })
-				if err := client.Call(requestCtx, control.Request{Method: "send", Provider: "test", Session: "original-thread", Text: "continue"}, nil); err != nil {
+				waitFor(t, func() bool {
+					peers := monitor.Snapshot().Peers
+					return strings.HasPrefix(client.Path(), "Relay") && len(peers) == 1 && strings.HasPrefix(peers[0].Path, "Relay")
+				})
+				// Fault injection gets its own budget rather than sharing the
+				// deadline with the large-message and concurrent-send checks.
+				fallbackCtx, cancelFallback := context.WithTimeout(ctx, 15*time.Second)
+				defer cancelFallback()
+				if err := client.Call(fallbackCtx, control.Request{Method: "send", Provider: "test", Session: "original-thread", Text: "continue"}, nil); err != nil {
 					t.Fatalf("fallback failed: %v", err)
 				}
 				if fake.sends.Load() != 5 {

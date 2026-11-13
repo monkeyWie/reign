@@ -176,6 +176,19 @@ jobs:
       - name: Build APK including native QR host
         working-directory: clients/nsgo
         run: ./scripts/build.sh android_arm64 -version "$VERSION" -build-number "$BUILD_NUMBER"
+      - name: Verify packaged APK version and signature
+        run: |
+          python3 - <<'PY'
+          import os, subprocess
+          from pathlib import Path
+          tools = Path(os.environ['ANDROID_HOME']) / 'build-tools/35.0.0'
+          apk = Path('clients/nsgo/dist/releases') / ('reign-' + os.environ['VERSION'] + '-android-arm64.apk')
+          badging = subprocess.check_output([str(tools / 'aapt'), 'dump', 'badging', str(apk)], text=True)
+          assert "versionName='" + os.environ['VERSION'] + "'" in badging
+          assert "versionCode='" + os.environ['BUILD_NUMBER'] + "'" in badging
+          assert "name='dev.agenthub.ras.RasActivity'" in badging
+          subprocess.run([str(tools / 'apksigner'), 'verify', str(apk)], check=True)
+          PY
       - name: Collect APK
         run: |
           python3 scripts/ci/release.py collect --source clients/nsgo/dist \
