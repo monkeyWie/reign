@@ -110,7 +110,7 @@ jobs:
       VERSION: ${{ needs.metadata.outputs.version }}
       BUILD_NUMBER: ${{ needs.metadata.outputs.build_number }}
       TARGETS: ${{ matrix.targets }}
-      AGENTHUB_SERVER_URL: ${{ vars.REIGN_SERVER_URL || 'http://127.0.0.1:26331' }}
+      AGENTHUB_SERVER_URL: ${{ vars.REIGN_SERVER_URL || 'https://myreign.cloud' }}
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-go@v7.0.0
@@ -141,7 +141,7 @@ jobs:
     env:
       VERSION: ${{ needs.metadata.outputs.version }}
       BUILD_NUMBER: ${{ needs.metadata.outputs.build_number }}
-      AGENTHUB_SERVER_URL: ${{ vars.REIGN_SERVER_URL || 'http://127.0.0.1:26331' }}
+      AGENTHUB_SERVER_URL: ${{ vars.REIGN_SERVER_URL || 'https://myreign.cloud' }}
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-go@v7.0.0
@@ -212,7 +212,7 @@ jobs:
     timeout-minutes: 25
     env:
       VERSION: ${{ needs.metadata.outputs.version }}
-      SERVER_DOMAIN: ${{ vars.REIGN_SERVER_DOMAIN || 'reign.example.com' }}
+      SERVER_DOMAIN: ${{ vars.REIGN_SERVER_DOMAIN || 'myreign.cloud' }}
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-go@v7.0.0

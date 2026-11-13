@@ -40,7 +40,7 @@ AGENTHUB_NSGO_DEMO=1 GOWORK=off go tool nsgo dev
 
 NSGo 应用 ID 是 `dev.agenthub.nsgo`，其本地设备身份和缓存与旧 Flutter 应用隔离。开发时可用 `AGENTHUB_NSGO_DATA_DIR` 指定独立测试目录。
 
-原生客户端默认服务为 `http://127.0.0.1:26331`（本机自部署）。可以在界面里改服务，或在第一次启动前设置运行环境变量 `AGENTHUB_SERVER_URL`。改变默认构建值：
+原生客户端默认服务为 `https://myreign.cloud`。可以在界面里改为自部署服务，或在第一次启动前设置运行环境变量 `AGENTHUB_SERVER_URL`。改变默认构建值：
 
 ```sh
 AGENTHUB_SERVER_URL=https://example.com ./scripts/build.sh macos_arm64,android_arm64
@@ -68,7 +68,7 @@ AGENTHUB_SERVER_URL=http://10.0.4.140:7443 ./scripts/build.sh macos_arm64,web
 
 Android 构建中，现有 Pion 依赖 `anet` 引用 Go 私有 zone cache，和旧 Flutter 构建一样需要 `-checklinkname=0`。包装脚本仅在 Android 链接时追加这个标志，不修改 Go 安装、依赖缓存或后端源码。
 
-- Android APK 当前使用 NSGo 自动生成的调试签名。正式发布须配置自己的 `sign.keystore`。
+- Android APK 支持通过 CI Secret `ANDROID_SIGNING_PEM_BASE64` 配置固定 PEM 签名身份；未配置时使用临时调试签名。详见 [CI 与 Release](../../docs/ci-and-releases.md)。
 - iOS IPA 已构建但未签名；安装到真机、TestFlight 或发布需要 Apple 签名配置。
 - Windows、Linux 包已交叉构建，尚未在对应真机运行。
 
@@ -77,7 +77,7 @@ Android 构建中，现有 Pion 依赖 `anet` 引用 Go 私有 zone cache，和�
 ```sh
 reign-server -listen :26331 -stun-listen :26330 -tcp-stun-listen :26330 \
   -state ./data/reign.db \
-  -origins https://reign.example.com \
+  -origins https://myreign.cloud \
   -web '/path/to/Reign-0.1.0-web'
 ```
 
@@ -86,10 +86,10 @@ HTTP/WS 可直接访问，也可用 Nginx 提供 HTTPS/WSS 并反代 26331。TCP
 打包公网 Linux 服务（包含 NSGo Web，保留当前 LAN 产物和服务）：
 
 ```sh
-python3 scripts/package-service.py --domain ras.lihuipeng.love
+python3 scripts/package-service.py --domain myreign.cloud
 ```
 
-输出在 `dist/server-releases/`，有 amd64 和 arm64 两种架构，Web 已内嵌在 `reign-server`，包含 Nginx、systemd 示例和 SHA256 清单，不需要启动脚本或外部 Web 目录。客户端填写 `http://公网IP:26331`，或配置反代后填写 `https://reign.example.com`。TCP/UDP 26330 均单独直达。详见 [服务部署说明](deploy/service/README.md)。
+输出在 `dist/server-releases/`，有 amd64 和 arm64 两种架构，Web 已内嵌在 `reign-server`，包含 Nginx、systemd 示例和 SHA256 清单，不需要启动脚本或外部 Web 目录。客户端填写 `http://公网IP:26331`，或配置反代后填写 `https://myreign.cloud`。TCP/UDP 26330 均单独直达。详见 [服务部署说明](deploy/service/README.md)。
 
 ## 界面和同步
 

@@ -17,7 +17,7 @@ ROOT = CLIENT.parents[1]
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--domain', default='reign.example.com')
+    parser.add_argument('--domain', default='myreign.cloud')
     parser.add_argument('--version', default='0.1.0-reign.embedded.20261113')
     parser.add_argument('--web-dir', type=Path, help='reuse a previously built NSGo Web directory')
     parser.add_argument('--output', type=Path, help='release output directory')

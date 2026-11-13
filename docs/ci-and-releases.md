@@ -35,8 +35,8 @@ PR 和 main 构建的产物在对应 Actions run 的 Artifacts 中，保留 14 �
 
 | 名称 | 类型 | 用途 |
 | --- | --- | --- |
-| `REIGN_SERVER_URL` | Variable | 原生客户端内置默认服务地址；未配置为 `http://127.0.0.1:26331`。Web 始终使用当前 origin |
-| `REIGN_SERVER_DOMAIN` | Variable | 服务包里 Nginx/说明文件使用的域名，默认 `reign.example.com`，不自动配置 DNS/TLS |
+| `REIGN_SERVER_URL` | Variable | 原生客户端内置默认服务地址；未配置为 `https://myreign.cloud`。Web 始终使用当前 origin |
+| `REIGN_SERVER_DOMAIN` | Variable | 服务包里 Nginx/说明文件使用的域名，默认 `myreign.cloud`，不自动配置 DNS/TLS |
 | `ANDROID_SIGNING_PEM_BASE64` | Secret | 可选的固定 Android 签名身份，使用 NSGo PEM 格式（RSA private key + certificate） |
 
 没有签名 Secret 也能完成流水线。Android 包名会加 `-debug.apk`，使用本次临时生成的调试身份，无法覆盖安装另一签名的旧包。需要跨版本覆盖安装时，将已有 NSGo `.nsgo/android/debug.pem`（或同格式的专用发布身份）Base64 后保存到上述 Secret，之后持续使用同一身份。不要提交密钥文件；流水线不会把 `.nsgo` 或密钥上传为产物，PR 也不会恢复这个 Secret。这不是 Google Play 上传密钥 / JKS 配置。
