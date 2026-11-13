@@ -1,62 +1,64 @@
 # Reign
 
-**Every agent. Under control.**
+Remote control for the AI Agents on your own computers. Native desktop and mobile clients use NSGo + Go; the website and browser controller use Next.js, React and shadcn/ui. The default service is `https://myreign.cloud`.
 
-Reign lets you access coding agents on your own computers from desktop, Android, iOS and the Web. The maintained client uses [NSGo](https://nsgo.dev/zh/docs/) with a Go core. The desktop app can both host agents and control other devices.
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/monkeyWie/reign)
 
-## Current capabilities
+## Architecture
 
-- Six-digit device IDs and QR pairing; host confirmation or a host password, saved device grants and revocation.
-- Provider architecture, with separate Codex App and Codex CLI integrations.
-- Shared session directory, streamed conversation updates, local cache, images and file attachments.
-- WebRTC and native TCP direct connections, optional Cloudflare Tunnel, and encrypted WebSocket relay fallback.
-- One self-hosted Go server with embedded Web UI and TCP/UDP STUN.
+- **One Worker** hosts `/`, `/docs`, `/chat` and `/p2p/*`. D1 stores device identities and encrypted pairing envelopes. Hibernating Durable Objects route signaling and encrypted relay frames.
+- **Direct first:** native clients try WebRTC/UDP and native TCP in parallel. Browsers use WebRTC. Public and optional self-hosted discovery servers provide candidates concurrently. If direct connectivity fails, self-hosted clients use their own Worker relay.
+- **One service address:** clients discover optional probe endpoints from `/p2p/config`. No second service address is required in the UI.
+- **End-to-end encryption:** pairing uses X25519/HKDF/AES-GCM; session traffic uses fresh directional AEAD keys and replay protection. Servers do not hold chat pairing keys or store chat plaintext.
+- **Providers:** Codex App and CLI are separate controlled connections, grouped into one `codex` product family for optional policy. Codex App must be connected through Reign's shared app-server setup. Local Agent tasks continue independently of remote connection authorization.
+- **Caching:** native clients use SQLite. Browsers use IndexedDB for paired identities, snapshots and bounded attachment caching.
 
-Codex App integration currently targets macOS. Reign must launch the App against its managed shared app-server; an independently launched App is discoverable but cannot be controlled. Remote clients do not require the official Codex App.
+The open-source deployment has no account, subscription, or commercial device limits. Our hosted service composes this same public core with private identity, payment and entitlement policies. Cloudflare's own infrastructure limits and charges still apply to your deployment.
 
-## Repository
+## Development
 
-| Directory | Purpose |
+Requires Go (see `go.mod`), Node 24 and pnpm 10.34.5.
+
+```sh
+pnpm install
+pnpm check
+pnpm test
+pnpm build:web
+pnpm exec wrangler d1 migrations apply DB --local
+pnpm exec wrangler dev --port 8787
+```
+
+Open `http://localhost:8787/chat`. Browser cryptography and WebRTC require a secure context: HTTPS or localhost. Use the generated `workers.dev` HTTPS address for other computers and phones.
+
+Native development remains in [`clients/nsgo`](clients/nsgo). Flutter and NSGo Web source remain historical references; releases ship React Web, not the NSGo WASM Web build.
+
+## Self-hosting
+
+The button above deploys the **whole repository**, not an isolated monorepo subdirectory. Cloudflare provisions the D1 database and SQLite Durable Object. The deploy command applies the D1 schema after provisioning. No OAuth applications, payment configuration, domain or external VM are required. Set every client to the resulting service origin.
+
+For manual deployment, run `pnpm build:web`, `pnpm exec wrangler login`, then `pnpm deploy`. See [deployment and optional probes](docs/platform/self-hosting.md).
+
+An optional Go probe improves native TCP/UDP candidate discovery. It runs independently:
+
+```sh
+go build -o reign-probe ./cmd/reign-probe
+./reign-probe --listen :26330
+```
+
+Expose **26330/TCP and 26330/UDP** directly. The probe contains no website, device directory, account database, or relay. No TURN, DERP, cloudflared or Tailcat is required.
+
+## Source map
+
+| Directory | Responsibility |
 | --- | --- |
-| `clients/nsgo` | Maintained desktop, mobile and Web UI |
-| `internal` | Go providers, device authorization, transport and storage |
-| `cmd/reign-server` | Self-hosted service entry point (`cmd/ras-server` remains compatible) |
-| `pkg` | Public service composition, ORM database and connection grant interfaces |
-| `deploy/service` | Deployment examples |
-| `docs` | Architecture and protocol documentation |
-| `clients/flutter` | Preserved earlier prototype; not the maintained UI |
-| `deploy/cloudflare` | Preserved Worker prototype; distinct from Cloudflare Tunnel |
+| `apps/site` | Public website, docs and React controller entry |
+| `packages/web-client` | Browser chat UI, messages, attachments and account UI |
+| `packages/client-sdk` | Pairing, encrypted RPC, WebRTC and IndexedDB |
+| `packages/protocol` | Current `/p2p/*` protocol and policy interfaces |
+| `packages/worker-core` | D1 directory/pairing, signed leases and hibernating rooms |
+| `clients/nsgo` | Native desktop, Android and iOS UI |
+| `internal` | Native Go application, Providers, transport and SQLite |
+| `cmd/reign-probe` | Optional TCP/UDP discovery binary |
+| `.github/workflows` | Native, Web, Worker and probe checks/builds/releases |
 
-## Develop
-
-Requires Go 1.27.3+; native client builds also need the platform SDKs described in [the NSGo client guide](clients/nsgo/README.md).
-
-```sh
-go test ./...
-cd clients/nsgo
-go test ./...
-./scripts/build.sh macos_arm64,web
-```
-
-## CI and releases
-
-Pushes and PRs run Go/NSGo checks and cross-platform builds. Version tags (`vX.Y.Z`, including prereleases) publish verified desktop, mobile, Web and embedded-Web server packages to GitHub Releases. See [CI, signing and release setup](docs/ci-and-releases.md).
-
-## Self-host
-
-```sh
-go build -o reign-server ./cmd/reign-server
-./reign-server
-```
-
-The server listens on **26331/TCP** for Web/API/signaling/relay and **26330/TCP+UDP** for STUN. TLS is optional; a reverse proxy can terminate HTTPS. STUN needs direct TCP/UDP reachability or layer-four forwarding. Release builds embed the compiled Web UI; a plain Go build uses the source placeholder until Web assets are built.
-
-Native settings, device identity and cached conversations use SQLite; browser storage uses IndexedDB. The server defaults to SQLite through GORM and accepts an injected GORM database for other engines. See [storage and Cloudflare setup](docs/storage-and-tunnels.md).
-
-See [server deployment](clients/nsgo/deploy/service/README.md) and [connection architecture](docs/relay.md). Configure the native client default through the build variable `AGENTHUB_SERVER_URL`; Web uses its current origin. No production service is provisioned by cloning this repository.
-
-## Open source and hosted service
-
-The self-hosted edition runs without an official account. A separately maintained private commercial service composes the same connection core, with account ownership, tenant isolation, entitlements and billing in a separate private repository. See [the boundary design](docs/open-source-boundary.md). Business implementation does not belong in this repository.
-
-Old application IDs, protocol identifiers and `AGENTHUB_*` configuration names remain compatibility identifiers during the Reign rename. Historical Flutter notes are in [legacy documentation](docs/legacy-flutter.md).
+Protocol compatibility with older prototypes is intentionally not provided. See [implementation scope](docs/platform/implementation.md) and [protocol](docs/platform/protocol.md). Older documents outside `docs/platform` describe historical prototypes.

@@ -1,1 +1,19 @@
-{"name":"@reign/worker-core","version":"0.1.0","private":true,"type":"module","exports":"./src/index.ts","dependencies":{"@reign/protocol":"workspace:*","drizzle-orm":"^0.45.2"},"devDependencies":{"@cloudflare/vitest-pool-workers":"^0.13.2","vitest":"^4.1.0"},"scripts":{"check":"tsc --noEmit","test":"vitest run"}}
+{
+  "name": "@reign/worker-core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "dependencies": {
+    "@reign/protocol": "workspace:*",
+    "drizzle-orm": "^0.45.2"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.13.2",
+    "vitest": "^4.1.0"
+  },
+  "scripts": {
+    "check": "tsc --noEmit",
+    "test": "vitest run"
+  }
+}

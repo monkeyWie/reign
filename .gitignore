@@ -1,4 +1,5 @@
 /build/
+/dist/
 /.agenthub/
 *.log
 .DS_Store

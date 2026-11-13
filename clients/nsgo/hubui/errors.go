@@ -26,22 +26,22 @@ func sessionAccessHelp(raw string, failure *sessionOperationError) accessHelp {
 		return accessHelp{}
 	}
 	app := failure.provider == "codex-app" || failure.source == "app"
-	h := accessHelp{Title: "此会话暂时无法发送消息", Description: "该会话由另一个 Codex 进程管理。能查看会话历史，不代表 RAS 已接入它的运行后端。输入内容已保留。"}
+	h := accessHelp{Title: "此会话暂时无法发送消息", Description: "该会话由另一个 Codex 进程管理。能查看会话历史，不代表 Reign 已接入它的运行后端。输入内容已保留。"}
 	where := "被控电脑"
 	if failure.device != "" {
 		where += "「" + failure.device + "」"
 	}
 	if app {
 		h.Steps = []string{
-			"在" + where + "上打开 RAS，进入「本机」。",
+			"在" + where + "上打开 Reign，进入「本机」。",
 			"先等待 Codex 当前任务结束，再在「Codex App」卡片点击「启用」，按提示正常退出并重新打开 Codex App。",
 			"确认 Codex App 显示「已就绪」后，返回此会话重试发送。",
 		}
 	} else {
 		h.Steps = []string{
 			"在" + where + "上确认这个会话当前由哪个 Codex 应用或终端管理。",
-			"如果来自 Codex App：等待当前任务结束，在 RAS「本机」的「Codex App」卡片点击「启用」，按提示重新接入。",
-			"如果来自 Codex CLI：需让 CLI 会话使用 RAS 已接入的共享后台；独立进程占用的会话不能直接接管。",
+			"如果来自 Codex App：等待当前任务结束，在 Reign「本机」的「Codex App」卡片点击「启用」，按提示重新接入。",
+			"如果来自 Codex CLI：需让 CLI 会话使用 Reign 已接入的共享后台；独立进程占用的会话不能直接接管。",
 			"接入完成后返回原会话重试；请勿仅因这个提示强制结束正在运行的任务。",
 		}
 	}

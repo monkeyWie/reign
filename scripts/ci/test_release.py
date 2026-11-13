@@ -26,8 +26,8 @@ class ReleaseContractTests(unittest.TestCase):
             output = Path(tmp)
             v = '1.2.3'
             names = [f'reign-{v}-{t.replace("_", "-")}' + ('.zip' if t.startswith('windows_') else '.tar.gz') for t in release.DESKTOP]
-            names += [f'reign-{v}-web.zip', f'reign-{v}-ios-unsigned.ipa', f'reign-{v}-android-arm64-debug.apk']
-            names += [f'reign-server-{v}-linux-{a}.tar.gz' for a in ('amd64', 'arm64')]
+            names += [f'reign-web-worker-{v}.tar.gz', f'reign-{v}-ios-unsigned.ipa', f'reign-{v}-android-arm64-debug.apk']
+            names += [f'reign-probe-{v}-linux-{a}.tar.gz' for a in ('amd64', 'arm64')]
             args = SimpleNamespace(version=v, output=tmp)
             for name in names:
                 path = output / name

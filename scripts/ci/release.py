@@ -88,12 +88,12 @@ def collect(args):
 def verify(args):
     output = Path(args.output)
     expected = [f'reign-{args.version}-{t.replace("_", "-")}' + ('.zip' if t.startswith('windows_') else '.tar.gz') for t in DESKTOP]
-    expected += [f'reign-{args.version}-web.zip', f'reign-{args.version}-ios-unsigned.ipa']
+    expected += [f'reign-web-worker-{args.version}.tar.gz', f'reign-{args.version}-ios-unsigned.ipa']
     apks = list(output.glob(f'reign-{args.version}-android-arm64*.apk'))
     if len(apks) != 1:
         raise SystemExit('Expected exactly one Android APK')
     expected += [apks[0].name]
-    expected += [f'reign-server-{args.version}-linux-{arch}.tar.gz' for arch in ('amd64', 'arm64')]
+    expected += [f'reign-probe-{args.version}-linux-{arch}.tar.gz' for arch in ('amd64', 'arm64')]
     actual = {p.name for p in output.iterdir() if p.is_file() and p.suffix != '.sha256' and p.name != 'SHA256SUMS'}
     if actual != set(expected):
         raise SystemExit(f'Release assets differ: missing={set(expected) - actual}, unexpected={actual - set(expected)}')

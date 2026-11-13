@@ -354,6 +354,14 @@ func (m *Manager) Local(ctx context.Context, r control.Request) (any, error) {
 		}
 	}
 	switch r.Method {
+	case "host.account.start", "host.account.poll", "host.account.status", "host.account.devices":
+		m.mu.Lock()
+		i := m.state.Identity
+		m.mu.Unlock()
+		paths := map[string]string{"host.account.start": "/api/account/device-login/start", "host.account.poll": "/api/account/device-login/poll", "host.account.status": "/api/account/device-status", "host.account.devices": "/api/account/device-list"}
+		var out map[string]any
+		err := device.Post(ctx, i.Service, i.Token, paths[r.Method], map[string]any{"id": in.ID}, &out)
+		return out, err
 	case "host.info":
 		m.mu.Lock()
 		defer m.mu.Unlock()

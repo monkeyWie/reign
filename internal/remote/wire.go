@@ -33,36 +33,37 @@ type Options struct {
 	RelayOnly      bool
 }
 type wire struct {
-	ws               *websocket.Conn
-	dataWS           *websocket.Conn
-	grantMu          sync.RWMutex
-	grant            string
-	crypto           *cryptor
-	base             *cryptor
-	key, clientNonce string
-	ready            chan struct{}
-	device           string
-	peer             string
-	host             bool
-	opts             Options
-	ctx              context.Context
-	cancel           context.CancelFunc
-	mu               sync.Mutex
-	pc               *webrtc.PeerConnection
-	dc               *webrtc.DataChannel
-	direct           bool
-	chunks           map[string]*assembly
-	chunkBytes       int
-	sendMu           sync.Mutex
-	signalMu         sync.Mutex
-	candidates       []webrtc.ICECandidateInit
-	tcpMu            sync.Mutex
-	tcpSelectMu      sync.Mutex
-	tcpAgent         *connectivity.TCPAgent
-	tcpStarted       bool
-	tcpKey           [32]byte
-	tcp              *tcpPath
-	onData           func([]byte)
+	ws                *websocket.Conn
+	dataWS            *websocket.Conn
+	grantMu           sync.RWMutex
+	grant             string
+	crypto            *cryptor
+	base              *cryptor
+	key, clientNonce  string
+	ready             chan struct{}
+	device            string
+	peer              string
+	host              bool
+	preferDirectUntil time.Time
+	opts              Options
+	ctx               context.Context
+	cancel            context.CancelFunc
+	mu                sync.Mutex
+	pc                *webrtc.PeerConnection
+	dc                *webrtc.DataChannel
+	direct            bool
+	chunks            map[string]*assembly
+	chunkBytes        int
+	sendMu            sync.Mutex
+	signalMu          sync.Mutex
+	candidates        []webrtc.ICECandidateInit
+	tcpMu             sync.Mutex
+	tcpSelectMu       sync.Mutex
+	tcpAgent          *connectivity.TCPAgent
+	tcpStarted        bool
+	tcpKey            [32]byte
+	tcp               *tcpPath
+	onData            func([]byte)
 }
 type chunk struct {
 	ID    string `json:"id"`
@@ -142,7 +143,7 @@ func newWire(ctx context.Context, ws *websocket.Conn, peer, key string, host boo
 	// additionally bind fresh randomness from both ends, even if relay IDs repeat.
 	crypto.random = true
 	life, cancel := context.WithCancel(ctx)
-	return &wire{ws: ws, peer: peer, base: crypto, key: key, clientNonce: relay.ID() + relay.ID(), ready: make(chan struct{}), host: host, opts: opts, ctx: life, cancel: cancel, chunks: make(map[string]*assembly), onData: onData}, nil
+	return &wire{ws: ws, peer: peer, base: crypto, key: key, clientNonce: relay.ID() + relay.ID(), ready: make(chan struct{}), host: host, preferDirectUntil: time.Now().Add(1500 * time.Millisecond), opts: opts, ctx: life, cancel: cancel, chunks: make(map[string]*assembly), onData: onData}, nil
 }
 
 func (w *wire) aad(kind string, out bool) string {
@@ -225,7 +226,8 @@ func (w *wire) close() {
 		_ = pc.Close()
 	}
 }
-func (w *wire) send(data []byte) error {
+func (w *wire) send(data []byte) error { return w.sendContext(w.ctx, data) }
+func (w *wire) sendContext(ctx context.Context, data []byte) error {
 	if err := w.ctx.Err(); err != nil {
 		return err
 	}
@@ -234,11 +236,15 @@ func (w *wire) send(data []byte) error {
 	}
 	w.sendMu.Lock()
 	defer w.sendMu.Unlock()
+	// Give direct negotiation a short head start even when relay is permitted.
 	// P2P-only accounts must establish a direct path before any business RPC.
-	if w.dataWS == nil {
+	if w.dataWS == nil || (!w.host && !w.opts.RelayOnly && time.Now().Before(w.preferDirectUntil)) {
 		deadline := time.NewTimer(25 * time.Second)
 		defer deadline.Stop()
 		for {
+			if w.dataWS != nil && !time.Now().Before(w.preferDirectUntil) {
+				break
+			}
 			w.mu.Lock()
 			direct := w.direct
 			w.mu.Unlock()
@@ -248,6 +254,8 @@ func (w *wire) send(data []byte) error {
 			select {
 			case <-w.ctx.Done():
 				return w.ctx.Err()
+			case <-ctx.Done():
+				return ctx.Err()
 			case <-deadline.C:
 				return errors.New("直连失败，当前服务未提供中继权限")
 			case <-time.After(20 * time.Millisecond):
@@ -600,6 +608,7 @@ func sessionCryptor(key, peer string, hello helloMessage, host bool) (*cryptor, 
 func keepAlive(ctx context.Context, ws *websocket.Conn) {
 	tick := time.NewTicker(25 * time.Second)
 	defer tick.Stop()
+	pulses := 0
 	for {
 		select {
 		case <-ctx.Done():
@@ -607,7 +616,8 @@ func keepAlive(ctx context.Context, ws *websocket.Conn) {
 		case <-tick.C:
 			probe, cancel := context.WithTimeout(ctx, 10*time.Second)
 			err := ws.Ping(probe)
-			if err == nil {
+			pulses++
+			if err == nil && pulses%3 == 0 {
 				err = ws.Write(probe, websocket.MessageText, []byte(`{"kind":"renew"}`))
 			}
 			cancel()

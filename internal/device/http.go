@@ -70,6 +70,12 @@ func Post(ctx context.Context, service, token, path string, in, out any) error {
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 1000))
+		var detail struct {
+			Message string `json:"message"`
+		}
+		if json.Unmarshal(b, &detail) == nil && detail.Message != "" {
+			return &HTTPError{StatusCode: resp.StatusCode, Detail: detail.Message}
+		}
 		return &HTTPError{StatusCode: resp.StatusCode, Detail: strings.TrimSpace(string(b))}
 	}
 	if out == nil {

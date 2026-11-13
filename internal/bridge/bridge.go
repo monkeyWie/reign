@@ -143,6 +143,8 @@ func Call(raw string) string {
 		case "client.assetCache.clear":
 			e = h.Assets.Clear(in.Target)
 		}
+	case "client.account.start", "client.account.poll", "client.account.status", "client.account.devices":
+		out, e = h.Account(ctx, p.Service, p.Name, strings.TrimPrefix(in.Method, "client.account."), p.ID)
 	case "client.list":
 		out, e = h.List()
 	case "client.connect":

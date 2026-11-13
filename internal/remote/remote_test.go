@@ -55,13 +55,16 @@ func waitFor(t *testing.T, fn func() bool) {
 }
 func TestRelayAndP2P(t *testing.T) {
 	for _, tc := range []struct {
-		name    string
-		options Options
-		path    string
+		name       string
+		options    Options
+		path       string
+		directOnly bool
 	}{
-		{"Relay", Options{RelayOnly: true}, "Relay"},
-		{"UDP", Options{DisableTCP: true}, "P2P · WebRTC"},
-		{"TCP", Options{DisableWebRTC: true}, "P2P · TCP"},
+		{"Relay", Options{RelayOnly: true}, "Relay", false},
+		{"UDP", Options{DisableTCP: true}, "P2P · WebRTC", false},
+		{"TCP", Options{DisableWebRTC: true}, "P2P · TCP", false},
+		{"UDP free", Options{DisableTCP: true}, "P2P · WebRTC", true},
+		{"TCP free", Options{DisableWebRTC: true}, "P2P · TCP", true},
 	} {
 		name, opts := tc.name, tc.options
 		relayOnly := opts.RelayOnly
@@ -69,7 +72,11 @@ func TestRelayAndP2P(t *testing.T) {
 			token := strings.Repeat("r", 32)
 			relayURL := os.Getenv("AGENTHUB_TEST_RELAY_URL")
 			if relayURL == "" {
-				server := httptest.NewServer(relay.New(token))
+				fixture := relay.New(token)
+				if tc.directOnly {
+					fixture.RelayAllowed = func(string, string, string) bool { return false }
+				}
+				server := httptest.NewServer(fixture)
 				defer server.Close()
 				relayURL = "ws" + strings.TrimPrefix(server.URL, "http")
 			} else {
@@ -114,7 +121,7 @@ func TestRelayAndP2P(t *testing.T) {
 			if !relayOnly {
 				waitFor(t, func() bool { return client.Path() == tc.path })
 			}
-			if name == "TCP" {
+			if strings.HasPrefix(name, "TCP") {
 				if err := client.wire.tcpSnapshot().control(tcpPing); err != nil {
 					t.Fatal("encrypted TCP heartbeat failed", err)
 				}
@@ -182,7 +189,7 @@ func TestRelayAndP2P(t *testing.T) {
 				client.wire.mu.Lock()
 				pc := client.wire.pc
 				client.wire.mu.Unlock()
-				if name == "TCP" {
+				if strings.HasPrefix(name, "TCP") {
 					client.wire.tcpSnapshot().close()
 				} else {
 					_ = pc.Close()
@@ -196,6 +203,21 @@ func TestRelayAndP2P(t *testing.T) {
 					hostPC := hostWire.pc
 					hostWire.mu.Unlock()
 					_ = hostPC.Close()
+				}
+				if tc.directOnly {
+					waitFor(t, func() bool { return !strings.HasPrefix(client.Path(), "P2P") })
+					if client.wire.dataWS != nil {
+						t.Fatal("free connection opened relay")
+					}
+					short, stop := context.WithTimeout(ctx, 100*time.Millisecond)
+					defer stop()
+					if client.Call(short, control.Request{Method: "send", Provider: "test", Session: "original-thread", Text: "continue"}, nil) == nil {
+						t.Fatal("business data bypassed denied relay")
+					}
+					if fake.sends.Load() != 4 {
+						t.Fatal("denied relay executed a command")
+					}
+					return
 				}
 				waitFor(t, func() bool {
 					peers := monitor.Snapshot().Peers

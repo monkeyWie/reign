@@ -1,1 +1,32 @@
-{"name":"@reign/web-client","version":"0.1.0","private":true,"type":"module","exports":"./src/index.tsx","dependencies":{"@reign/protocol":"workspace:*","@reign/client-sdk":"workspace:*","react":"^19.2.0","react-dom":"^19.2.0","lucide-react":"^0.577.0","@radix-ui/react-dialog":"^1.1.15","@radix-ui/react-tooltip":"^1.2.8","@radix-ui/react-select":"^2.2.6","class-variance-authority":"^0.7.1","clsx":"^2.1.1","tailwind-merge":"^3.4.0","react-markdown":"^10.1.0","remark-gfm":"^4.0.1","@tanstack/react-virtual":"^3.13.12","qrcode":"^1.5.4"},"devDependencies":{"@types/react":"^19.2.0","@types/react-dom":"^19.2.0","@types/qrcode":"^1.5.5"},"scripts":{"check":"tsc --noEmit"}}
+{
+  "name": "@reign/web-client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.tsx",
+  "dependencies": {
+    "@reign/protocol": "workspace:*",
+    "@reign/client-sdk": "workspace:*",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "lucide-react": "^0.577.0",
+    "@radix-ui/react-dialog": "^1.1.15",
+    "@radix-ui/react-tooltip": "^1.2.8",
+    "@radix-ui/react-select": "^2.2.6",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "tailwind-merge": "^3.4.0",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
+    "@tanstack/react-virtual": "^3.13.12",
+    "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@types/qrcode": "^1.5.5"
+  },
+  "scripts": {
+    "check": "tsc --noEmit"
+  }
+}

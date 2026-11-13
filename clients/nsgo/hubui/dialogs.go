@@ -36,6 +36,47 @@ func (s *State) dialogView(cx *core.Scope, kind string) core.Node {
 		}
 	}, Style: core.Style{Width: core.Pt(448), MaxWidth: core.Pct(96)}}
 	switch {
+	case kind == "account":
+		title = "账号与设备同步"
+		prefix := "client.account."
+		origin := serviceOrigin()
+		if s.api.CanHost() && str(s.host, "serviceUrl") != "" {
+			origin = str(s.host, "serviceUrl")
+		}
+		service := core.NewSignal(cx, origin)
+		params := Object{"service": service.Get(), "name": s.clientName}
+		if !s.api.CanHost() {
+			children = append(children, field("account-service", "服务地址", service, false))
+		}
+		if s.api.CanHost() {
+			prefix = "host.account."
+		}
+		children = append(children, label(cx, "登录后可同步设备。首次连接仍需主机确认或访问密码；自建开源服务无需登录。", 13, true))
+		if s.accountLogin != nil {
+			children = append(children, label(cx, "授权码："+str(s.accountLogin, "code"), 17, false), s.copyButton(cx, "copy-login-code", "复制授权码", "outline", func() string { return str(s.accountLogin, "code") }), button(cx, "open-login-page", "在浏览器中打开登录页面", nil, "outline", func() { cx.OpenURL(str(s.accountLogin, "url"), nil) }))
+		}
+		if s.accountStatus != nil {
+			children = append(children, label(cx, choose(flag(s.accountStatus, "linked"), "账号已绑定 · "+str(s.accountStatus, "plan"), "尚未绑定账号"), 13, false))
+		}
+		for _, entry := range s.accountDevices {
+			d := entry
+			children = append(children, button(cx, "account-device-"+str(d, "id"), str(d, "name")+" · "+str(d, "connectionId"), nil, "outline", func() {
+				close()
+				s.connect(Object{"service": service.Get(), "code": str(d, "connectionId"), "public": str(d, "public"), "remember": true, "name": s.clientName})
+			}))
+		}
+		footer = append(footer, button(cx, "account-start", "登录与绑定", nil, "primary", func() {
+			params["service"] = service.Get()
+			s.call(prefix+"start", params, func(v any) { s.accountLogin = object(v); cx.OpenURL(str(s.accountLogin, "url"), nil) })
+		}), button(cx, "account-refresh", "刷新账号设备", nil, "outline", func() {
+			if s.accountLogin != nil {
+				p := Object{"service": serviceOrigin(), "name": s.clientName, "id": str(s.accountLogin, "id")}
+				s.call(prefix+"poll", p, nil)
+			}
+			params["service"] = service.Get()
+			s.call(prefix+"status", params, func(v any) { s.accountStatus = object(v) })
+			s.call(prefix+"devices", params, func(v any) { s.accountDevices = objects(object(v)["devices"]) })
+		}))
 	case kind == "session-access-help":
 		help := sessionAccessHelp(s.error, s.failure)
 		if help.Title == "" {
@@ -84,6 +125,7 @@ func (s *State) dialogView(cx *core.Scope, kind string) core.Node {
 			children = append(children, field("access-password", "8–72 字节的访问密码", password, true))
 		} else {
 			title = "本机服务设置"
+			children = append(children, button(cx, "account-settings", "账号与设备同步", nil, "outline", func() { s.dialog.Set("account") }))
 			children = append(children, field("server-url", "服务地址", service, false), field("device-name", "设备名称", name, false), label(cx, "优先尝试 P2P 直连；允许中继时自动回退到所选服务的 WSS 中继。", 12, true))
 		}
 		footer = append(footer, button(cx, "dialog-save", "保存", nil, "primary", func() {
@@ -265,7 +307,7 @@ func (s *State) scanPhoto(cx *core.Scope, done func(string)) {
 						return
 					}
 				}
-				done("不是 RAS 设备二维码")
+				done("不是 Reign 设备二维码")
 			})
 		}()
 	}

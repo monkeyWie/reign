@@ -141,6 +141,9 @@ func serveHostObserved(ctx context.Context, p Pairing, opts Options, d *control.
 							return
 						}
 					}
+					if peer.authorize(p.Host, deviceID, req) != nil {
+						result = control.Response{ID: originalID, Error: "远控授权已过期，请重新连接"}
+					}
 					encoded, _ := json.Marshal(result)
 					if len(encoded) > 16<<20 {
 						encoded, _ = json.Marshal(control.Response{ID: originalID, Error: "响应超过 16 MiB，请缩小查询范围"})

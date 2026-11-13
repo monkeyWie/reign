@@ -95,7 +95,7 @@ func deviceStatus(d Object) string {
 func (s *State) phoneDevices(cx *core.Scope) core.Node {
 	nodes := []core.Node{
 		core.View{Style: core.Style{Padding: core.All(20), Gap: 16}, Children: []core.Node{
-			row(label(cx, "RAS", 24, false), spacer(), button(cx, "theme-toggle", "", lucide.SunMoon, "ghost", s.toggleTheme)),
+			row(label(cx, "Reign", 24, false), spacer(), button(cx, "mobile-account", "", lucide.User, "ghost", func() { s.dialog.Set("account") }), button(cx, "theme-toggle", "", lucide.SunMoon, "ghost", s.toggleTheme)),
 			label(cx, "选择设备，查看与管理它的 Agent 会话", 13, true),
 			row(button(cx, "connect-device", "连接设备", lucide.Plus, "primary", func() { s.scanned = nil; s.dialog.Set("connect") }), core.Show{When: func() bool { return isMobile(cx) }, Then: func(cx *core.Scope) core.Node {
 				return button(cx, "scan-qr", "扫一扫", lucide.ScanLine, "outline", func() { s.scan(cx) })

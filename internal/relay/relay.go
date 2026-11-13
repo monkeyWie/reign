@@ -49,6 +49,7 @@ type Server struct {
 	Authorize        func(credential, host, role string) (string, bool)
 	AuthorizeContext func(context.Context, string, string, string) (string, bool)
 	Grant            func(host, device, role string) string
+	RelayAllowed     func(host, device, role string) bool
 	Origins          []string
 }
 
@@ -102,6 +103,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid route", 400)
 		return
 	}
+	allowedRelay := true
+	if s.RelayAllowed != nil {
+		allowedRelay = s.RelayAllowed(id, deviceID, role)
+	}
+	if r.URL.Path == "/p2p/relay" && !allowedRelay {
+		http.Error(w, "relay not allowed", 403)
+		return
+	}
 	ws, err := websocket.Accept(w, r, &websocket.AcceptOptions{Subprotocols: []string{"reign.p2p"}, OriginPatterns: s.Origins})
 	if err != nil {
 		return
@@ -127,7 +136,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		attached.data = ws
 		s.mu.Unlock()
 		defer func() { s.mu.Lock(); attached.data = nil; s.mu.Unlock() }()
-		_ = (&connection{ws: ws}).send(Frame{Peer: peer, Kind: "welcome", Protocol: 1, AllowRelay: true})
+		_ = (&connection{ws: ws}).send(Frame{Peer: peer, Kind: "welcome", Protocol: 1, AllowRelay: allowedRelay})
 		for {
 			_, raw, err := ws.Read(r.Context())
 			if err != nil {
@@ -183,8 +192,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Unlock()
 	defer func() {
-		if c.data != nil {
-			c.data.CloseNow()
+		s.mu.Lock()
+		data := c.data
+		s.mu.Unlock()
+		if data != nil {
+			data.CloseNow()
 		}
 		s.mu.Lock()
 		if role == "host" {
@@ -205,7 +217,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			_ = room.host.send(Frame{Peer: peer, Kind: "bye"})
 		}
 	}()
-	if err = c.send(Frame{Peer: peer, Kind: "welcome", Protocol: 1, AllowRelay: true}); err != nil {
+	if err = c.send(Frame{Peer: peer, Kind: "welcome", Protocol: 1, AllowRelay: allowedRelay}); err != nil {
 		return
 	}
 	// Ping bounds half-open connections and keeps common reverse proxies alive.

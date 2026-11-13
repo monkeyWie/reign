@@ -120,7 +120,7 @@ func (c *Client) Call(ctx context.Context, r control.Request, out any) error {
 	if len(raw) > 1<<20 {
 		return errors.New("request too large")
 	}
-	if err = c.wire.send(raw); err != nil {
+	if err = c.wire.sendContext(ctx, raw); err != nil {
 		return err
 	}
 	select {

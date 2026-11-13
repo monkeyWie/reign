@@ -1,1 +1,9 @@
-'use client';import dynamic from 'next/dynamic';const Client=dynamic(()=>import('@reign/web-client').then(m=>m.RemoteApp),{ssr:false,loading:()=> <div className="loading">正在打开 Reign…</div>});export default function Chat(){return <Client/>;}
+"use client";
+import dynamic from "next/dynamic";
+const Client = dynamic(
+  () => import("@reign/web-client").then((m) => m.RemoteApp),
+  { ssr: false, loading: () => <div className="loading">正在打开 Reign…</div> },
+);
+export default function Chat() {
+  return <Client />;
+}

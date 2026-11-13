@@ -263,6 +263,7 @@ func (s *State) navigation(cx *core.Scope, compact bool) core.Node {
 			return core.Style{Background: bg, BorderColor: c.border, Hover: &core.Style{Background: c.muted}}
 		}, Children: []core.Node{dynamicText(cx, func() string { return deviceName(d()) }, 13, false), dynamicText(cx, func() string { return deviceStatus(d()) }, 10, true)}}
 	})}})
+	nodes = append(nodes, button(cx, "account-menu", choose(compact, "", "账号与设备同步"), lucide.User, "ghost", func() { s.dialog.Set("account") }))
 	nodes = append(nodes, button(cx, "theme-toggle", choose(compact, "", "切换主题"), lucide.SunMoon, "ghost", s.toggleTheme))
 	if s.api.CanHost() && !compact {
 		nodes = append(nodes, button(cx, "server-settings", "服务设置", lucide.Settings, "ghost", func() { s.dialog.Set("settings") }))

@@ -32,6 +32,8 @@ type State struct {
 	dialog                                                  *core.Signal[string]
 	devices, localProviders, providers, sessions, approvals []Object
 	host, selected, transcript, scanned                     Object
+	accountLogin, accountStatus                             Object
+	accountDevices                                          []Object
 	target, error, notice, model                            string
 	failure                                                 *sessionOperationError
 	copiedValue                                             string
