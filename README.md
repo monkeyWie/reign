@@ -38,6 +38,10 @@ go test ./...
 ./scripts/build.sh macos_arm64,web
 ```
 
+## CI and releases
+
+Pushes and PRs run Go/NSGo checks and cross-platform builds. Version tags (`vX.Y.Z`, including prereleases) publish verified desktop, mobile, Web and embedded-Web server packages to GitHub Releases. See [CI, signing and release setup](docs/ci-and-releases.md).
+
 ## Self-host
 
 ```sh

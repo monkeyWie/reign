@@ -29,6 +29,8 @@ func main() {
 	manifest := flag.String("manifest", "native/android/AndroidManifest.xml", "launcher XML")
 	config := flag.String("config", "nsgo.yaml", "NSGo config")
 	keyFile := flag.String("key", ".nsgo/android/debug.pem", "existing APK signing key")
+	version := flag.String("version", "", "override application version")
+	buildNumber := flag.Int("build-number", 0, "override application build number")
 	flag.Parse()
 	var cfg struct {
 		Name, ID, Version string
@@ -40,6 +42,12 @@ func main() {
 		}
 	}
 	must(yaml.Unmarshal(read(*config), &cfg))
+	if *version != "" {
+		cfg.Version = *version
+	}
+	if *buildNumber > 0 {
+		cfg.BuildNumber = *buildNumber
+	}
 	if cfg.Sign.Keystore != "" {
 		panic("native Android host packaging requires production keystore support before release signing; refusing to replace a release signature with the debug key")
 	}

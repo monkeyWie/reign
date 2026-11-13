@@ -4,7 +4,7 @@
 No framework fork or modification of the Go module cache. Uses the existing
 NSGo debug certificate, so this APK upgrades the previous NSGo installation.
 """
-import argparse, hashlib, os, pathlib, shutil, subprocess, tempfile, urllib.request, zipfile
+import argparse, hashlib, os, pathlib, re, shutil, subprocess, tempfile, urllib.request, zipfile
 
 root = pathlib.Path(__file__).resolve().parent.parent
 parser = argparse.ArgumentParser()
@@ -12,6 +12,14 @@ parser.add_argument('--output', default='dist')
 parser.add_argument('--targets', required=True)
 args = parser.parse_args()
 out = pathlib.Path(args.output).resolve()
+name = re.search(r'^name:\s*(\S+)\s*$', (root/'nsgo.yaml').read_text(), re.M).group(1)
+version = os.environ.get('REIGN_BUILD_VERSION', '')
+build_number = os.environ.get('REIGN_BUILD_NUMBER', '')
+overrides = []
+if version:
+    overrides += ['-version', version]
+if build_number:
+    overrides += ['-build-number', build_number]
 android = [t for t in args.targets.split(',') if t.startswith('android_')]
 if not android:
     raise SystemExit(0)
@@ -30,10 +38,10 @@ if not zxing.exists():
 if hashlib.sha256(zxing.read_bytes()).hexdigest() != expected:
     raise SystemExit('ZXing dependency checksum mismatch')
 for target in android:
-    with tempfile.TemporaryDirectory(prefix='ras-native-android-') as tmp:
+    with tempfile.TemporaryDirectory(prefix='reign-native-android-') as tmp:
         tmp = pathlib.Path(tmp)
-        subprocess.run(['go','tool','nsgo','build','-embed','-target',target,'-output',str(tmp/'aar')],cwd=root,check=True)
-        aar = next((tmp/'aar').rglob('RAS.aar'))
+        subprocess.run(['go','tool','nsgo','build','-embed','-target',target,'-output',str(tmp/'aar'),*overrides],cwd=root,check=True)
+        aar = next((tmp/'aar').rglob(name+'.aar'))
         with zipfile.ZipFile(aar) as z:
             (tmp/'classes.jar').write_bytes(z.read('classes.jar'))
         classes = tmp/'classes'; classes.mkdir()
@@ -41,15 +49,15 @@ for target in android:
         jar = str(platforms[-1])
         subprocess.run(['javac','-nowarn','--release','17','-classpath',os.pathsep.join([jar,str(tmp/'classes.jar'),str(zxing)]),'-d',str(classes),*map(str,sources)],check=True)
         subprocess.run([str(d8s[-1]),'--lib',jar,'--min-api','28','--output',str(tmp),str(tmp/'classes.jar'),str(zxing),*map(str,classes.rglob('*.class'))],check=True)
-        matches = list(out.glob(f'RAS-*-{target}/RAS.apk'))
+        matches = list(out.glob(f'{name}-{version or "*"}-{target}/{name}.apk'))
         if len(matches) != 1:
             raise SystemExit(f'Expected one {target} APK in {out}, found {len(matches)}')
         apk = matches[0]
-        patched = tmp/'RAS.apk'
-        subprocess.run(['go','run','./scripts/android-package','-input',str(apk),'-output',str(patched),'-dex',str(tmp/'classes.dex')],cwd=root,check=True)
+        patched = tmp/(name+'.apk')
+        subprocess.run(['go','run','./scripts/android-package','-input',str(apk),'-output',str(patched),'-dex',str(tmp/'classes.dex'),*overrides],cwd=root,check=True)
         shutil.copy2(patched,apk)
         # NSGo names arm64 => android-arm64, x64 => android-x64 in releases.
-        release = list((out/'releases').glob(f'ras-*-{target.replace("_","-")}.apk'))
+        release = list((out/'releases').glob(f'{name.lower()}-{version or "*"}-{target.replace("_","-")}.apk'))
         for dest in release:
             shutil.copy2(patched,dest)
             dest.with_name(dest.name+'.sha256').write_text(hashlib.sha256(dest.read_bytes()).hexdigest()+'  '+dest.name+'\n')

@@ -15,12 +15,23 @@ if [ "$#" -gt 0 ]; then
   # Preserve the regular NSGo release layout; Android then adds the host using
   # the framework's public embedding APIs and re-signs with the same key.
   nsgo_output=dist
+  nsgo_version=
+  nsgo_build_number=
   nsgo_prev=
   for nsgo_arg in "$@"; do
-    if [ "$nsgo_prev" = -output ]; then nsgo_output=$nsgo_arg; fi
-    case "$nsgo_arg" in -output=*) nsgo_output=${nsgo_arg#-output=};; esac
+    case "$nsgo_prev" in
+      -output) nsgo_output=$nsgo_arg ;;
+      -version) nsgo_version=$nsgo_arg ;;
+      -build-number) nsgo_build_number=$nsgo_arg ;;
+    esac
+    case "$nsgo_arg" in
+      -output=*) nsgo_output=${nsgo_arg#-output=} ;;
+      -version=*) nsgo_version=${nsgo_arg#-version=} ;;
+      -build-number=*) nsgo_build_number=${nsgo_arg#-build-number=} ;;
+    esac
     nsgo_prev=$nsgo_arg
   done
+  export REIGN_BUILD_VERSION="$nsgo_version" REIGN_BUILD_NUMBER="$nsgo_build_number"
   go tool nsgo build -target "$exec_target" "$@"
   case "$exec_target" in *android*) python3 scripts/build-android-host.py --targets "$exec_target" --output "$nsgo_output";; esac
 else

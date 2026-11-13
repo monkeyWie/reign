@@ -1,7 +1,6 @@
 //go:build !js
 
 // Isolated local transport fixture. Never opens a real agent or user session.
-//
 package main
 
 import (

@@ -19,12 +19,14 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--domain', default='reign.example.com')
     parser.add_argument('--version', default='0.1.0-reign.embedded.20261113')
+    parser.add_argument('--web-dir', type=Path, help='reuse a previously built NSGo Web directory')
+    parser.add_argument('--output', type=Path, help='release output directory')
     args = parser.parse_args()
     if not re.fullmatch(r'[a-zA-Z0-9](?:[a-zA-Z0-9.-]*[a-zA-Z0-9])?', args.domain):
         parser.error('domain must be an ASCII hostname without scheme, port or path')
     if not re.fullmatch(r'[a-zA-Z0-9._-]+', args.version):
         parser.error('version must use letters, digits, dot, underscore or dash')
-    releases = CLIENT / 'dist/server-releases'
+    releases = (args.output or CLIENT / 'dist/server-releases').resolve()
     releases.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ, GOWORK='off', GOFLAGS='', AGENTHUB_ALLOW_LAN_HTTP='false',
                AGENTHUB_SERVER_URL='https://' + args.domain)
@@ -34,12 +36,15 @@ def main():
     with tempfile.TemporaryDirectory(prefix='reign-public-build-') as temp:
         work = Path(temp)
         output = work / 'nsgo'
-        subprocess.run(['sh', 'scripts/build.sh', 'web', '-output', str(output)],
-                       cwd=CLIENT, env=env, check=True)
-        sites = [p.parent for p in output.glob('*/nsgo.json')]
-        if len(sites) != 1:
-            raise SystemExit('Expected exactly one NSGo Web output')
-        web = sites[0]
+        if args.web_dir:
+            web = args.web_dir.resolve()
+        else:
+            subprocess.run(['sh', 'scripts/build.sh', 'web', '-version', args.version, '-output', str(output)],
+                           cwd=CLIENT, env=env, check=True)
+            sites = [p.parent for p in output.glob('*/nsgo.json')]
+            if len(sites) != 1:
+                raise SystemExit('Expected exactly one NSGo Web output')
+            web = sites[0]
         manifest = json.loads((web / 'nsgo.json').read_text())
         if not (web / 'index.html').is_file() or any(not (web / manifest[k]).is_file() for k in ('wasm', 'exec', 'loader')):
             raise SystemExit('NSGo Web output is incomplete')
