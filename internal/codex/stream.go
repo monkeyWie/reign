@@ -44,8 +44,7 @@ func (p *Provider) Watch(ctx context.Context, session, epoch string, after int64
 		// Reading history does not subscribe this RPC client to live events.
 		// Rejoin the same thread without changing its model, permissions or
 		// instructions, and without starting a turn.
-		var resumed json.RawMessage
-		if err := p.call(ctx, "thread/resume", map[string]any{"threadId": session, "excludeTurns": true}, &resumed); err != nil {
+		if _, err := p.threadClient(ctx, session); err != nil {
 			return provider.StreamBatch{}, err
 		}
 		return log.Watch(ctx, session, "", 0)

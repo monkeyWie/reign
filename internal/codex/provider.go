@@ -36,6 +36,7 @@ type Provider struct {
 	broker    *events.Broker
 	mu        sync.Mutex
 	client    *rpc.Client
+	created   map[string]*rpc.Client
 	endpoint  string
 	shared    sharedRuntime
 	lastError string
@@ -70,6 +71,7 @@ func (p *Provider) Close() error {
 	p.mu.Lock()
 	c := p.client
 	p.client = nil
+	p.created = nil
 	p.mu.Unlock()
 	if c != nil {
 		_ = c.Close()
@@ -182,7 +184,12 @@ func (p *Provider) Transcript(ctx context.Context, id, cursor string) (provider.
 		NextCursor string
 	}
 	if err := p.call(ctx, "thread/turns/list", params, &turns); err != nil {
-		return provider.Transcript{}, err
+		// Codex does not materialize a new thread's history until its first
+		// user message. Metadata remains readable in the creating connection.
+		var rpcErr *rpc.Error
+		if cursor != "" || !p.isCreatedThread(id) || !errors.As(err, &rpcErr) || rpcErr.Code != -32600 || !strings.Contains(rpcErr.Message, "is not materialized yet") {
+			return provider.Transcript{}, err
+		}
 	}
 	out := provider.Transcript{Session: p.session(metadata.Thread), Turns: []provider.Turn{}, NextCursor: turns.NextCursor}
 	for i := len(turns.Data) - 1; i >= 0; i-- {
@@ -297,9 +304,53 @@ func (p *Provider) Create(ctx context.Context, o provider.CreateOptions) (provid
 		params["model"] = o.Model
 	}
 	var out struct{ Thread thread }
-	err := p.call(ctx, "thread/start", params, &out)
-	return p.session(out.Thread), err
+	p.mu.Lock()
+	c := p.client
+	p.mu.Unlock()
+	if c == nil || !c.Alive() {
+		return provider.Session{}, provider.ErrUnavailable
+	}
+	if err := c.Call(ctx, "thread/start", params, &out); err != nil {
+		return provider.Session{}, err
+	}
+	if out.Thread.ID == "" {
+		return provider.Session{}, errors.New("Codex did not return a thread ID")
+	}
+	p.mu.Lock()
+	if p.client == c {
+		if p.created == nil {
+			p.created = make(map[string]*rpc.Client)
+		}
+		p.created[out.Thread.ID] = c
+	}
+	p.mu.Unlock()
+	return p.session(out.Thread), nil
 }
+
+// Only threads created on the current transport can skip resume. Persisted
+// threads still resume normally, preserving writer-conflict checks and IDs.
+func (p *Provider) isCreatedThread(id string) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.client != nil && p.created[id] == p.client && p.client.Alive()
+}
+func (p *Provider) threadClient(ctx context.Context, id string) (*rpc.Client, error) {
+	p.mu.Lock()
+	c := p.client
+	created := c != nil && p.created[id] == c
+	p.mu.Unlock()
+	if c == nil || !c.Alive() {
+		return nil, provider.ErrUnavailable
+	}
+	if !created {
+		var resumed json.RawMessage
+		if err := c.Call(ctx, "thread/resume", map[string]any{"threadId": id, "excludeTurns": true}, &resumed); err != nil {
+			return nil, fmt.Errorf("无法接续原会话（不会另建会话）: %w", err)
+		}
+	}
+	return c, nil
+}
+
 func (p *Provider) Send(ctx context.Context, id, text string) error {
 	return p.SendWithModel(ctx, id, text, "")
 }
@@ -307,15 +358,15 @@ func (p *Provider) SendWithModel(ctx context.Context, id, text, model string) er
 	if strings.TrimSpace(text) == "" {
 		return errors.New("消息不能为空")
 	}
-	var resumed json.RawMessage
-	if err := p.call(ctx, "thread/resume", map[string]any{"threadId": id, "excludeTurns": true}, &resumed); err != nil {
-		return fmt.Errorf("无法接续原会话（不会另建会话）: %w", err)
+	c, err := p.threadClient(ctx, id)
+	if err != nil {
+		return err
 	}
 	params := map[string]any{"threadId": id, "input": []any{map[string]string{"type": "text", "text": text}}}
 	if model != "" {
 		params["model"] = model
 	}
-	return p.call(ctx, "turn/start", params, nil)
+	return c.Call(ctx, "turn/start", params, nil)
 }
 
 func (p *Provider) Models(ctx context.Context) ([]provider.Model, error) {
@@ -420,6 +471,14 @@ func (p *Provider) observe(m rpc.Message, reply func(context.Context, any) error
 	if len(m.ID) > 0 {
 		p.addPending(m, reply, "service")
 	} else {
+		if m.Method == "thread/closed" {
+			var closed struct{ ThreadID string }
+			if json.Unmarshal(m.Params, &closed) == nil {
+				p.mu.Lock()
+				delete(p.created, closed.ThreadID)
+				p.mu.Unlock()
+			}
+		}
 		p.observeStream(m)
 		p.resolvePending("service", m)
 		p.broker.Publish("codex", m.Method, m.Params)

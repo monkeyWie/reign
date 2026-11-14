@@ -234,15 +234,15 @@ func (p *Provider) SendAttachments(ctx context.Context, session, message, model 
 	if e != nil {
 		return e
 	}
-	var resumed json.RawMessage
-	if e = p.call(ctx, "thread/resume", map[string]any{"threadId": session, "excludeTurns": true}, &resumed); e != nil {
-		return fmt.Errorf("无法接续原会话（不会另建会话）: %w", e)
+	c, e := p.threadClient(ctx, session)
+	if e != nil {
+		return e
 	}
 	params := map[string]any{"threadId": session, "input": input}
 	if model != "" {
 		params["model"] = model
 	}
-	return p.call(ctx, "turn/start", params, nil)
+	return c.Call(ctx, "turn/start", params, nil)
 }
 func (p *Provider) SteerAttachments(ctx context.Context, session, turn, message string, ids []string) error {
 	input, e := p.attachmentInput(session, message, ids)

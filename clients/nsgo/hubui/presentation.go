@@ -218,7 +218,60 @@ func messagePreviewText(m Message) string {
 
 func mergeLatest(old, latest Object) Object {
 	out := copyObject(latest)
-	previous, next := objects(old["turns"]), objects(latest["turns"])
+	previous, next := objects(old["turns"]), append([]Object{}, objects(latest["turns"])...)
+	// A recovered connection can first return its last persisted snapshot.
+	// Preserve the live tail until a newer/final snapshot actually supersedes it.
+	if activeTurn(old) != nil {
+		if len(next) == 0 {
+			out["turns"], out["nextCursor"] = previous, old["nextCursor"]
+			return out
+		}
+		for i, turn := range previous {
+			if str(turn, "id") == str(next[len(next)-1], "id") && i < len(previous)-1 {
+				next = append(append([]Object{}, next...), previous[i+1:]...)
+				break
+			}
+		}
+	}
+	byID := map[string]Object{}
+	for _, turn := range previous {
+		byID[str(turn, "id")] = turn
+	}
+	for i, turn := range next {
+		prior := byID[str(turn, "id")]
+		if prior == nil || str(turn, "status") != "inProgress" {
+			continue // A final snapshot is authoritative, including corrected text.
+		}
+		if str(prior, "status") != "inProgress" {
+			next[i] = prior
+			continue
+		}
+		merged := copyObject(turn)
+		items := append([]Object{}, objects(prior["items"])...)
+		indices := map[string]int{}
+		for j, item := range items {
+			indices[str(item, "id")] = j
+		}
+		for _, item := range objects(turn["items"]) {
+			j, exists := indices[str(item, "id")]
+			if !exists {
+				indices[str(item, "id")] = len(items)
+				items = append(items, item)
+				continue
+			}
+			value := copyObject(item)
+			if text := str(items[j], "text"); strings.HasPrefix(text, str(item, "text")) {
+				value["text"] = text
+			}
+			if str(items[j], "status") == "completed" && str(item, "status") == "inProgress" {
+				value["status"] = "completed"
+			}
+			items[j] = value
+		}
+		merged["items"] = items
+		next[i] = merged
+	}
+	out["turns"] = next
 	anchor := -1
 	if len(next) > 0 {
 		for i, t := range previous {

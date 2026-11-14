@@ -58,6 +58,9 @@ type State struct {
 	pollCancel                                              context.CancelFunc
 	pollGeneration                                          uint64
 	timeline                                                *core.Ref
+	pendingSends                                            map[string]string
+	streamKey, streamEpoch                                  string
+	streamCursor                                            int64
 }
 
 func newState(cx *core.Scope, api API) *State {
@@ -325,6 +328,10 @@ func (s *State) startSessionWatch() {
 		s.watchCancel()
 	}
 	target, p, id, key := s.target, str(s.selected, "providerId"), str(s.selected, "id"), s.key()
+	if s.streamKey != key {
+		s.streamKey, s.streamEpoch, s.streamCursor = key, "", 0
+	}
+	epoch, cursor := s.streamEpoch, s.streamCursor
 	ctx, cancel := context.WithCancel(s.ctx)
 	s.watchCancel = cancel
 	go func() {
@@ -340,7 +347,7 @@ func (s *State) startSessionWatch() {
 			s.changed()
 		})
 	}()
-	go s.watch(ctx, target, p, id, key)
+	go s.watch(ctx, target, p, id, key, epoch, cursor)
 }
 func (s *State) setTranscript(t Object) {
 	s.transcript = mergeLatest(s.transcript, t)
@@ -350,9 +357,7 @@ func (s *State) setTranscript(t Object) {
 	}
 	s.changed()
 }
-func (s *State) watch(ctx context.Context, target, p, id, key string) {
-	epoch := ""
-	var cursor int64
+func (s *State) watch(ctx context.Context, target, p, id, key, epoch string, cursor int64) {
 	snapshot := func() error {
 		v, e := rpc(ctx, s.api, target, p, id, "transcript", nil)
 		s.cx.Post(func() {
@@ -381,8 +386,8 @@ func (s *State) watch(ctx context.Context, target, p, id, key string) {
 			}
 		})
 		if e != nil {
-			epoch = ""
-			_ = snapshot()
+			// Keep the rendered transcript and replay cursor. An offline cache is
+			// older than the deltas already on screen, not a replacement for them.
 			select {
 			case <-ctx.Done():
 				return
@@ -391,11 +396,16 @@ func (s *State) watch(ctx context.Context, target, p, id, key string) {
 			continue
 		}
 		b := object(v)
-		epoch = str(b, "epoch")
-		cursor = number(b, "cursor")
 		events := objects(b["events"])
 		if flag(b, "reset") || flag(b, "heartbeat") {
-			_ = snapshot()
+			if snapshot() != nil {
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(time.Second):
+				}
+				continue
+			}
 		} else if len(events) > 0 {
 			applied := make(chan bool, 1)
 			s.cx.Post(func() {
@@ -412,12 +422,21 @@ func (s *State) watch(ctx context.Context, target, p, id, key string) {
 			select {
 			case reset := <-applied:
 				if reset {
-					_ = snapshot()
+					if snapshot() != nil {
+						continue
+					}
 				}
 			case <-ctx.Done():
 				return
 			}
 		}
+		epoch, cursor = str(b, "epoch"), number(b, "cursor")
+		checkpointEpoch, checkpointCursor := epoch, cursor
+		s.cx.Post(func() {
+			if ctx.Err() == nil && s.key() == key {
+				s.streamKey, s.streamEpoch, s.streamCursor = key, checkpointEpoch, checkpointCursor
+			}
+		})
 		v, e = rpc(ctx, s.api, target, p, id, "approvals", nil)
 		if e == nil {
 			s.cx.Post(func() {
@@ -464,59 +483,95 @@ func (s *State) older() {
 		s.messageRows = messages(s.transcript)
 	})
 }
+func (s *State) pendingSend() string {
+	s.read()
+	return s.pendingSends[s.key()]
+}
+func (s *State) canSend() bool {
+	s.read()
+	if s.selected == nil || s.busy || !s.connected() || s.pendingSend() != "" {
+		return false
+	}
+	for _, u := range s.uploads {
+		if u.Status != "ready" {
+			return false
+		}
+	}
+	return strings.TrimSpace(s.draft.Get()) != "" || len(s.uploads) > 0
+}
 func (s *State) send(method string) {
-	if s.busy || !s.connected() || s.selected == nil {
+	if s.selected == nil || s.busy || !s.connected() || s.pendingSend() != "" {
+		return
+	}
+	if method != "interrupt" && !s.canSend() {
 		return
 	}
 	key, target, p, id := s.key(), s.target, str(s.selected, "providerId"), str(s.selected, "id")
 	body := strings.TrimSpace(s.draft.Get())
+	sent := append([]*Upload{}, s.uploads...)
 	ids := []string{}
-	for _, u := range s.uploads {
-		if u.Status != "ready" && method != "interrupt" {
-			return
-		}
+	for _, u := range sent {
 		if u.Status == "ready" {
 			ids = append(ids, u.ID)
 		}
 	}
-	if method != "interrupt" && body == "" && len(ids) == 0 {
-		return
-	}
 	extra := Object{"turn": str(activeTurn(s.transcript), "id")}
 	if method != "interrupt" {
-		extra["text"] = body
-		extra["attachments"] = ids
+		extra["text"], extra["attachments"] = body, ids
 		if s.model != "" {
 			extra["model"] = s.model
 		}
 	}
-	s.busy = true
+	if s.pendingSends == nil {
+		s.pendingSends = map[string]string{}
+	}
+	s.pendingSends[key] = method
 	s.error = ""
 	s.changed()
 	failure := &sessionOperationError{target: target, device: str(s.device(), "name"), provider: p, session: id, source: str(s.selected, "sourceKind"), method: method}
-	s.async(func(ctx context.Context) (any, error) {
-		v, err := rpc(ctx, s.api, target, p, id, method, extra)
-		if err != nil {
-			failure.cause = err
-			return nil, failure
-		}
-		return v, nil
-	}, func(any) {
-		if s.key() != key && method != "interrupt" {
-			if d := s.drafts[key]; strings.TrimSpace(d.Text) == body {
-				d.Text = ""
-				d.Uploads = nil
-				s.drafts[key] = d
+	go func() {
+		_, err := rpc(s.ctx, s.api, target, p, id, method, extra)
+		s.cx.Post(func() {
+			if s.ctx.Err() != nil {
+				return
 			}
-		}
-		if s.key() == key && method != "interrupt" {
-			if strings.TrimSpace(s.draft.Get()) == body {
-				s.draft.Set("")
+			delete(s.pendingSends, key)
+			if err != nil {
+				if s.key() == key {
+					failure.cause = err
+					s.error, s.failure = err.Error(), failure
+				}
+			} else if method != "interrupt" {
+				// The editor remains usable while awaiting acceptance. Only consume the
+				// submitted draft/attachments, never text or files added in the meantime.
+				consume := func(d draftState) draftState {
+					if strings.TrimSpace(d.Text) == body {
+						d.Text = ""
+					}
+					kept := []*Upload{}
+					for _, u := range d.Uploads {
+						wasSent := false
+						for _, submitted := range sent {
+							wasSent = wasSent || u == submitted
+						}
+						if !wasSent {
+							kept = append(kept, u)
+						}
+					}
+					d.Uploads = kept
+					return d
+				}
+				if s.key() == key {
+					d := consume(draftState{s.draft.GetUntracked(), s.model, s.uploads})
+					s.draft.Set(d.Text)
+					s.uploads = d.Uploads
+				} else {
+					s.drafts[key] = consume(s.drafts[key])
+				}
 			}
-			s.uploads = nil
-			s.model = str(object(s.transcript["session"]), "model")
-		}
-	})
+			s.changed()
+		})
+	}()
 }
 func (s *State) decision(a Object, decision string) {
 	target, p, id := s.target, str(s.selected, "providerId"), str(s.selected, "id")

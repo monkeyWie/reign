@@ -113,7 +113,7 @@ func (s *State) conversation(cx *core.Scope, narrow bool) core.Node {
 	return core.View{TestID: "conversation", Style: fill, Children: children}
 }
 func (s *State) messageInset(cx *core.Scope, content core.Node) core.Node {
-	return core.View{Style: core.Style{AlignItems: core.AlignCenter}, Children: []core.Node{core.View{Style: core.Style{Width: core.Pct(100), MaxWidth: core.Pt(988)}, StyleFunc: func() core.Style {
+	return core.View{Style: core.Style{Width: core.Pct(100), MinWidth: core.Pt(0), AlignItems: core.AlignCenter}, Children: []core.Node{core.View{Style: core.Style{Width: core.Pct(100), MaxWidth: core.Pt(988)}, StyleFunc: func() core.Style {
 		inset := core.Points(40)
 		width := s.width.Get()
 		if width >= 1000 {
@@ -121,7 +121,7 @@ func (s *State) messageInset(cx *core.Scope, content core.Node) core.Node {
 		} else if width >= 650 {
 			width -= s.deviceWidth.Get() + 5
 		} else {
-			width -= 60
+			inset = 20
 		}
 		if width >= 1000 {
 			inset = 64
@@ -158,7 +158,7 @@ func (s *State) message(cx *core.Scope, get func() Message) core.Node {
 			}
 		}
 		return label(cx, choose(im.Alt != "", im.Alt, "图片不可用"), 13, true)
-	}, Selectable: true, OpenLinks: false, OnLinkPress: func(e textview.LinkPressEvent) { s.openLink(cx, get(), e.URL) }, CodeBlockActions: []textview.CodeAction{{ID: textview.CopyAction, Label: "复制"}}, Styles: textview.Styles{textview.PartRoot: core.Style{FontSize: 14, LineHeight: 23, MinWidth: core.Pt(0)}}, StyleOf: func(p textview.Part) core.Style {
+	}, Selectable: true, OpenLinks: false, OnLinkPress: func(e textview.LinkPressEvent) { s.openLink(cx, get(), e.URL) }, CodeBlockActions: []textview.CodeAction{{ID: textview.CopyAction, Label: "复制"}}, Styles: textview.Styles{textview.PartRoot: core.Style{FontSize: 14, LineHeight: 23, MinWidth: core.Pt(0), Width: core.Pct(100)}}, StyleOf: func(p textview.Part) core.Style {
 		if p == textview.PartRoot || p == textview.PartParagraph {
 			return core.Style{Color: palette(cx).foreground}
 		}
@@ -178,10 +178,10 @@ func (s *State) message(cx *core.Scope, get func() Message) core.Node {
 					children = append(children, view)
 				}
 			}
-			return core.View{Style: core.Style{Gap: 12, MinWidth: core.Pt(0)}, Children: children}
+			return core.View{Style: core.Style{Gap: 12, Width: core.Pct(100), MinWidth: core.Pt(0)}, Children: children}
 		})
 	}
-	bubble := core.View{TestID: "message-body-" + m.ID, Selectable: true, Style: core.Style{MinWidth: core.Pt(0), MaxWidth: core.Pt(choose(user, core.Points(680), core.Points(820)))}, StyleFunc: func() core.Style {
+	bubble := core.View{TestID: "message-body-" + m.ID, Selectable: true, Style: core.Style{Width: core.Pct(100), FlexShrink: 1, MinWidth: core.Pt(0), MaxWidth: core.Pt(choose(user, core.Points(680), core.Points(820)))}, StyleFunc: func() core.Style {
 		if user {
 			return core.Style{Background: palette(cx).muted, CornerRadius: 20, Padding: core.All(16)}
 		}
@@ -229,7 +229,7 @@ func (s *State) message(cx *core.Scope, get func() Message) core.Node {
 			return time.UnixMilli(ts).Local().Format("15:04")
 		}, 11, true)}}
 	}})
-	return core.View{TestID: "message-" + m.ID, OnMouseEnter: func(core.MouseEvent) { hover.Set(true) }, OnMouseLeave: func(core.MouseEvent) { hover.Set(false) }, Style: core.Style{AlignItems: choose(user, core.AlignEnd, core.AlignStretch), Padding: core.Edges{Top: 10, Bottom: 10}, MinWidth: core.Pt(0)}, Children: content}
+	return core.View{TestID: "message-" + m.ID, OnMouseEnter: func(core.MouseEvent) { hover.Set(true) }, OnMouseLeave: func(core.MouseEvent) { hover.Set(false) }, Style: core.Style{AlignItems: choose(user, core.AlignEnd, core.AlignStretch), Padding: core.Edges{Top: 10, Bottom: 10}, Width: core.Pct(100), MinWidth: core.Pt(0)}, Children: content}
 }
 func (s *State) activity(cx *core.Scope, get func() Message) core.Node {
 	open := core.NewSignal(cx, false)
@@ -283,7 +283,7 @@ func (s *State) composer(cx *core.Scope) core.Node {
 		return core.Style{Background: c.muted.Faded(.45), BorderColor: c.border, Color: c.foreground}
 	}, Class: "dark:bg-zinc-900/60", Children: []core.Node{
 		core.Show{When: func() bool { s.read(); return len(s.uploads) > 0 }, Then: func(cx *core.Scope) core.Node { return s.uploadPreviews(cx) }},
-		core.Input{TestID: "chat-input", Label: "消息", Placeholder: "发送消息…", Value: s.draft.Get, OnChange: s.draft.Set, Multiline: true, SubmitBehavior: submit, Disabled: disabled, OnSubmit: func(string) { s.send(choose(running(), "steer", "send")) }, OnPaste: func(e core.PasteEvent) {
+		core.Input{TestID: "chat-input", Label: "消息", Placeholder: "发送消息…", Value: s.draft.Get, OnChange: s.draft.Set, Multiline: true, SubmitBehavior: submit, OnSubmit: func(string) { s.send(choose(running(), "steer", "send")) }, OnPaste: func(e core.PasteEvent) {
 			if !isMobile(cx) {
 				s.paste(cx, e)
 			}
@@ -323,7 +323,27 @@ func (s *State) composer(cx *core.Scope) core.Node {
 			}, Options: options, Selected: func() string { s.read(); return s.model }, OnChange: func(id string) { s.model = id; s.changed() }, Width: 300, SearchLabel: "搜索模型"}}}
 		}), core.Show{When: running, Then: func(cx *core.Scope) core.Node {
 			return button(cx, "interrupt-generation", "", lucide.Square, "outline", func() { s.send("interrupt") })
-		}}, core.View{Style: core.Style{CornerRadius: 18, Overflow: core.Hidden}, Children: []core.Node{button(cx, "send-message", "", lucide.ArrowUp, "primary", func() { s.send(choose(running(), "steer", "send")) })}}}},
+		}}, core.View{TestID: "send-message", Role: core.RoleButton, LabelFunc: func() string {
+			if s.pendingSend() != "" {
+				return "正在发送"
+			}
+			return "发送消息"
+		}, Disabled: func() bool { return !s.canSend() }, OnPress: func(core.PressEvent) { s.send(choose(running(), "steer", "send")) }, Style: core.Style{Width: core.Pt(36), Height: core.Pt(36), CornerRadius: 18, FlexShrink: 0, AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter}, StyleFunc: func() core.Style {
+			c := palette(cx)
+			opacity := float32(1)
+			if !s.canSend() && s.pendingSend() == "" {
+				opacity = .35
+			}
+			return core.Style{Background: c.foreground, Color: c.background, Opacity: core.Alpha(opacity)}
+		}, Children: []core.Node{core.Show{When: func() bool { return s.pendingSend() != "" }, Then: func(cx *core.Scope) core.Node {
+			theme := *cx.Theme()
+			theme.Light.TextMuted = theme.Light.Background
+			theme.Dark.TextMuted = theme.Dark.Background
+			cx.SetTheme(&theme)
+			return ui.Spinner{TestID: "send-loading", Label: "正在发送", Variant: ui.SpinnerSpokes, Size: 18}
+		}, Else: func(cx *core.Scope) core.Node {
+			return core.Icon{SVG: lucide.ArrowUp(), Style: core.Style{Width: core.Pt(16), Height: core.Pt(16)}}
+		}}}}}},
 	}}}}
 }
 func (s *State) messageNavigation(cx *core.Scope, rows *core.Memo[[]Message], ref *core.Ref, viewport *core.Signal[core.Size], tailCount func() int) core.Node {

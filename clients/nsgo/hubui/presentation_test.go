@@ -90,3 +90,26 @@ func TestSupersededTurnDoesNotRemainActive(t *testing.T) {
 		t.Fatal("superseded turn remained active")
 	}
 }
+
+func TestStaleSnapshotsDoNotEraseStreamedTail(t *testing.T) {
+	old := Object{"turns": []Object{{"id": "history", "status": "completed"}, {"id": "live", "status": "inProgress", "items": []Object{{"id": "answer", "role": "assistant", "text": "已经收到完整的前半段🙂"}, {"id": "tool", "role": "tool", "status": "completed"}}}}}
+	stale := Object{"turns": []Object{{"id": "live", "status": "inProgress", "items": []Object{{"id": "answer", "role": "assistant", "text": "已经收到"}}}}}
+	merged := mergeLatest(old, stale)
+	live := activeTurn(merged)
+	if str(objects(live["items"])[0], "text") != "已经收到完整的前半段🙂" || len(objects(live["items"])) != 2 {
+		t.Fatal("stale snapshot erased live items")
+	}
+	if str(objects(objects(stale["turns"])[0]["items"])[0], "text") != "已经收到" {
+		t.Fatal("merge mutated the source snapshot")
+	}
+	for _, snapshot := range []Object{{"turns": []Object{}}, {"turns": []Object{{"id": "history", "status": "completed"}}}} {
+		if str(activeTurn(mergeLatest(old, snapshot)), "id") != "live" {
+			t.Fatal("offline cache erased a newer streamed turn")
+		}
+	}
+	final := Object{"turns": []Object{{"id": "live", "status": "completed", "items": []Object{{"id": "answer", "role": "assistant", "text": "最终更正"}}}}}
+	done := mergeLatest(merged, final)
+	if activeTurn(done) != nil || str(objects(objects(done["turns"])[len(objects(done["turns"]))-1]["items"])[0], "text") != "最终更正" {
+		t.Fatal("final authoritative snapshot was not applied")
+	}
+}
