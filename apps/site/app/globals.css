@@ -1327,3 +1327,12 @@ hr {
   --accent-fg: #171717;
   --danger: #fca5a5;
 }
+
+.account-legal {
+  font-size: 12px;
+  line-height: 1.8;
+}
+.account-legal a {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}

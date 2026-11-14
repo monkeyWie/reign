@@ -57,6 +57,18 @@ pnpm run deploy
 
 这会为自己的域名生成 canonical、语言替代链接、分享卡片和站点地图。未设置 `SITE_URL` 时，不生成绝对 canonical，站点地图为空，避免把自建实例指向官方域名。更换域名需要调整构建变量并重新构建。私有实例仍需访问控制，robots.txt 不是鉴权。
 
+## 配置自己的法律页面
+
+如果服务有自己的运营条款和隐私政策，可在构建时指定链接：
+
+```sh
+NEXT_PUBLIC_TERMS_URL='https://example.com/{lang}/terms' \
+NEXT_PUBLIC_PRIVACY_URL='https://example.com/{lang}/privacy' \
+pnpm build:web
+```
+
+`{lang}` 会替换为 `en` 或 `zh-CN`；不需要多语言时也可填写固定链接。配置两个地址后，官网页脚和账号页会显示对应入口。正文由你自己的站点托管，开源版本不附带其他运营者的条款。
+
 ## 本地验证
 
 ```sh

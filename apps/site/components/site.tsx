@@ -1,5 +1,6 @@
 "use client";
-import { useT } from "./locale";
+import { legalLinks } from "../lib/legal";
+import { useLocale, useT } from "./locale";
 import { LocalizedLink as Link } from "./locale";
 import "./site.css";
 import { ArrowUpRight } from "lucide-react";
@@ -21,6 +22,7 @@ export function SiteShell({ children }: { children: ReactNode }) {
 }
 export function SiteFooter() {
   const t = useT();
+  const legal = legalLinks(useLocale());
   return (
     <footer className="site-footer site-width">
       <div className="footer-top">
@@ -79,7 +81,14 @@ export function SiteFooter() {
           © {new Date().getFullYear()}
           {t("Reign · 开源核心采用 MIT 许可")}
         </span>
-        <span>{t("原生客户端 · Web 控制台 · 可自行部署")}</span>
+        {legal ? (
+          <nav className="footer-legal" aria-label={t("法律信息")}>
+            <a href={legal.terms}>{t("服务条款")}</a>
+            <a href={legal.privacy}>{t("隐私政策")}</a>
+          </nav>
+        ) : (
+          <span>{t("原生客户端 · Web 控制台 · 可自行部署")}</span>
+        )}
       </div>
     </footer>
   );

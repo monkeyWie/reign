@@ -57,6 +57,18 @@ pnpm run deploy
 
 This generates canonical URLs, language alternates, social cards and a sitemap for **your** domain. Without `SITE_URL`, the build omits absolute canonical URLs and publishes an empty sitemap rather than pointing your instance at the official site. Change the build variable and rebuild if you change domains. Keep private instances protected by access control; robots.txt is not authorization.
 
+## Link your own legal policies
+
+If your service has its own terms and privacy policy, configure their URLs at build time:
+
+```sh
+NEXT_PUBLIC_TERMS_URL='https://example.com/{lang}/terms' \
+NEXT_PUBLIC_PRIVACY_URL='https://example.com/{lang}/privacy' \
+pnpm build:web
+```
+
+`{lang}` is replaced with `en` or `zh-CN`; fixed URLs also work. Once both URLs are configured, the website footer and account page show the links. Host the content on your own site; the open-source build does not include another operator's policies.
+
 ## Local verification
 
 ```sh

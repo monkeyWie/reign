@@ -41,7 +41,9 @@ async function api<T>(path: string, body?: unknown): Promise<T> {
   if (!r.ok) throw Error(data.message || "请求失败");
   return data as T;
 }
-export function AccountPage() {
+export function AccountPage({
+  legal,
+}: { legal?: { terms: string; privacy: string } } = {}) {
   const [account, setAccount] = useState<Account>();
   const [plans, setPlans] = useState<Plan[]>([]);
   const [providers, setProviders] = useState<string[]>([]);
@@ -245,6 +247,12 @@ export function AccountPage() {
           <p className="muted">
             同步你的设备，随时接续 Agent 工作。首次连接仍由电脑授权。
           </p>
+          {legal && (
+            <p className="muted account-legal">
+              登录即表示你同意 <a href={legal.terms}>服务条款</a>，并已阅读{" "}
+              <a href={legal.privacy}>隐私政策</a>。
+            </p>
+          )}
           <div className="login-actions">
             {providers.map((p) => (
               <Button key={p} disabled={busy} onClick={() => void login(p)}>
@@ -257,6 +265,14 @@ export function AccountPage() {
       {plans.length > 0 && (
         <section className="account-section">
           <h2>套餐</h2>
+          {legal && (
+            <p className="muted account-legal">
+              付费订阅会按结账页所示周期自动续费，可通过「管理订阅与账单」在线取消。购买前请阅读{" "}
+              <a href={legal.terms + "#section-7"}>取消与退款政策</a>、
+              <a href={legal.terms}>服务条款</a> 和{" "}
+              <a href={legal.privacy}>隐私政策</a>。
+            </p>
+          )}
           <div className="plan-grid">
             {plans.map((p) => (
               <article className="plan" key={p.id}>
