@@ -203,31 +203,42 @@ export class Connection extends EventTarget {
           "准备备用中继通道",
           this.endpoint(routes.relay),
         );
-        const data = await this.socket(routes.relay, this.peer);
-        this.relay = data.ws;
-        this.report(
-          "relay-ready",
-          "relay",
-          "备用中继通道已就绪",
-          this.endpoint(routes.relay) + " · 优先直连",
-          "success",
-        );
-        this.relay.onclose = () => {
-          this.relay = undefined;
-          if (!this.dc || this.dc.readyState !== "open")
-            this.update("Disconnected");
-        };
-        this.relay.onmessage = (e) => {
-          if (e.data !== "reign:pong") {
-            try {
-              const f = JSON.parse(e.data) as Frame;
-              if (f.kind === "error")
-                this.dispatchEvent(
-                  new CustomEvent("error", { detail: f.error }),
-                );
-            } catch {}
-          }
-        };
+        try {
+          const data = await this.socket(routes.relay, this.peer);
+          this.relay = data.ws;
+          this.report(
+            "relay-ready",
+            "relay",
+            "备用中继通道已就绪",
+            this.endpoint(routes.relay) + " · 优先直连",
+            "success",
+          );
+          this.relay.onclose = () => {
+            this.relay = undefined;
+            if (!this.dc || this.dc.readyState !== "open")
+              this.update("Disconnected");
+          };
+          this.relay.onmessage = (e) => {
+            if (e.data !== "reign:pong") {
+              try {
+                const f = JSON.parse(e.data) as Frame;
+                if (f.kind === "error")
+                  this.dispatchEvent(
+                    new CustomEvent("error", { detail: f.error }),
+                  );
+              } catch {}
+            }
+          };
+        } catch (error) {
+          if (this.closed) throw error;
+          this.report(
+            "relay-ready",
+            "relay",
+            "备用中继暂不可用，继续尝试 P2P 直连",
+            error instanceof Error ? error.message : String(error),
+            "warning",
+          );
+        }
       }
       const ready = new Promise<void>((resolve, reject) => {
         this.handshook = resolve;
@@ -585,7 +596,11 @@ export class Connection extends EventTarget {
       (!this.relay || Date.now() < this.preferDirectUntil)
     ) {
       if (Date.now() > deadline)
-        throw Error("直连失败，当前套餐不包含官方中继");
+        throw Error(
+          this.allowRelay
+            ? "直连失败，备用中继通道也未能建立，请查看连接详情"
+            : "直连失败，当前服务未提供中继权限",
+        );
       await new Promise((r) => setTimeout(r, 30));
     }
     if (this.closed) throw Error("连接已断开");

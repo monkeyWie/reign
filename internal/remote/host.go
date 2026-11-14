@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/monkeyWie/reignhub/internal/connectivity"
 	"github.com/monkeyWie/reignhub/internal/control"
 	"github.com/monkeyWie/reignhub/internal/relay"
 )
@@ -35,7 +36,7 @@ func serveHost(ctx context.Context, p Pairing, opts Options, d *control.Dispatch
 	return serveHostObserved(ctx, p, opts, d, nil)
 }
 func serveHostObserved(ctx context.Context, p Pairing, opts Options, d *control.Dispatcher, status *HostStatus) error {
-	ws, dataWS, _, err := dial(ctx, p, "host")
+	ws, dataWS, _, err := dialWithRelayPolicy(ctx, p, "host", connectivity.StageTimeout, opts.RelayOnly)
 	if err != nil {
 		return err
 	}
@@ -43,7 +44,11 @@ func serveHostObserved(ctx context.Context, p Pairing, opts Options, d *control.
 	if dataWS != nil {
 		defer dataWS.CloseNow()
 	}
-	status.set("connected", "中继已连接，等待移动端配对")
+	if dataWS != nil {
+		status.set("connected", "信令与备用中继已连接，等待控制端配对")
+	} else {
+		status.set("connected", "信令已连接，可尝试 P2P 直连；暂无可用中继")
+	}
 	life, cancel := context.WithCancel(ctx)
 	defer cancel()
 	go keepAlive(life, ws)

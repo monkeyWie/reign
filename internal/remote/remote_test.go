@@ -3,6 +3,7 @@ package remote
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"reflect"
@@ -56,16 +57,19 @@ func waitFor(t *testing.T, fn func() bool) {
 }
 func TestRelayAndP2P(t *testing.T) {
 	for _, tc := range []struct {
-		name       string
-		options    Options
-		path       string
-		directOnly bool
+		name             string
+		options          Options
+		path             string
+		directOnly       bool
+		relayUnavailable bool
 	}{
-		{"Relay", Options{RelayOnly: true}, "Relay", false},
-		{"UDP", Options{DisableTCP: true}, "P2P · WebRTC", false},
-		{"TCP", Options{DisableWebRTC: true}, "P2P · TCP", false},
-		{"UDP free", Options{DisableTCP: true}, "P2P · WebRTC", true},
-		{"TCP free", Options{DisableWebRTC: true}, "P2P · TCP", true},
+		{"Relay", Options{RelayOnly: true}, "Relay", false, false},
+		{"UDP", Options{DisableTCP: true}, "P2P · WebRTC", false, false},
+		{"TCP", Options{DisableWebRTC: true}, "P2P · TCP", false, false},
+		{"UDP free", Options{DisableTCP: true}, "P2P · WebRTC", true, false},
+		{"TCP free", Options{DisableWebRTC: true}, "P2P · TCP", true, false},
+		{"TCP relay unavailable", Options{DisableWebRTC: true}, "P2P · TCP", true, true},
+		{"UDP relay unavailable", Options{DisableTCP: true}, "P2P · WebRTC", true, true},
 	} {
 		name, opts := tc.name, tc.options
 		relayOnly := opts.RelayOnly
@@ -74,10 +78,18 @@ func TestRelayAndP2P(t *testing.T) {
 			relayURL := os.Getenv("AGENTHUB_TEST_RELAY_URL")
 			if relayURL == "" {
 				fixture := relay.New(token)
-				if tc.directOnly {
+				if tc.directOnly && !tc.relayUnavailable {
 					fixture.RelayAllowed = func(string, string, string) bool { return false }
 				}
-				server := httptest.NewServer(fixture)
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if tc.relayUnavailable && r.URL.Path == "/p2p/relay" {
+						w.Header().Set("Content-Type", "application/json")
+						w.WriteHeader(503)
+						_, _ = w.Write([]byte(`{"code":"SERVICE_UNAVAILABLE","message":"中继暂不可用"}`))
+						return
+					}
+					fixture.ServeHTTP(w, r)
+				}))
 				defer server.Close()
 				relayURL = "ws" + strings.TrimPrefix(server.URL, "http")
 			} else {

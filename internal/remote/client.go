@@ -27,7 +27,7 @@ func Connect(ctx context.Context, p Pairing, opts Options) (*Client, error) {
 	} else {
 		ctx = connectivity.WithProgress(ctx, opts.Progress)
 	}
-	ws, dataWS, peer, err := dial(ctx, p, "client")
+	ws, dataWS, peer, err := dialWithRelayPolicy(ctx, p, "client", connectivity.StageTimeout, opts.RelayOnly)
 	if err != nil {
 		return nil, err
 	}
@@ -79,7 +79,7 @@ func Connect(ctx context.Context, p Pairing, opts Options) (*Client, error) {
 		return nil, fmt.Errorf("配对握手失败: %w", err)
 	}
 	connectivity.Note(ctx, "handshake", "handshake", "端到端加密握手完成", "已验证设备配对密钥", "success")
-	message := "正在尝试 P2P 直连；此服务未授予中继权限"
+	message := "正在尝试 P2P 直连；暂无可用的备用中继通道"
 	if dataWS != nil {
 		message = "优先尝试 P2P 直连，必要时自动使用中继"
 	}

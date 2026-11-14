@@ -7,8 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
 	"net/url"
 	"strings"
 	"sync"
@@ -89,6 +87,10 @@ func dial(ctx context.Context, p Pairing, role string) (*websocket.Conn, *websoc
 }
 
 func dialWithTimeout(ctx context.Context, p Pairing, role string, timeout time.Duration) (*websocket.Conn, *websocket.Conn, string, error) {
+	return dialWithRelayPolicy(ctx, p, role, timeout, true)
+}
+
+func dialWithRelayPolicy(ctx context.Context, p Pairing, role string, timeout time.Duration, requireRelay bool) (*websocket.Conn, *websocket.Conn, string, error) {
 	if err := p.Validate(); err != nil {
 		return nil, nil, "", err
 	}
@@ -101,19 +103,9 @@ func dialWithTimeout(ctx context.Context, p Pairing, role string, timeout time.D
 	connectivity.Report(ctx, "signal", "正在建立信令连接", timeout)
 	signalCtx, stopSignal := context.WithTimeout(ctx, timeout)
 	defer stopSignal()
-	ws, resp, err := websocket.Dial(signalCtx, u.String(), &websocket.DialOptions{HTTPClient: connectivity.ConnectionHTTPClient, HTTPHeader: http.Header{"Authorization": []string{"Bearer " + p.RelayToken}}})
+	ws, resp, err := dialWebSocket(signalCtx, u.String(), p.RelayToken, "signal")
 	if err != nil {
-		if resp != nil && resp.Body != nil {
-			body, _ := io.ReadAll(io.LimitReader(resp.Body, 2000))
-			resp.Body.Close()
-			var detail struct {
-				Message string `json:"message"`
-			}
-			if json.Unmarshal(body, &detail) == nil && detail.Message != "" {
-				err = fmt.Errorf("信令服务拒绝连接（HTTP %d）：%s", resp.StatusCode, detail.Message)
-			}
-		}
-		return nil, nil, "", fmt.Errorf("建立信令连接失败: %w", err)
+		return nil, nil, "", websocketDialFailure("建立信令连接", resp, err)
 	}
 	ws.SetReadLimit(2 << 20)
 	_, raw, err := ws.Read(signalCtx)
@@ -141,31 +133,18 @@ func dialWithTimeout(ctx context.Context, p Pairing, role string, timeout time.D
 		u.Path = "/p2p/relay"
 		q.Set("peer", f.Peer)
 		u.RawQuery = q.Encode()
-		data, resp, err = websocket.Dial(relayCtx, u.String(), &websocket.DialOptions{HTTPClient: connectivity.ConnectionHTTPClient, HTTPHeader: http.Header{"Authorization": []string{"Bearer " + p.RelayToken}}})
+		data, err = openRelaySocket(relayCtx, u.String(), p.RelayToken, f.Peer)
 		if err != nil {
-			if resp != nil && resp.Body != nil {
-				resp.Body.Close()
+			if requireRelay || ctx.Err() != nil {
+				ws.CloseNow()
+				return nil, nil, "", err
 			}
-			ws.CloseNow()
-			return nil, nil, "", fmt.Errorf("建立备用中继通道失败: %w", err)
-		}
-		data.SetReadLimit(2 << 20)
-		_, raw, err = data.Read(relayCtx)
-		var welcome relay.Frame
-		if err != nil {
-			data.CloseNow()
-			ws.CloseNow()
-			return nil, nil, "", fmt.Errorf("等待中继服务响应失败: %w", err)
-		}
-		if json.Unmarshal(raw, &welcome) != nil || welcome.Kind != "welcome" || welcome.Peer != f.Peer {
-			data.CloseNow()
-			ws.CloseNow()
-			return nil, nil, "", errors.New("invalid relay handshake")
+			connectivity.Note(ctx, "relay-ready", "relay", "备用中继暂不可用，继续尝试 P2P 直连", err.Error(), "warning")
 		}
 	}
 	if data != nil {
 		connectivity.Note(ctx, "relay-ready", "relay", "备用中继通道已就绪", u.Host+"/p2p/relay · 优先直连", "success")
-	} else {
+	} else if !f.AllowRelay {
 		connectivity.Note(ctx, "relay-ready", "relay", "此服务未授予中继权限", u.Host, "warning")
 	}
 	return ws, data, f.Peer, nil
@@ -288,7 +267,7 @@ func (w *wire) waitPath(ctx context.Context) error {
 			case <-ctx.Done():
 				return ctx.Err()
 			case <-deadline.C:
-				return errors.New("直连失败，当前服务未提供中继权限")
+				return errors.New("直连失败，且当前没有可用的中继通道，请查看连接详情")
 			case <-time.After(20 * time.Millisecond):
 			}
 		}

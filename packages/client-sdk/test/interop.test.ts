@@ -108,6 +108,40 @@ test("browser SDK and Go host share handshake, AEAD, fragmentation, conditional 
     } finally {
       client.close();
     }
+    // Relay setup is optional: retain the real Go signaling/crypto handshake
+    // when the browser's second WebSocket fails, then verify the selected path.
+    const degraded = new Connection(saved, identity, config);
+    const socket = Reflect.get(degraded, "socket").bind(degraded);
+    Reflect.set(degraded, "socket", (path: string, peer?: string) =>
+      path === "/p2p/relay"
+        ? Promise.reject(Error("connection aborted"))
+        : socket(path, peer),
+    );
+    Reflect.set(degraded, "waitPath", async () => {});
+    let verified = false;
+    degraded.call = async <T>() => {
+      verified = true;
+      return [] as T;
+    };
+    try {
+      await degraded.connect();
+      assert.ok(verified);
+      assert.ok(
+        degraded.progress.some(
+          (step) => step.id === "handshake" && step.state === "success",
+        ),
+      );
+      assert.ok(
+        degraded.progress.some(
+          (step) =>
+            step.id === "relay-ready" &&
+            step.state === "warning" &&
+            step.detail?.includes("connection aborted"),
+        ),
+      );
+    } finally {
+      degraded.close();
+    }
   } finally {
     if (child.pid)
       try {

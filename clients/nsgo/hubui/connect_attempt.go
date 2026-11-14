@@ -121,7 +121,7 @@ func connectionFailure(a *connectAttempt) (string, string) {
 		return "找不到这台设备", "请检查设备 ID，并确认手机与电脑使用相同的服务地址。"
 	case strings.Contains(raw, "主机拒绝") || strings.Contains(raw, "授权被拒绝") || strings.Contains(raw, "密码错误"):
 		return "连接未获授权", "请检查访问密码，或在电脑上的 ReignHub 中允许连接。"
-	case strings.Contains(raw, "中继权限") || strings.Contains(raw, "不包含中继") || strings.Contains(raw, "直连失败"):
+	case strings.Contains(raw, "中继权限") || strings.Contains(raw, "不包含中继"):
 		return "直连未能建立", "当前网络未能建立直连，且此服务未授予中继权限。可换用同一局域网，或使用支持中继的服务后重试。"
 	case a.step.Stage == "approval":
 		return "等待授权未完成", "请检查电脑上的 ReignHub 是否收到了连接申请，并点击允许；也可以使用电脑设置的访问密码。"
