@@ -416,6 +416,7 @@ func (w *wire) setup() (*webrtc.PeerConnection, error) {
 		return nil, err
 	}
 	w.pc = pc
+	var candidateCount atomic.Int32
 	for _, url := range w.opts.PublicSTUN {
 		w.progress("stun:"+url, "udp", "公共 STUN 节点", url+" · 并行探测", "info")
 	}
@@ -425,10 +426,15 @@ func (w *wire) setup() (*webrtc.PeerConnection, error) {
 	w.progress("ice", "udp", "收集 UDP / IPv6 直连候选地址", "公共与自建节点同时参与探测", "running")
 	pc.OnICECandidate(func(candidate *webrtc.ICECandidate) {
 		if candidate == nil {
-			w.progress("ice", "udp", "UDP 候选地址收集结束", "正在检查可用直连路径", "success")
+			if candidateCount.Load() == 0 {
+				w.progress("ice", "udp", "未收集到 UDP 直连候选地址", "请检查网卡访问权限和本机网络；继续使用可用中继", "warning")
+			} else {
+				w.progress("ice", "udp", "UDP 候选地址收集结束", fmt.Sprintf("共 %d 个候选，正在检查可用直连路径", candidateCount.Load()), "success")
+			}
 			go w.reportSTUNStats(pc)
 			return
 		}
+		candidateCount.Add(1)
 		w.progress("candidate:"+candidate.Address+fmt.Sprint(candidate.Port), "udp", "发现 UDP 直连候选", fmt.Sprintf("%s · %s:%d · %s", candidate.Typ.String(), candidate.Address, candidate.Port, candidate.Protocol.String()), "info")
 		raw, err := json.Marshal(map[string]any{"type": "candidate", "candidate": candidate.ToJSON()})
 		if err == nil {
@@ -485,18 +491,23 @@ func (w *wire) offer() {
 	}
 	pc, err := w.setup()
 	if err != nil {
+		w.progress("ice", "udp", "无法初始化 WebRTC 直连", err.Error(), "warning")
 		return
 	}
 	dc, err := pc.CreateDataChannel("reign.p2p", nil)
 	if err != nil {
+		w.progress("ice", "udp", "无法创建 WebRTC 数据通道", err.Error(), "warning")
 		return
 	}
 	w.attach(dc)
 	offer, err := pc.CreateOffer(nil)
 	if err != nil {
+		w.progress("ice", "udp", "无法创建 WebRTC 协商请求", err.Error(), "warning")
 		return
 	}
-	_ = w.local(pc, offer)
+	if err := w.local(pc, offer); err != nil {
+		w.progress("ice", "udp", "WebRTC 候选收集或信令发送失败", err.Error(), "warning")
+	}
 }
 func (w *wire) local(pc *webrtc.PeerConnection, sdp webrtc.SessionDescription) error {
 	if err := pc.SetLocalDescription(sdp); err != nil {

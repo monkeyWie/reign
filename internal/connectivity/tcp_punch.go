@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/wlynxg/anet"
 )
 
 // TCPCandidate is exchanged over the authenticated, encrypted signaling link.
@@ -71,7 +73,11 @@ func (a *TCPAgent) Start(servers []string) {
 			a.launch(func() { a.accept(s) })
 		}
 		a.launch(func() {
-			addresses, _ := net.InterfaceAddrs()
+			addresses, err := anet.InterfaceAddrs()
+			if err != nil {
+				a.progress("tcp-interfaces", "无法读取本机 TCP 候选地址", err.Error(), "warning")
+				return
+			}
 			for _, s := range a.sockets {
 				for _, address := range addresses {
 					ip, _, err := net.ParseCIDR(address.String())

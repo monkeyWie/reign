@@ -66,6 +66,7 @@ func (w *wire) startTCP() {
 	}, w.onTCPConn)
 	if err != nil {
 		w.tcpMu.Unlock()
+		w.progress("tcp", "tcp", "无法初始化 TCP 直连", err.Error(), "warning")
 		return
 	}
 	w.tcpAgent = a
