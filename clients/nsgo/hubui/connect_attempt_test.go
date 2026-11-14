@@ -156,6 +156,9 @@ func TestRetryKeepsStatusPanelAndShowsActualTransportSteps(t *testing.T) {
 	app.WaitFor("id:connection-retry", time.Second)
 	app.Press("id:connection-retry")
 	app.WaitUntil(time.Second, func() bool { return f.calls.Load() == 2 })
+	if app.Exists("id:connection-error-raw") {
+		t.Fatal("new attempt retained the previous connection failure")
+	}
 	f.steps <- connectivity.Progress{ID: "path", Stage: "direct", Message: "已切换为 TCP 直连", Detail: "192.168.1.2:5000 → 192.168.1.3:5000", State: "success"}
 	app.WaitFor("text:已切换为 TCP 直连", time.Second)
 	f.finish <- nil

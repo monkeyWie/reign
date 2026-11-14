@@ -259,8 +259,12 @@ func (s *State) connectionPanel(cx *core.Scope, id string, a *connectAttempt, in
 		})}}}})
 	}
 	raw := s.connectionDetails(id)
-	if a != nil && a.err != "" {
-		raw = a.err
+	if a != nil {
+		if a.active {
+			raw = ""
+		} else if a.err != "" {
+			raw = a.err
+		}
 	}
 	if raw != "" {
 		text := label(cx, raw, 11, true)
