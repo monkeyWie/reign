@@ -42,6 +42,7 @@
     appearance: none;
     background-color: transparent;
     background-image: none;
+    border-color: var(--color-fd-border);
   }
 }
 .docs-search-dialog input {
