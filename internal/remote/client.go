@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/monkeyWie/reignhub/internal/connectivity"
 	"github.com/monkeyWie/reignhub/internal/control"
@@ -107,7 +108,26 @@ func Connect(ctx context.Context, p Pairing, opts Options) (*Client, error) {
 		c.Close()
 		return nil, fmt.Errorf("配对验证失败: %w", err)
 	}
+	go c.watchPaths()
 	return c, nil
+}
+
+// Business RPCs have no total deadline. End their wait when every usable data
+// path has actually gone away, even if the signaling socket remains open.
+func (c *Client) watchPaths() {
+	tick := time.NewTicker(time.Second)
+	defer tick.Stop()
+	for {
+		select {
+		case <-c.done:
+			return
+		case <-tick.C:
+			if c.Path() == "Disconnected" {
+				_ = c.Close()
+				return
+			}
+		}
+	}
 }
 func (c *Client) Path() string {
 	select {

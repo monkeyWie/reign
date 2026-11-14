@@ -35,7 +35,8 @@ interface Reply {
 interface Pending {
   resolve: (v: unknown) => void;
   reject: (e: Error) => void;
-  timer: ReturnType<typeof setTimeout>;
+  timer?: ReturnType<typeof setTimeout>;
+  cleanup?: () => void;
   key: string;
   cached?: { revision: string; value: unknown };
 }
@@ -53,13 +54,14 @@ export class Connection extends EventTarget {
   private snapshots = new Map<string, { revision: string; value: unknown }>();
   private chunks = new Map<
     string,
-    { parts: (Uint8Array | undefined)[]; size: number; created: number }
+    { parts: (Uint8Array | undefined)[]; size: number; updated: number }
   >();
   private candidates: RTCIceCandidateInit[] = [];
   private chain = Promise.resolve();
   private sendChain = Promise.resolve();
   private tick?: ReturnType<typeof setInterval>;
   private closed = false;
+  private established = false;
   private handshook!: () => void;
   private failHandshake!: (e: Error) => void;
   private heartbeat = Date.now();
@@ -215,8 +217,10 @@ export class Connection extends EventTarget {
           );
           this.relay.onclose = () => {
             this.relay = undefined;
-            if (!this.dc || this.dc.readyState !== "open")
-              this.update("Disconnected");
+            if (!this.dc || this.dc.readyState !== "open") {
+              if (this.established) this.close("数据连接已断开");
+              else this.update("Disconnected");
+            }
           };
           this.relay.onmessage = (e) => {
             if (e.data !== "reign:pong") {
@@ -289,6 +293,7 @@ export class Connection extends EventTarget {
       await this.waitPath();
       this.report("verify", "verify", "正在验证设备响应");
       await this.call({ method: "providers" }, CONNECTION_STAGE_TIMEOUT);
+      this.established = true;
       this.report(
         "connected",
         "connected",
@@ -464,8 +469,12 @@ export class Connection extends EventTarget {
           "使用可用的服务中继",
           "warning",
         );
-      if (["failed", "disconnected", "closed"].includes(pc.connectionState))
-        this.update(this.relay ? "Relay · encrypted" : "Disconnected");
+      if (["failed", "disconnected", "closed"].includes(pc.connectionState)) {
+        if (this.relay?.readyState === WebSocket.OPEN)
+          this.update("Relay · encrypted");
+        else if (this.established) this.close("直连已断开，且没有可用中继");
+        else this.update("Disconnected");
+      }
     };
     this.dc = pc.createDataChannel("reign.p2p", { ordered: true });
     this.dc.binaryType = "arraybuffer";
@@ -541,14 +550,16 @@ export class Connection extends EventTarget {
     const part = un64(c.b);
     if (part.length > 12000) return;
     for (const [k, v] of this.chunks)
-      if (Date.now() - v.created > 30000) this.chunks.delete(k);
+      if (Date.now() - v.updated > CONNECTION_STAGE_TIMEOUT)
+        this.chunks.delete(k);
     let a = this.chunks.get(c.id);
     if (!a) {
       if (this.chunks.size >= 8) return;
-      a = { parts: Array(c.n), size: 0, created: Date.now() };
+      a = { parts: Array(c.n), size: 0, updated: Date.now() };
       this.chunks.set(c.id, a);
     }
     if (a.parts.length !== c.n || a.parts[c.i]) return;
+    a.updated = Date.now();
     a.parts[c.i] = part;
     a.size += part.length;
     if (a.size > 16 * 1024 * 1024) {
@@ -570,6 +581,7 @@ export class Connection extends EventTarget {
     const p = this.pending.get(r.id);
     if (!p) return;
     clearTimeout(p.timer);
+    p.cleanup?.();
     this.pending.delete(r.id);
     if (r.error) {
       p.reject(Error(r.error));
@@ -644,8 +656,13 @@ export class Connection extends EventTarget {
       } else throw Error("发送中断，请刷新确认结果后再重试");
     }
   }
-  async call<T = unknown>(request: RPCRequest, timeout = 40000): Promise<T> {
+  async call<T = unknown>(
+    request: RPCRequest,
+    timeout?: number,
+    signal?: AbortSignal,
+  ): Promise<T> {
     if (this.closed) throw Error("连接已断开");
+    signal?.throwIfAborted();
     const r: RPCRequest & { id: string } = {
       ...request,
       id: crypto.randomUUID(),
@@ -665,25 +682,42 @@ export class Connection extends EventTarget {
     const cached = this.snapshots.get(key);
     if (cached) r.revision = cached.revision;
     const result = new Promise<T>((resolve, reject) => {
-      const timer = setTimeout(() => {
+      // Ordinary RPCs wait for the result, cancellation or connection loss.
+      // Only setup verification passes an explicit deadline.
+      const timer =
+        timeout === undefined
+          ? undefined
+          : setTimeout(() => {
+              this.pending.get(r.id)?.cleanup?.();
+              this.pending.delete(r.id);
+              reject(Error("请求超时，请刷新确认操作结果后再重试"));
+            }, timeout);
+      const abort = () => {
+        clearTimeout(timer);
+        this.pending.get(r.id)?.cleanup?.();
         this.pending.delete(r.id);
-        reject(Error("请求超时，请刷新确认操作结果后再重试"));
-      }, timeout);
+        reject(signal?.reason ?? new DOMException("请求已取消", "AbortError"));
+      };
+      signal?.addEventListener("abort", abort, { once: true });
       this.pending.set(r.id, {
         resolve: resolve as (v: unknown) => void,
         reject,
         timer,
+        cleanup: () => signal?.removeEventListener("abort", abort),
         key,
         cached,
       });
     });
     this.sendChain = this.sendChain
       .catch(() => {})
-      .then(() => this.send(utf8(JSON.stringify(r))));
+      .then(() => {
+        if (this.pending.has(r.id)) return this.send(utf8(JSON.stringify(r)));
+      });
     void this.sendChain.catch((e) => {
       const p = this.pending.get(r.id);
       if (p) {
         clearTimeout(p.timer);
+        p.cleanup?.();
         this.pending.delete(r.id);
         p.reject(e as Error);
       }
@@ -710,6 +744,7 @@ export class Connection extends EventTarget {
     this.pc?.close();
     for (const p of this.pending.values()) {
       clearTimeout(p.timer);
+      p.cleanup?.();
       p.reject(Error(reason));
     }
     this.pending.clear();

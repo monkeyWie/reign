@@ -436,13 +436,21 @@ export function RemoteApp() {
       return;
     }
     let alive = true;
+    const reads = new AbortController();
+    let refreshing = false;
     const key = selectedDevice + "|sessions";
     void cache.snapshots.get(key).then((r) => {
       if (alive && r) setSessions(r.value as Session[]);
     });
     async function refresh() {
+      if (!alive || refreshing) return;
+      refreshing = true;
       try {
-        const ps = await active.call<Provider[]>({ method: "providers" });
+        const ps = await active.call<Provider[]>(
+          { method: "providers" },
+          undefined,
+          reads.signal,
+        );
         let all: Session[] = [];
         for (const p of ps.filter(
           (p) => p.controllable && !p.id.includes("vscode"),
@@ -453,7 +461,11 @@ export function RemoteApp() {
             const page = await active.call<{
               sessions: Session[];
               nextCursor?: string;
-            }>({ method: "sessions", provider: p.id, cursor });
+            }>(
+              { method: "sessions", provider: p.id, cursor },
+              undefined,
+              reads.signal,
+            );
             all.push(...page.sessions.map((s) => ({ ...s, providerId: p.id })));
             cursor = page.nextCursor || "";
           } while (cursor && ++pages < 100);
@@ -466,12 +478,15 @@ export function RemoteApp() {
         }
       } catch (e) {
         if (alive) onError(e);
+      } finally {
+        refreshing = false;
       }
     }
     void refresh();
     const timer = setInterval(() => void refresh(), 10000);
     return () => {
       alive = false;
+      reads.abort();
       clearInterval(timer);
     };
   }, [active, selectedDevice]);
@@ -484,6 +499,7 @@ export function RemoteApp() {
     }
     transcriptScope.current = scope;
     let alive = true;
+    const reads = new AbortController();
     let snapshot: Transcript | undefined;
     let epoch = "",
       cursor = 0;
@@ -495,11 +511,15 @@ export function RemoteApp() {
       }
     });
     async function full() {
-      const t = await active.call<Transcript>({
-        method: "transcript",
-        provider: selected!.provider,
-        session: selected!.id,
-      });
+      const t = await active.call<Transcript>(
+        {
+          method: "transcript",
+          provider: selected!.provider,
+          session: selected!.id,
+        },
+        undefined,
+        reads.signal,
+      );
       if (!alive) return t;
       snapshot = reconcileTranscript(
         t,
@@ -515,24 +535,32 @@ export function RemoteApp() {
     void (async () => {
       while (alive && active.path !== "Disconnected") {
         try {
-          const baseline = await active.call<Batch>({
-            method: "watch",
-            provider: selected.provider,
-            session: selected.id,
-            epoch: "",
-            after: 0,
-          });
+          const baseline = await active.call<Batch>(
+            {
+              method: "watch",
+              provider: selected.provider,
+              session: selected.id,
+              epoch: "",
+              after: 0,
+            },
+            undefined,
+            reads.signal,
+          );
           epoch = baseline.epoch;
           cursor = baseline.cursor;
           await full();
           while (alive && active.path !== "Disconnected") {
-            const batch = await active.call<Batch>({
-              method: "watch",
-              provider: selected.provider,
-              session: selected.id,
-              epoch,
-              after: cursor,
-            });
+            const batch = await active.call<Batch>(
+              {
+                method: "watch",
+                provider: selected.provider,
+                session: selected.id,
+                epoch,
+                after: cursor,
+              },
+              undefined,
+              reads.signal,
+            );
             if (!alive) return;
             if (
               batch.reset ||
@@ -574,6 +602,7 @@ export function RemoteApp() {
     })();
     return () => {
       alive = false;
+      reads.abort();
     };
   }, [active, selected?.device, selected?.provider, selected?.id]);
   function selectSession(s: Session) {

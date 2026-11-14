@@ -11,7 +11,6 @@ import (
 	"runtime"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/monkeyWie/reignhub/internal/app"
 	"github.com/monkeyWie/reignhub/internal/clienthub"
@@ -111,12 +110,10 @@ func CallContext(parent context.Context, raw string) string {
 		hubs[in.DataDir] = h
 	}
 	mu.Unlock()
-	timeout := 140 * time.Second
-	ctx, cancel := context.WithTimeout(parent, timeout)
-	if in.Method == "client.connect" || in.Method == "client.reconnect" {
-		cancel()
-		ctx, cancel = context.WithCancel(parent)
-	}
+	// Business reads and commands follow the caller/application lifetime. Slow
+	// agents and large snapshots must not inherit an arbitrary total deadline.
+	// Connection setup and HTTP operations enforce their own stage budgets.
+	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 	stop := context.AfterFunc(bridgeContext, cancel)
 	defer stop()

@@ -79,7 +79,7 @@ type chunk struct {
 type assembly struct {
 	parts   [][]byte
 	count   int
-	created time.Time
+	updated time.Time
 }
 
 func dial(ctx context.Context, p Pairing, role string) (*websocket.Conn, *websocket.Conn, string, error) {
@@ -366,7 +366,9 @@ func (w *wire) onChunk(data []byte) {
 	}
 	w.mu.Lock()
 	for id, a := range w.chunks {
-		if time.Since(a.created) > 30*time.Second {
+		// Expire abandoned fragments by inactivity, never by total transfer
+		// duration: a large snapshot may legitimately take minutes to arrive.
+		if time.Since(a.updated) > connectivity.StageTimeout {
 			for _, p := range a.parts {
 				w.chunkBytes -= len(p)
 			}
@@ -379,13 +381,14 @@ func (w *wire) onChunk(data []byte) {
 			w.mu.Unlock()
 			return
 		}
-		a = &assembly{parts: make([][]byte, c.Total), created: time.Now()}
+		a = &assembly{parts: make([][]byte, c.Total), updated: time.Now()}
 		w.chunks[c.ID] = a
 	}
 	if len(a.parts) != c.Total || a.parts[c.Index] != nil {
 		w.mu.Unlock()
 		return
 	}
+	a.updated = time.Now()
 	a.parts[c.Index] = c.Data
 	a.count++
 	w.chunkBytes += len(c.Data)

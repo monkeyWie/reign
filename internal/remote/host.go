@@ -109,7 +109,9 @@ func serveHostObserved(ctx context.Context, p Pairing, opts Options, d *control.
 					go peer.send(encoded)
 					return
 				}
-				callCtx, stop := context.WithTimeout(peer.ctx, 40*time.Second)
+				// Agent work can outlive a fixed RPC budget. Cancel with the peer
+				// instead; connection liveness is checked independently.
+				callCtx, stop := context.WithCancel(peer.ctx)
 				watch := req.Method == "watch"
 				if watch {
 					// One visible conversation per controller. Replacing its read
