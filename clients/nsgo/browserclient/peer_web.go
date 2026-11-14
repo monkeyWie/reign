@@ -3,12 +3,18 @@
 package browserclient
 
 import (
+	"context"
 	"errors"
+	"github.com/coder/websocket"
 	"sync"
 	"sync/atomic"
 	"syscall/js"
 	"time"
 )
+
+func pingSocket(ctx context.Context, ws *websocket.Conn) (bool, error) {
+	return false, ws.Write(ctx, websocket.MessageText, []byte("reign:ping"))
+}
 
 type jsPeer struct {
 	client         *Client
@@ -75,6 +81,7 @@ func newPeer(c *Client, urls []string) (result peer, err error) {
 	p.bind(p.pc, "onicecandidate", func(e js.Value) {
 		candidate := e.Get("candidate")
 		if candidate.Truthy() {
+			c.note("candidate:"+candidate.Get("candidate").String(), "udp", "发现 WebRTC 直连候选", candidate.Get("candidate").String(), "info")
 			var v Object
 			_ = jsonUnmarshal([]byte(js.Global().Get("JSON").Call("stringify", candidate.Call("toJSON")).String()), &v)
 			go func() { _ = c.signal(Object{"type": "candidate", "candidate": v}) }()
@@ -82,11 +89,18 @@ func newPeer(c *Client, urls []string) (result peer, err error) {
 	})
 	p.bind(p.pc, "onconnectionstatechange", func(js.Value) {
 		state := p.pc.Get("connectionState").String()
+		if state == "connecting" {
+			c.note("ice-check", "udp", "正在验证 WebRTC 直连路径", "", "running")
+		}
 		if state == "failed" || state == "disconnected" || state == "closed" {
 			p.direct.Store(false)
+			c.note("ice-check", "udp", "WebRTC 直连暂不可用", "尝试可用中继", "warning")
 		}
 	})
-	p.bind(p.dc, "onopen", func(js.Value) { p.direct.Store(true) })
+	p.bind(p.dc, "onopen", func(js.Value) {
+		p.direct.Store(true)
+		c.note("path:webrtc", "direct", "已建立 WebRTC 直连", "端到端加密数据通道", "success")
+	})
 	p.bind(p.dc, "onclose", func(js.Value) { p.direct.Store(false) })
 	p.bind(p.dc, "onerror", func(js.Value) { p.direct.Store(false) })
 	p.bind(p.dc, "onmessage", func(e js.Value) {

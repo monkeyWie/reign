@@ -63,3 +63,32 @@ func browserInterop(t *testing.T) {
 		})
 	}
 }
+
+func browserDirectInterop(t *testing.T) {
+	url := os.Getenv("AGENTHUB_NSGO_TEST_FIXTURE")
+	if url == "" {
+		t.Skip("requires isolated browser fixture")
+	}
+	r, err := http.Get(url + "/fixture-direct")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Body.Close()
+	var p Pairing
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+	defer cancel()
+	c, err := Connect(ctx, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	if c.dataWS != nil || !strings.HasPrefix(c.Path(), "P2P") {
+		t.Fatal("free connection did not select direct-only path", c.Path())
+	}
+	if _, err := c.Call(ctx, Object{"method": "sessions", "provider": "fixture"}); err != nil {
+		t.Fatal(err)
+	}
+}

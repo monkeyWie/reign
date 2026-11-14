@@ -18,9 +18,9 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
 
 	"github.com/monkeyWie/reignhub/clients/nsgo/browserclient"
+	"github.com/monkeyWie/reignhub/internal/connectivity"
 )
 
 type Object = map[string]any
@@ -76,7 +76,7 @@ func post(ctx context.Context, service, token, path string, v Object) (Object, e
 	if e != nil || u.User != nil || u.Host == "" || u.RawQuery != "" || u.Fragment != "" || u.Path != "" && u.Path != "/" || u.Scheme != "https" && !(u.Scheme == "http" && browserclient.CleartextAllowed(u.Hostname())) {
 		return nil, errors.New("服务地址必须使用 HTTP 或 HTTPS")
 	}
-	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, connectivity.StageTimeout)
 	defer cancel()
 	b, e := json.Marshal(v)
 	if e != nil {

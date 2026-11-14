@@ -19,9 +19,11 @@ Native WebRTC uses Pion; browsers use RTCPeerConnection and DataChannel. Native 
 
 WebSockets carry signaling and, when needed, end-to-end encrypted relay traffic. Users configure one service root URL; the service publishes probe endpoints and connection capabilities.
 
-## Web: Next.js, React and OpenNext
+## Web: NSGo, Next.js and OpenNext
 
-The website, docs and `/chat` share Next.js App Router. React provides responsive layouts, virtual messages and incremental synchronization. Browsers use WebRTC and Web Crypto directly.
+The `/chat` console uses the same NSGo Go UI as desktop and mobile, compiled to WebAssembly with the DOM backend. Shared layouts, virtual messages, attachments and incremental synchronization stay consistent across platforms. A lightweight HTML/CSS shell opens the workspace; compressed modules and content-addressed assets are cached by the browser.
+
+Next.js and Fumadocs provide the website and documentation. OpenNext deploys them alongside the NSGo assets and connection services in one Cloudflare Worker. Browsers use RTCPeerConnection for WebRTC and IndexedDB for device and message caches.
 
 OpenNext adapts the build to Cloudflare Workers. Fumadocs generates multilingual documentation, navigation, search and tables of contents from repository Markdown/MDX.
 

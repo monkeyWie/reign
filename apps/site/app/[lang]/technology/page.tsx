@@ -57,11 +57,11 @@ export default async function Technology({
       id: "web",
       icon: Globe,
       kicker: "02 / WEB EXPERIENCE",
-      title: t("React + Next.js，打开就能连接。"),
+      title: t("NSGo + WebAssembly，各端体验一致。"),
       description: t(
-        "Next.js App Router 构建官网、文档与 Web 控制台，OpenNext 将完整体验部署到 Cloudflare。浏览器直接使用标准 WebRTC 与 Web Crypto。",
+        "NSGo 将同一套 Go 界面编译为 WebAssembly，浏览器控制台与原生端共用布局和交互。Next.js 与 Fumadocs 提供官网文档，OpenNext 统一部署到 Cloudflare。",
       ),
-      tags: ["Next.js + React", "OpenNext", "Fumadocs + MDX"],
+      tags: ["NSGo + WebAssembly", "OpenNext", "Fumadocs + MDX"],
       points: [
         [
           t("文档也是代码"),

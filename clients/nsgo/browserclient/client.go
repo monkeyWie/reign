@@ -12,9 +12,11 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/monkeyWie/reignhub/internal/connectivity"
 )
 
 type Object = map[string]any
@@ -39,7 +41,7 @@ type chunk struct {
 type assembly struct {
 	parts       [][]byte
 	count, size int
-	created     time.Time
+	updated     time.Time
 }
 type peer interface {
 	Offer() error
@@ -64,6 +66,10 @@ type Client struct {
 	base, crypto *cryptor
 	ready        chan struct{}
 	readyOnce    sync.Once
+	closeOnce    sync.Once
+	relayDone    chan struct{}
+	heartbeat    atomic.Int64
+	progress     func(connectivity.Progress)
 	pc           peer
 	pending      map[string]chan Object
 	chunks       map[string]*assembly
@@ -87,86 +93,225 @@ func Connect(ctx context.Context, p Pairing) (*Client, error) {
 	}
 	u.Path = "/p2p/signal"
 	u.RawQuery = url.Values{"id": {p.Host}, "role": {"client"}}.Encode()
-	ws, _, e := websocket.Dial(ctx, u.String(), &websocket.DialOptions{Subprotocols: []string{"reign.p2p", "auth." + base64.RawURLEncoding.EncodeToString([]byte(p.Token))}})
+	connectivity.Report(ctx, "signal", "正在建立信令连接", connectivity.StageTimeout)
+	connectivity.Note(ctx, "signal-endpoint", "signal", "信令服务地址", u.Scheme+"://"+u.Host+u.Path, "info")
+	signalCtx, stop := context.WithTimeout(ctx, connectivity.StageTimeout)
+	ws, welcome, e := openSocket(signalCtx, u.String(), p.Token)
+	stop()
 	if e != nil {
-		return nil, e
+		return nil, fmt.Errorf("建立信令连接失败: %w", e)
 	}
-	ws.SetReadLimit(2 << 20)
-	_, b, e := ws.Read(ctx)
-	var f frame
-	if e != nil || json.Unmarshal(b, &f) != nil || f.Kind != "welcome" || len(f.Peer) != 32 {
-		ws.CloseNow()
-		return nil, errors.New("无效中继握手")
-	}
-	// Connection lifetime must outlive the short pairing HTTP request.
+	connectivity.Note(ctx, "signal", "signal", "信令连接已建立", u.Host, "success")
+	// Connection lifetime outlives pairing and all ordinary business requests.
 	life, cancel := context.WithCancel(context.Background())
-	c := &Client{ctx: life, cancel: cancel, ws: ws, p: p, id: f.Peer, nonce: id() + id(), ready: make(chan struct{}), pending: map[string]chan Object{}, chunks: map[string]*assembly{}, cache: map[string]cached{}}
-	if f.AllowRelay {
-		u.Path = "/p2p/relay"
-		q := u.Query()
-		q.Set("peer", f.Peer)
-		u.RawQuery = q.Encode()
-		c.dataWS, _, e = websocket.Dial(ctx, u.String(), &websocket.DialOptions{Subprotocols: []string{"reign.p2p", "auth." + base64.RawURLEncoding.EncodeToString([]byte(p.Token))}})
-		if e != nil {
-			c.Close()
-			return nil, e
-		}
-		if _, _, e = c.dataWS.Read(ctx); e != nil {
-			c.Close()
-			return nil, e
-		}
-		go func() {
-			for {
-				if _, _, e := c.dataWS.Read(life); e != nil {
-					return
-				}
-			}
-		}()
-	}
+	c := &Client{ctx: life, cancel: cancel, ws: ws, p: p, id: welcome.Peer, nonce: id() + id(), ready: make(chan struct{}), relayDone: make(chan struct{}), pending: map[string]chan Object{}, chunks: map[string]*assembly{}, cache: map[string]cached{}, progress: connectivity.Observer(ctx)}
+	c.heartbeat.Store(time.Now().UnixNano())
 	c.base, e = newCryptor(sum("reign/p2p/peer/" + c.id + "/" + p.Key))
 	if e != nil {
 		c.Close()
 		return nil, e
 	}
 	c.base.random = true
+	if welcome.AllowRelay {
+		connectivity.Report(ctx, "relay-ready", "准备备用中继通道", connectivity.StageTimeout)
+		u.Path = "/p2p/relay"
+		q := u.Query()
+		q.Set("peer", c.id)
+		u.RawQuery = q.Encode()
+		connectivity.Note(ctx, "relay-endpoint", "relay", "中继服务地址", u.Scheme+"://"+u.Host+u.Path, "info")
+		relayCtx, stop := context.WithTimeout(ctx, connectivity.StageTimeout)
+		data, f, err := openSocket(relayCtx, u.String(), p.Token)
+		stop()
+		if err == nil && f.Peer != c.id {
+			data.CloseNow()
+			err = errors.New("中继设备身份不匹配")
+		}
+		if err != nil {
+			if p.RelayOnly || ctx.Err() != nil {
+				c.Close()
+				return nil, fmt.Errorf("建立备用中继连接失败: %w", err)
+			}
+			connectivity.Note(ctx, "relay-ready", "relay", "备用中继暂不可用，继续尝试 P2P 直连", err.Error(), "warning")
+		} else {
+			c.dataWS = data
+			connectivity.Note(ctx, "relay-ready", "relay", "备用中继通道已就绪", u.Host+" · 优先直连", "success")
+		}
+	}
+	go func() {
+		defer close(c.relayDone)
+		if c.dataWS == nil {
+			return
+		}
+		defer c.dataWS.CloseNow()
+		for {
+			if _, _, err := c.dataWS.Read(life); err != nil {
+				return
+			}
+		}
+	}()
 	go c.readLoop()
+	go c.keepAlive()
+	if p.RelayOnly && c.dataWS == nil {
+		c.Close()
+		return nil, errors.New("当前服务未提供中继权限，请尝试直连")
+	}
+	connectivity.Report(ctx, "handshake", "正在与被控设备建立加密握手", connectivity.StageTimeout)
+	handshake, stop := context.WithTimeout(ctx, connectivity.StageTimeout)
 	hello, _ := json.Marshal(Object{"clientNonce": c.nonce})
-	if e = c.relaySend("hello", hello); e != nil {
+	e = c.relaySend("hello", hello)
+	if e == nil {
+		select {
+		case <-c.ready:
+		case <-handshake.Done():
+			e = handshake.Err()
+		case <-life.Done():
+			e = errors.New("连接已断开")
+		}
+	}
+	stop()
+	if e != nil {
+		c.Close()
+		return nil, fmt.Errorf("配对握手失败: %w", e)
+	}
+	connectivity.Note(ctx, "handshake", "handshake", "端到端加密握手完成", "已验证设备配对密钥", "success")
+	connectivity.Report(ctx, "direct", "优先尝试 WebRTC 直连，必要时使用中继", connectivity.StageTimeout)
+	if !p.RelayOnly {
+		pc, err := newPeer(c, p.ICE)
+		if err == nil {
+			c.mu.Lock()
+			if c.ctx.Err() != nil {
+				c.mu.Unlock()
+				pc.Close()
+				return nil, errors.New("连接已取消")
+			}
+			c.pc = pc
+			c.mu.Unlock()
+			// Keep the path budget independent of browser candidate gathering.
+			go func() {
+				if err := pc.Offer(); err != nil {
+					c.note("ice", "udp", "WebRTC 探测未能启动", err.Error(), "warning")
+				}
+			}()
+		} else {
+			c.note("ice", "udp", "当前环境无法使用 WebRTC", err.Error(), "warning")
+		}
+	}
+	pathCtx, stop := context.WithTimeout(ctx, connectivity.StageTimeout)
+	preferUntil := time.Now().Add(1500 * time.Millisecond)
+	tick := time.NewTicker(20 * time.Millisecond)
+	for {
+		c.mu.Lock()
+		pc := c.pc
+		c.mu.Unlock()
+		if pc != nil && pc.Direct() || c.relayAvailable() && (p.RelayOnly || time.Now().After(preferUntil)) {
+			break
+		}
+		select {
+		case <-pathCtx.Done():
+			e = fmt.Errorf("直连失败，且没有可用中继: %w", pathCtx.Err())
+		case <-life.Done():
+			e = errors.New("连接已断开")
+		case <-tick.C:
+		}
+		if e != nil {
+			break
+		}
+	}
+	tick.Stop()
+	stop()
+	if e != nil {
 		c.Close()
 		return nil, e
+	}
+	connectivity.Report(ctx, "verify", "正在验证设备响应", connectivity.StageTimeout)
+	verify, stop := context.WithTimeout(ctx, connectivity.StageTimeout)
+	_, e = c.Call(verify, Object{"method": "providers"})
+	stop()
+	if e != nil {
+		c.Close()
+		return nil, fmt.Errorf("设备响应验证失败: %w", e)
+	}
+	c.note("connected", "connected", "设备连接成功", c.Path(), "success")
+	go c.watchPaths()
+	return c, nil
+}
+func openSocket(ctx context.Context, endpoint, token string) (*websocket.Conn, frame, error) {
+	var f frame
+	ws, _, err := websocket.Dial(ctx, endpoint, &websocket.DialOptions{Subprotocols: []string{"reign.p2p", "auth." + base64.RawURLEncoding.EncodeToString([]byte(token))}})
+	if err != nil {
+		return nil, f, err
+	}
+	ws.SetReadLimit(2 << 20)
+	_, raw, err := ws.Read(ctx)
+	if err == nil && (json.Unmarshal(raw, &f) != nil || f.Kind != "welcome" || len(f.Peer) != 32) {
+		err = errors.New("无效服务握手")
+	}
+	if err != nil {
+		ws.CloseNow()
+		return nil, f, err
+	}
+	return ws, f, nil
+}
+func (c *Client) note(id, stage, message, detail, state string) {
+	if c.progress != nil && c.ctx.Err() == nil {
+		c.progress(connectivity.Progress{ID: id, Stage: stage, Message: message, Detail: detail, State: state})
+	}
+}
+func (c *Client) relayAvailable() bool {
+	if c.dataWS == nil {
+		return false
 	}
 	select {
-	case <-c.ready:
-	case <-ctx.Done():
-		c.Close()
-		return nil, ctx.Err()
-	case <-c.ctx.Done():
-		return nil, errors.New("连接已断开")
-	case <-time.After(20 * time.Second):
-		c.Close()
-		return nil, errors.New("连接握手超时")
+	case <-c.relayDone:
+		return false
+	default:
+		return true
 	}
-	if _, e = c.Call(ctx, Object{"method": "providers"}); e != nil {
-		c.Close()
-		return nil, e
-	}
-	if !p.RelayOnly {
-		go func() {
-			pc, e := newPeer(c, p.ICE)
-			if e == nil {
-				c.mu.Lock()
-				if c.ctx.Err() != nil {
-					c.mu.Unlock()
-					pc.Close()
-					return
-				}
-				c.pc = pc
-				c.mu.Unlock()
-				_ = pc.Offer()
+}
+func (c *Client) watchPaths() {
+	tick := time.NewTicker(time.Second)
+	defer tick.Stop()
+	for {
+		select {
+		case <-c.ctx.Done():
+			return
+		case <-tick.C:
+			if c.Path() == "Disconnected" {
+				c.Close()
+				return
 			}
-		}()
+		}
 	}
-	return c, nil
+}
+func (c *Client) keepAlive() {
+	tick := time.NewTicker(25 * time.Second)
+	defer tick.Stop()
+	pulses := 0
+	for {
+		select {
+		case <-c.ctx.Done():
+			return
+		case <-tick.C:
+			if time.Since(time.Unix(0, c.heartbeat.Load())) > 85*time.Second {
+				c.Close()
+				return
+			}
+			ctx, stop := context.WithTimeout(c.ctx, 10*time.Second)
+			confirmed, err := pingSocket(ctx, c.ws)
+			if confirmed {
+				c.heartbeat.Store(time.Now().UnixNano())
+			}
+			pulses++
+			if err == nil && pulses%3 == 0 {
+				err = c.ws.Write(ctx, websocket.MessageText, []byte(`{"kind":"renew"}`))
+			}
+			stop()
+			if err != nil {
+				c.Close()
+				return
+			}
+		}
+	}
 }
 func (c *Client) aad(kind string, out bool) string {
 	direction := "h2c"
@@ -195,7 +340,7 @@ func (c *Client) relaySend(kind string, b []byte) error {
 	socket := c.ws
 	if kind == "chunk" || kind == "data" {
 		socket = c.dataWS
-		if socket == nil {
+		if !c.relayAvailable() {
 			return errors.New("直连失败，服务未提供中继权限")
 		}
 	}
@@ -207,6 +352,10 @@ func (c *Client) readLoop() {
 		_, raw, e := c.ws.Read(c.ctx)
 		if e != nil {
 			return
+		}
+		c.heartbeat.Store(time.Now().UnixNano())
+		if string(raw) == "reign:pong" {
+			continue
 		}
 		var f frame
 		if json.Unmarshal(raw, &f) != nil || f.Peer != c.id {
@@ -284,7 +433,7 @@ func (c *Client) receiveChunk(packet []byte) error {
 	}
 	c.mu.Lock()
 	for k, a := range c.chunks {
-		if time.Since(a.created) > 30*time.Second {
+		if time.Since(a.updated) > connectivity.StageTimeout {
 			delete(c.chunks, k)
 		}
 	}
@@ -294,13 +443,14 @@ func (c *Client) receiveChunk(packet []byte) error {
 			c.mu.Unlock()
 			return errors.New("过多分片")
 		}
-		a = &assembly{parts: make([][]byte, part.Total), created: time.Now()}
+		a = &assembly{parts: make([][]byte, part.Total), updated: time.Now()}
 		c.chunks[part.ID] = a
 	}
 	if len(a.parts) != part.Total || a.parts[part.Index] != nil {
 		c.mu.Unlock()
 		return nil
 	}
+	a.updated = time.Now()
 	a.parts[part.Index] = part.Data
 	a.count++
 	a.size += len(part.Data)
@@ -343,8 +493,6 @@ func (c *Client) response(b []byte) {
 	}
 }
 func (c *Client) Call(ctx context.Context, request Object) (any, error) {
-	ctx, cancel := context.WithTimeout(ctx, 40*time.Second)
-	defer cancel()
 	r := Object{}
 	for k, v := range request {
 		r[k] = v
@@ -459,25 +607,35 @@ func (c *Client) Path() string {
 	if pc != nil && pc.Direct() {
 		return "P2P · WebRTC"
 	}
+	if !c.relayAvailable() {
+		return "Disconnected"
+	}
 	if c.p.RouteName != "" {
 		return "Relay · " + c.p.RouteName
 	}
 	return "Relay · encrypted"
 }
 func (c *Client) Connected() bool {
-	return c.ctx.Err() == nil
+	return c.Path() != "Disconnected"
 }
 func (c *Client) Close() {
 	c.cancel()
-	c.ws.CloseNow()
-	c.mu.Lock()
-	pc := c.pc
-	c.pc = nil
-	c.chunks = map[string]*assembly{}
-	c.mu.Unlock()
-	if pc != nil {
-		pc.Close()
-	}
+	c.closeOnce.Do(func() {
+		if c.ws != nil {
+			c.ws.CloseNow()
+		}
+		if c.dataWS != nil {
+			c.dataWS.CloseNow()
+		}
+		c.mu.Lock()
+		pc := c.pc
+		c.pc = nil
+		c.chunks = map[string]*assembly{}
+		c.mu.Unlock()
+		if pc != nil {
+			pc.Close()
+		}
+	})
 }
 func (c *Client) signal(v Object) error {
 	b, e := json.Marshal(v)

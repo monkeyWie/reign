@@ -1,19 +1,18 @@
 package hubui
 
 import (
+	_ "embed"
 	"encoding/json"
-	"os"
 	"reflect"
 	"strings"
 	"testing"
 )
 
-// Both UIs consume the same fixtures so presentation changes stay aligned.
+//go:embed testdata/chat-presentation.json
+var presentationFixtures []byte
+
+// One presentation implementation runs on native and Web backends.
 func TestWebNativePresentationParity(t *testing.T) {
-	data, err := os.ReadFile("../../../packages/protocol/testdata/chat-presentation.json")
-	if err != nil {
-		t.Fatal(err)
-	}
 	var fixtures []struct {
 		Name       string `json:"name"`
 		Transcript Object `json:"transcript"`
@@ -21,7 +20,7 @@ func TestWebNativePresentationParity(t *testing.T) {
 		Live       []bool
 		Thinking   bool
 	}
-	if err := json.Unmarshal(data, &fixtures); err != nil {
+	if err := json.Unmarshal(presentationFixtures, &fixtures); err != nil {
 		t.Fatal(err)
 	}
 	for _, f := range fixtures {

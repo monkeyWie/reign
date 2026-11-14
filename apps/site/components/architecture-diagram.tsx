@@ -355,7 +355,7 @@ export function ArchitectureDiagram({
                 y={20}
                 w={320}
                 title={label("浏览器控制端", "Web controller")}
-                detail="React + Next.js · IndexedDB"
+                detail="NSGo + WebAssembly · IndexedDB"
               />
               <Arrow d="M190 96 V128 H320 V149" />
               <Arrow d="M550 96 V128 H420 V149" />

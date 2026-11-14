@@ -1,6 +1,6 @@
 # ReignHub
 
-Remote control for the AI Agents on your own computers. Native desktop and mobile clients use NSGo + Go; the website and browser controller use Next.js, React and shadcn/ui. The default service is `https://reignhub.app`.
+Remote control for the AI Agents on your own computers. Desktop, mobile and browser controllers share one NSGo + Go UI. The website and documentation use Next.js and Fumadocs. The default service is `https://reignhub.app`.
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/monkeyWie/reignhub)
 
@@ -34,7 +34,7 @@ pnpm exec wrangler dev --port 8787
 
 Open `http://localhost:8787/chat`. Browser cryptography and WebRTC require a secure context: HTTPS or localhost. Use the generated `workers.dev` HTTPS address for other computers and phones.
 
-Native development remains in [`clients/nsgo`](clients/nsgo). Flutter and NSGo Web source remain historical references; releases ship React Web, not the NSGo WASM Web build.
+All controller UI development lives in [`clients/nsgo`](clients/nsgo). NSGo maps this shared UI to native views on desktop/mobile and Go WebAssembly + DOM in browsers. `/chat` serves a standalone HTML shell and compressed, content-addressed NSGo assets.
 
 ## Self-hosting
 
@@ -55,12 +55,12 @@ Expose **26330/TCP and 26330/UDP** directly. The probe contains no website, devi
 
 | Directory              | Responsibility                                            |
 | ---------------------- | --------------------------------------------------------- |
-| `apps/site`            | Public website, docs and React controller entry           |
-| `packages/web-client`  | Browser chat UI, messages, attachments and account UI     |
+| `apps/site`            | Public website, docs and NSGo console hosting           |
+| `packages/account-ui`  | Website account and administration pages     |
 | `packages/client-sdk`  | Pairing, encrypted RPC, WebRTC and IndexedDB              |
 | `packages/protocol`    | Current `/p2p/*` protocol and policy interfaces           |
 | `packages/worker-core` | D1 directory/pairing, signed leases and hibernating rooms |
-| `clients/nsgo`         | Native desktop, Android and iOS UI                        |
+| `clients/nsgo`         | Shared desktop, Android, iOS and browser UI                        |
 | `internal`             | Native Go application, Providers, transport and SQLite    |
 | `cmd/reignhub-probe`      | Optional TCP/UDP discovery binary                         |
 | `.github/workflows`    | Native, Web, Worker and probe checks/builds/releases      |

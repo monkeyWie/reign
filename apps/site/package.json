@@ -4,9 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "next dev --hostname 0.0.0.0",
+    "dev": "node ../../scripts/platform/build-console.mjs && next dev --hostname 0.0.0.0",
     "check": "tsc --noEmit && node ../../scripts/platform/check-site-content.mjs",
-    "build": "next build",
+    "build": "node ../../scripts/platform/build-console.mjs && next build",
     "preview": "opennextjs-cloudflare preview",
     "deploy": "wrangler d1 migrations apply DB --remote && opennextjs-cloudflare deploy",
     "build:worker": "opennextjs-cloudflare build",
@@ -14,9 +14,7 @@
   },
   "dependencies": {
     "@opennextjs/cloudflare": "1.20.17",
-    "@reignhub/client-sdk": "workspace:*",
-    "@reignhub/protocol": "workspace:*",
-    "@reignhub/web-client": "workspace:*",
+    "@reignhub/account-ui": "workspace:*",
     "@reignhub/worker-core": "workspace:*",
     "@tailwindcss/postcss": "4.3.0",
     "@types/mdx": "2.0.13",

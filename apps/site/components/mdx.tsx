@@ -18,9 +18,12 @@ export function getMDXComponents(
     ArchitectureDiagram: (
       props: Omit<ComponentProps<typeof ArchitectureDiagram>, "locale">,
     ) => <ArchitectureDiagram {...props} locale={locale} />,
-    a: ({ href, ...props }: ComponentProps<"a">) => (
-      <Anchor {...props} href={href ? localizeHref(href, locale) : href} />
-    ),
+    a: ({ href, ...props }: ComponentProps<"a">) =>
+      href && /^\/chat(?:[/?#]|$)/.test(href) ? (
+        <a {...props} href={href} />
+      ) : (
+        <Anchor {...props} href={href ? localizeHref(href, locale) : href} />
+      ),
     Card: ({ href, ...props }: ComponentProps<typeof Card>) => (
       <Card {...props} href={href ? localizeHref(href, locale) : href} />
     ),

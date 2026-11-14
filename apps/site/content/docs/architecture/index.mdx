@@ -17,7 +17,7 @@ The desktop app is both a controller and a host: connect to other computers or s
 
 ## Web and connection service
 
-Next.js and React power the website, documentation and browser console, deployed to Cloudflare Workers through OpenNext. The service handles discovery, pairing signals and encrypted relay.
+The NSGo browser console shares its Go UI with native clients and uses WebAssembly + DOM. Next.js and Fumadocs power the website and documentation. OpenNext deploys the site and NSGo assets to one Cloudflare Worker alongside discovery, pairing and encrypted relay services.
 
 - **Durable Objects** manage device rooms, online connections and WebSocket signaling.
 - **D1** stores device identities, pairing relationships and service metadata.

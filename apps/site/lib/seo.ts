@@ -80,11 +80,11 @@ export const marketingMeta = {
   "/technology": {
     en: [
       "Technology · ReignHub",
-      "Explore NSGo native UI, the Go core, React Web, WebRTC/TCP, Cloudflare Workers, D1 and measured package size and memory.",
+      "Explore NSGo native UI, the Go core, NSGo WebAssembly, WebRTC/TCP, Cloudflare Workers, D1 and measured package size and memory.",
     ],
     "zh-CN": [
       "技术栈 · ReignHub",
-      "了解 NSGo 原生 UI、Go 核心、React Web、WebRTC／TCP、Cloudflare Worker、D1，以及包体积和内存实测。",
+      "了解 NSGo 原生 UI、Go 核心、NSGo WebAssembly、WebRTC／TCP、Cloudflare Worker、D1，以及包体积和内存实测。",
     ],
   },
   "/pricing": {

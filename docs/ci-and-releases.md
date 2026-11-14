@@ -27,7 +27,7 @@ Linux 和 macOS 分别运行两个 Go module 的 `go vet`、`go test -race` 与�
 
 PR 和 main 构建的产物在对应 Actions run 的 Artifacts 中，保留 14 天；覆盖率保留 7 天。每次完整构建都会把公开产物合并到 `release-bundle` artifact，验证 15 个预期安装包/归档及各自 `.sha256`，生成总 `SHA256SUMS`；tag 发布直接使用这一份已验证的产物。缺失、额外文件或校验和错误都会阻止发布。
 
-Web job 构建 React 网站与 Worker，并使用迁移后的本地 D1 验证原生客户端互通。Linux amd64 探测服务使用随机本地端口实际启动，验证 TCP/UDP 探测，不承载 Web 或账号服务。
+Web job 构建 NSGo Web、Next.js 网站与 Worker，并使用迁移后的本地 D1 验证原生客户端互通。Linux amd64 探测服务使用随机本地端口实际启动，验证 TCP/UDP 探测，不承载 Web 或账号服务。
 
 ## 配置（均可选）
 

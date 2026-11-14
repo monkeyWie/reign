@@ -2,6 +2,7 @@
 import assert from "node:assert/strict";
 import { publicLocalePath } from "../../apps/site/lib/language-routing";
 import { pathToFileURL } from "node:url";
+import { gunzipSync } from "node:zlib";
 
 export async function smokeSite(origin: string) {
   const pending = new Set(
@@ -150,7 +151,10 @@ export async function smokeSite(origin: string) {
       (
         await fetch(
           origin +
-            publicLocalePath("/docs/not-a-reignhub-page", lang as "en" | "zh-CN"),
+            publicLocalePath(
+              "/docs/not-a-reignhub-page",
+              lang as "en" | "zh-CN",
+            ),
           { headers: { Cookie: "reignhub_locale=en" } },
         )
       ).status,
@@ -207,6 +211,21 @@ export async function smokeSite(origin: string) {
     const html = await (await fetch(origin + path)).text();
     assert.match(html, /name="robots" content="noindex, nofollow"/, path);
   }
+  const consoleResponse = await fetch(origin + "/chat");
+  const consoleHTML = await consoleResponse.text();
+  assert.doesNotMatch(consoleHTML, /_next\/|__next_f/);
+  assert.match(consoleHTML, /DecompressionStream/);
+  assert.match(consoleResponse.headers.get("Cache-Control") || "", /no-cache/);
+  const config = JSON.parse(
+    consoleHTML.match(/const config = (\{[^;]+\});/)![1],
+  );
+  const moduleResponse = await fetch(origin + "/console/" + config.wasm);
+  assert.equal(moduleResponse.status, 200);
+  assert.match(moduleResponse.headers.get("Cache-Control") || "", /immutable/);
+  const moduleBytes = gunzipSync(
+    new Uint8Array(await moduleResponse.arrayBuffer()),
+  );
+  assert.equal(moduleBytes.subarray(0, 4).toString("hex"), "0061736d");
   const robots = await (await fetch(origin + "/robots.txt")).text();
   for (const path of ["/chat", "/account", "/admin", "/api/", "/p2p/"])
     assert.ok(robots.includes(`Disallow: ${path}`));

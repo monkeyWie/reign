@@ -10,7 +10,7 @@
   "assets": {
     "directory": "apps/site/.open-next/assets",
     "binding": "ASSETS",
-    "run_worker_first": ["/p2p/*", "/api/*"],
+    "run_worker_first": ["/chat", "/chat/", "/p2p/*", "/api/*"],
     "html_handling": "none",
   },
   "d1_databases": [

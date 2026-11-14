@@ -9,7 +9,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/monkeyWie/reignhub/clients/nsgo/browserclient"
+	"github.com/monkeyWie/reignhub/internal/connectivity"
 	"strings"
 	"sync"
 	"time"
@@ -125,16 +127,23 @@ func (a *API) connect(ctx context.Context, p Object) (any, error) {
 	if name == "" && p["reconnectOnly"] != true {
 		name = "Web 浏览器"
 	}
+	connectivity.Report(ctx, "service", "正在连接服务并验证本机身份", connectivity.StageTimeout)
 	i, e := a.loadIdentity(ctx, service, name)
 	if e != nil {
 		return nil, e
 	}
 	token := str(i, "token")
+	connectivity.Note(ctx, "service", "service", "本机身份已验证", service, "success")
+	connectivity.Report(ctx, "lookup", "正在查找被控设备", connectivity.StageTimeout)
 	r, e := post(ctx, service, token, "/p2p/devices/resolve", Object{"connectionId": p["code"]})
 	if e != nil {
 		return nil, e
 	}
 	d := obj(r["device"])
+	if r["online"] == false {
+		return nil, errors.New("被控设备离线，请确认电脑上的 ReignHub 正在运行并已连接服务")
+	}
+	connectivity.Note(ctx, "lookup", "lookup", "已找到被控设备", str(d, "name"), "success")
 	id := service + "|" + str(d, "id")
 	if str(d, "id") == "" || str(d, "public") == "" {
 		return nil, errors.New("无效设备信息")
@@ -170,6 +179,7 @@ func (a *API) connect(ctx context.Context, p Object) (any, error) {
 		return nil, errors.New("设备身份已变化，需要重新配对")
 	}
 	if str(s, "key") == "" || expired {
+		connectivity.Report(ctx, "authorize", "等待被控设备授权", connectivity.StageTimeout)
 		request := randomHex(16)
 		envelope, e := seal(i, str(d, "public"), "reignhub/pair/request/"+request, Object{"password": p["password"], "remember": p["remember"] != false})
 		if e != nil {
@@ -178,13 +188,14 @@ func (a *API) connect(ctx context.Context, p Object) (any, error) {
 		if _, e = post(ctx, service, token, "/p2p/pairings/request", Object{"id": request, "host": d["id"], "envelope": envelope}); e != nil {
 			return nil, e
 		}
-		until := time.Now().Add(125 * time.Second)
+		approvalCtx, stopApproval := context.WithTimeout(ctx, connectivity.StageTimeout)
+		defer stopApproval()
 		var result Object
-		for time.Now().Before(until) {
+		for approvalCtx.Err() == nil {
 			if !a.current(id, g) {
 				return nil, errors.New("连接已取消")
 			}
-			result, e = post(ctx, service, token, "/p2p/pairings/result", Object{"id": request})
+			result, e = post(approvalCtx, service, token, "/p2p/pairings/result", Object{"id": request})
 			if e != nil {
 				return nil, e
 			}
@@ -195,8 +206,8 @@ func (a *API) connect(ctx context.Context, p Object) (any, error) {
 				break
 			}
 			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
+			case <-approvalCtx.Done():
+				return nil, fmt.Errorf("等待主机确认超时或取消: %w", approvalCtx.Err())
 			case <-time.After(time.Second):
 			}
 		}
@@ -212,11 +223,19 @@ func (a *API) connect(ctx context.Context, p Object) (any, error) {
 		}
 		s = Object{"id": id, "service": service, "connectionId": d["connectionId"], "name": d["name"], "host": d["id"], "public": d["public"], "key": reply["key"], "expires": reply["expires"]}
 	}
+	connectivity.Note(ctx, "authorize", "authorize", "设备授权已就绪", "", "success")
 	policy := Object{}
 	if p["relayOnly"] != true {
-		short, cancel := context.WithTimeout(ctx, 3*time.Second)
-		policy, _ = post(short, service, "", "/p2p/config", Object{})
-		cancel()
+		connectivity.Report(ctx, "config", "正在获取直连探测配置", connectivity.StageTimeout)
+		policy, e = post(ctx, service, "", "/p2p/config", Object{})
+		if e != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			connectivity.Note(ctx, "config", "config", "探测配置暂不可用，使用公共 STUN", e.Error(), "warning")
+		} else {
+			connectivity.Note(ctx, "config", "config", "直连探测配置已获取", strings.Join(browserclient.STUN(policy), ", "), "success")
+		}
 	}
 	c, e := browserclient.Connect(ctx, browserclient.Pairing{Relay: strings.Replace(service, "http", "ws", 1), Host: str(d, "id"), Key: str(s, "key"), Token: token, ICE: browserclient.STUN(policy), RelayOnly: p["relayOnly"] == true})
 	if e != nil {
@@ -262,6 +281,19 @@ func (a *API) client(id string) *browserclient.Client {
 	return a.clients[id]
 }
 func (a *API) Call(ctx context.Context, method string, p Object, target string, command Object) (any, error) {
+	if strings.HasPrefix(method, "client.account.") {
+		paths := map[string]string{"start": "/api/account/device-login/start", "poll": "/api/account/device-login/poll", "status": "/api/account/device-status", "devices": "/api/account/device-list"}
+		path, ok := paths[strings.TrimPrefix(method, "client.account.")]
+		if !ok {
+			return nil, errors.New("无效账号操作")
+		}
+		service := strings.TrimRight(str(p, "service"), "/")
+		i, err := a.loadIdentity(ctx, service, str(p, "name"))
+		if err != nil {
+			return nil, err
+		}
+		return post(ctx, service, str(i, "token"), path, Object{"id": p["id"]})
+	}
 	switch method {
 	case "client.list":
 		return a.list()

@@ -228,7 +228,7 @@ jobs:
         run: rm -f clients/nsgo/.nsgo/android/debug.pem
 
   web:
-    name: Test and build React + Worker
+    name: Test and build NSGo Web + Worker
     needs: [metadata]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -261,8 +261,23 @@ jobs:
             sleep 1
           done
           pnpm exec tsx scripts/platform/smoke-worker.mts http://127.0.0.1:8787
+      - name: Verify shared NSGo browser UI and real WebRTC/relay transport
+        working-directory: clients/nsgo
+        run: |
+          go run ./testsupport/fixture > /tmp/reignhub-browser-fixture.log 2>&1 &
+          fixture_pid=$!
+          trap 'kill "$fixture_pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 60); do
+            if head -1 /tmp/reignhub-browser-fixture.log | rg -q '^http://127.0.0.1:'; then break; fi
+            sleep 1
+          done
+          fixture_url=$(head -1 /tmp/reignhub-browser-fixture.log)
+          go tool nsgo test -target web -env "AGENTHUB_NSGO_TEST_FIXTURE=$fixture_url" \
+            -run 'TestBrowserP2PAndRelayWithExistingHost|TestBrowserDirectWithoutRelay' ./browserclient
+          go tool nsgo test -target web \
+            -run 'TestDesktopNavigationAndDrafts|TestPhoneNavigation|TestComposerSubmit|TestWebNativePresentationParity' ./hubui
       - run: pnpm exec wrangler deploy --dry-run --outdir build/worker
-      - name: Package deployable Worker and React assets
+      - name: Package deployable Worker and NSGo assets
         run: python3 scripts/platform/package-worker.py --version "$VERSION" --output dist/release
       - uses: actions/upload-artifact@v7.0.2
         with:
@@ -354,7 +369,7 @@ jobs:
       - name: Prepare release notes
         run: |
           cat > build-notes.md <<'NOTES'
-          ReignHub native clients, Cloudflare Worker with React Web, and optional probes.
+          ReignHub native clients, Cloudflare Worker with NSGo Web, and optional probes.
 
           - macOS DMG: open and drag ReignHub into Applications. Builds are ad hoc signed and not notarized.
           - Windows setup EXE: includes installation, shortcuts and an uninstaller.

@@ -17,7 +17,7 @@ ReignHub 将使用界面、连接协调和 Agent 执行分开：你从任意设�
 
 ## Web 与连接服务
 
-Next.js 与 React 提供官网、文档和浏览器控制台，通过 OpenNext 部署到 Cloudflare Worker。连接服务负责设备发现、配对信令和加密中继。
+浏览器控制台通过 NSGo WebAssembly + DOM 复用原生客户端的 Go UI。Next.js 和 Fumadocs 提供官网与文档，OpenNext 将站点、NSGo 静态资源以及设备发现、配对信令和加密中继服务部署到同一个 Cloudflare Worker。
 
 - **Durable Objects**：管理设备房间、在线连接与 WebSocket 信令。
 - **D1**：保存设备身份、配对关系和服务元数据。

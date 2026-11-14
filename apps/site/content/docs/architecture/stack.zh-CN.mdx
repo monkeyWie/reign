@@ -19,9 +19,11 @@ Go 核心复用设备管理、配对、加密、网络与同步逻辑。Provider
 
 WebSocket 承载信令，并在需要时中继端到端加密业务数据。用户仅配置一个服务根地址，探测与连接能力由服务自动下发。
 
-## Web：Next.js、React、OpenNext
+## Web：NSGo、Next.js、OpenNext
 
-官网、文档与 `/chat` 共用 Next.js App Router。React 控制端采用响应式布局、虚拟消息列表与增量同步；浏览器直接使用 WebRTC 和 Web Crypto。
+`/chat` 控制台与桌面、移动端共用 NSGo Go UI，编译为 WebAssembly，通过 DOM 后端呈现。响应式布局、虚拟消息列表、图片附件和增量同步共用实现。首屏采用轻量 HTML/CSS，压缩模块与内容哈希资源可由浏览器持续缓存。
+
+官网与文档使用 Next.js 和 Fumadocs，OpenNext 将其与 NSGo 静态资源、连接服务一起部署到同一个 Cloudflare Worker。浏览器通过 RTCPeerConnection 使用 WebRTC，通过 IndexedDB 缓存设备和会话。
 
 OpenNext 将站点构建适配到 Cloudflare Worker。Fumadocs 根据仓库内 Markdown／MDX 生成多语言文档、导航、搜索与目录。
 

@@ -45,3 +45,5 @@ node_modules/
 
 # Generated Fumadocs MDX source maps
 .source/
+/apps/site/public/console/
+/apps/site/public/_headers

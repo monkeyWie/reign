@@ -1,6 +1,6 @@
 # ReignHub · NSGo 客户端
 
-这是独立于 `../flutter` 的原生 Go UI 实现。旧 Flutter UI 保留；复用根模块 Go 后端。网络层增加了原生 TCP P2P 与 TCP STUN，Provider 和 Agent 接入逻辑没有变更。
+桌面、移动端与浏览器共用此 Go UI 实现，复用根模块 Go 后端。网络层增加了原生 TCP P2P 与 TCP STUN，Provider 和 Agent 接入逻辑没有变更。
 
 ## 技术与目录
 
@@ -54,7 +54,7 @@ AGENTHUB_SERVER_URL=http://10.0.4.140:7443 ./scripts/build.sh macos_arm64,web
 
 已有设备配置不会被构建默认值覆盖，仍需在界面修改。Web 按当前 origin 连接；HTTP 下部分浏览器能力受安全上下文限制，WebRTC 不可用时保留 WS 中继。公网 Web 推荐 HTTPS，但 TLS 不是连接的强制条件。
 
-浏览器始终使用当前页面的 `location.origin` 作为服务地址。正常生产访问必须在同一 origin 部署静态页面、`/v2/` 和 `/relay`；`?demo=1` 只打开隔离演示，不是连接真实设备的入口。
+浏览器始终使用当前页面的 `location.origin` 作为服务地址。正常生产访问必须在同一 origin 部署静态页面与 `/p2p/*`；`?demo=1` 只打开隔离演示，不是连接真实设备的入口。
 
 ## 构建和分发
 
@@ -72,7 +72,7 @@ Android 构建中，现有 Pion 依赖 `anet` 引用 Go 私有 zone cache，和�
 - iOS IPA 已构建但未签名；安装到真机、TestFlight 或发布需要 Apple 签名配置。
 - Windows、Linux 包已交叉构建，尚未在对应真机运行。
 
-发布版 `reignhub-server` 默认内嵌 ReignHub Web，执行 `./reignhub-server` 即可使用。`--no-web` 可关闭页面。以下外部目录方式仅用于开发时覆盖内嵌资源：
+开发用 `reignhub-server` 可内嵌 ReignHub Web，执行 `./reignhub-server` 即可使用。`--no-web` 可关闭页面。以下外部目录方式仅用于开发时覆盖内嵌资源：
 
 ```sh
 reignhub-server -listen :26331 -stun-listen :26330 -tcp-stun-listen :26330 \

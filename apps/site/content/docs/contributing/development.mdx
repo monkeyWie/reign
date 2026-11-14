@@ -10,11 +10,11 @@ Use Git, Node.js 24 and pnpm 10.34.5. Go versions are specified by the root and 
 | Path                   | Responsibility                                           |
 | ---------------------- | -------------------------------------------------------- |
 | `apps/site`            | Website, Fumadocs and Web routes                         |
-| `packages/web-client`  | Browser session UI                                       |
+| `packages/account-ui`  | Website account and administration UI                                       |
 | `packages/client-sdk`  | Pairing, encrypted RPC, direct connections and IndexedDB |
 | `packages/protocol`    | TypeScript connection and entitlement interfaces         |
 | `packages/worker-core` | Self-hosted Worker, D1 and DO                            |
-| `clients/nsgo`         | Native UI, host capabilities and platform builds         |
+| `clients/nsgo`         | Shared controller UI, host capabilities and platform builds         |
 | `internal`             | Go providers, networking and local storage               |
 | `cmd/reignhub-probe`      | Optional public TCP/UDP probe                            |
 
@@ -55,4 +55,4 @@ go tool nsgo test -target macos ./hubui
 
 JavaScript uses `pnpm check` and `pnpm test`. Check both Go modules separately. Linux UI tests need GTK 4 and a graphical testing environment.
 
-CI covers native multi-platform builds, React/Worker tests, isolated host integration, probes and release manifests. Main artifacts are not formal Releases. Maintainers manage version tags and signing.
+CI covers native multi-platform builds, NSGo Web and Worker tests, isolated host integration, probes and release manifests. Main artifacts are not formal Releases. Maintainers manage version tags and signing.

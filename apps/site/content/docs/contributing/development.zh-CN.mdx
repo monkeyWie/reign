@@ -10,7 +10,7 @@ description: 在隔离环境运行原生端、Web 与 Worker。
 | 路径                   | 职责                             |
 | ---------------------- | -------------------------------- |
 | `apps/site`            | 官网、Fumadocs 与 Web 路由       |
-| `packages/web-client`  | 浏览器会话 UI                    |
+| `packages/account-ui`  | 网站账号与管理 UI                    |
 | `packages/client-sdk`  | 配对、加密 RPC、直连与 IndexedDB |
 | `packages/protocol`    | TypeScript 连接协议与权益接口    |
 | `packages/worker-core` | 自建 Worker、D1、DO              |
@@ -55,4 +55,4 @@ go tool nsgo test -target macos ./hubui
 
 JavaScript workspace 使用 `pnpm check` 和 `pnpm test`；Go 涉及两个 module，需分别检查。Linux 原生 UI 测试需要 GTK 4 和图形测试环境。
 
-CI 覆盖原生多平台构建、React／Worker、隔离主机链路、探测器与发布清单。main 自动产物不创建正式 Release；版本 tag 和商店签名由维护者管理。
+CI 覆盖原生多平台构建、NSGo Web／Worker、隔离主机链路、探测器与发布清单。main 自动产物不创建正式 Release；版本 tag 和商店签名由维护者管理。
