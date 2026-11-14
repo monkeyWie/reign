@@ -69,6 +69,7 @@ type Client struct {
 	closeOnce    sync.Once
 	relayDone    chan struct{}
 	heartbeat    atomic.Int64
+	relayBeat    atomic.Int64
 	progress     func(connectivity.Progress)
 	pc           peer
 	pending      map[string]chan Object
@@ -134,6 +135,7 @@ func Connect(ctx context.Context, p Pairing) (*Client, error) {
 			connectivity.Note(ctx, "relay-ready", "relay", "备用中继暂不可用，继续尝试 P2P 直连", err.Error(), "warning")
 		} else {
 			c.dataWS = data
+			c.relayBeat.Store(time.Now().UnixNano())
 			connectivity.Note(ctx, "relay-ready", "relay", "备用中继通道已就绪", u.Host+" · 优先直连", "success")
 		}
 	}
@@ -147,10 +149,14 @@ func Connect(ctx context.Context, p Pairing) (*Client, error) {
 			if _, _, err := c.dataWS.Read(life); err != nil {
 				return
 			}
+			c.relayBeat.Store(time.Now().UnixNano())
 		}
 	}()
 	go c.readLoop()
 	go c.keepAlive()
+	if c.dataWS != nil {
+		go c.keepRelayAlive()
+	}
 	if p.RelayOnly && c.dataWS == nil {
 		c.Close()
 		return nil, errors.New("当前服务未提供中继权限，请尝试直连")
@@ -224,6 +230,7 @@ func Connect(ctx context.Context, p Pairing) (*Client, error) {
 		return nil, e
 	}
 	connectivity.Report(ctx, "verify", "正在验证设备响应", connectivity.StageTimeout)
+	go c.watchPaths()
 	verify, stop := context.WithTimeout(ctx, connectivity.StageTimeout)
 	_, e = c.Call(verify, Object{"method": "providers"})
 	stop()
@@ -232,8 +239,35 @@ func Connect(ctx context.Context, p Pairing) (*Client, error) {
 		return nil, fmt.Errorf("设备响应验证失败: %w", e)
 	}
 	c.note("connected", "connected", "设备连接成功", c.Path(), "success")
-	go c.watchPaths()
 	return c, nil
+}
+
+func (c *Client) keepRelayAlive() {
+	tick := time.NewTicker(25 * time.Second)
+	defer tick.Stop()
+	for {
+		select {
+		case <-c.ctx.Done():
+			return
+		case <-c.relayDone:
+			return
+		case <-tick.C:
+			if time.Since(time.Unix(0, c.relayBeat.Load())) > 85*time.Second {
+				c.dataWS.CloseNow()
+				return
+			}
+			ctx, stop := context.WithTimeout(c.ctx, 10*time.Second)
+			confirmed, err := pingSocket(ctx, c.dataWS)
+			stop()
+			if err != nil {
+				c.dataWS.CloseNow()
+				return
+			}
+			if confirmed {
+				c.relayBeat.Store(time.Now().UnixNano())
+			}
+		}
+	}
 }
 func openSocket(ctx context.Context, endpoint, token string) (*websocket.Conn, frame, error) {
 	var f frame

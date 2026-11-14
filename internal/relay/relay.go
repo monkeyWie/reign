@@ -142,6 +142,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				return
 			}
+			if string(raw) == "reign:ping" {
+				if !replyPing(r.Context(), ws) {
+					return
+				}
+				continue
+			}
 			var f Frame
 			if json.Unmarshal(raw, &f) != nil || (f.Kind != "chunk" && f.Kind != "data") {
 				return
@@ -256,6 +262,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return
 		}
+		if string(raw) == "reign:ping" {
+			if !replyPing(ctx, ws) {
+				return
+			}
+			continue
+		}
 		var f Frame
 		if json.Unmarshal(raw, &f) != nil {
 			return
@@ -289,6 +301,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+}
+
+func replyPing(ctx context.Context, ws *websocket.Conn) bool {
+	probe, stop := context.WithTimeout(ctx, 10*time.Second)
+	defer stop()
+	return ws.Write(probe, websocket.MessageText, []byte("reign:pong")) == nil
 }
 
 // DisconnectDevice closes only the revoked controller's signaling and relay links.

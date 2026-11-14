@@ -663,6 +663,12 @@ func sessionCryptor(key, peer string, hello helloMessage, host bool) (*cryptor, 
 // Native protocol pings are handled by Cloudflare without waking a hibernating
 // Durable Object. Keep the outbound relay link healthy even during P2P traffic.
 func keepAlive(ctx context.Context, ws *websocket.Conn) {
+	keepSocketAlive(ctx, ws, true)
+}
+
+// Keep both physical sockets active. Only signaling may renew the lease;
+// sending renewal frames on the relay would violate its data-only protocol.
+func keepSocketAlive(ctx context.Context, ws *websocket.Conn, renew bool) {
 	tick := time.NewTicker(25 * time.Second)
 	defer tick.Stop()
 	pulses := 0
@@ -674,7 +680,7 @@ func keepAlive(ctx context.Context, ws *websocket.Conn) {
 			probe, cancel := context.WithTimeout(ctx, 10*time.Second)
 			err := ws.Ping(probe)
 			pulses++
-			if err == nil && pulses%3 == 0 {
+			if err == nil && renew && pulses%3 == 0 {
 				err = ws.Write(probe, websocket.MessageText, []byte(`{"kind":"renew"}`))
 			}
 			cancel()

@@ -80,7 +80,17 @@ describe("device authorization and separated ingress", () => {
     expect(hr.status).toBe(101);
     const host = hr.webSocket!;
     host.accept();
-    await message(host);
+    const hostWelcome = await message(host);
+    const hostRelayResponse = await socket(
+      h.id,
+      h.token,
+      "host",
+      routes.relay,
+      hostWelcome.peer as string,
+    );
+    const hostRelay = hostRelayResponse.webSocket!;
+    hostRelay.accept();
+    await message(hostRelay);
     const p = crypto.randomUUID().replaceAll("-", "");
     await post(
       routes.request,
@@ -137,6 +147,73 @@ describe("device authorization and separated ingress", () => {
     await closed;
     expect((await socket(h.id, c.token, "client")).status).toBe(403);
     host.close();
+    data.close();
+    hostRelay.close();
+  });
+  it("disconnects a host whose response relay closes and admits its replacement", async () => {
+    const h = await register(true);
+    const hr = await socket(h.id, h.token, "host");
+    const host = hr.webSocket!;
+    host.accept();
+    const welcome = await message(host);
+    const dr = await socket(
+      h.id,
+      h.token,
+      "host",
+      routes.relay,
+      welcome.peer as string,
+    );
+    const data = dr.webSocket!;
+    data.accept();
+    await message(data);
+    const closed = new Promise<CloseEvent>((resolve) =>
+      host.addEventListener("close", resolve, { once: true }),
+    );
+    data.close(1000, "lost response channel");
+    expect((await closed).code).toBe(1013);
+    const replacement = await socket(h.id, h.token, "host");
+    expect(replacement.status).toBe(101);
+    replacement.webSocket!.accept();
+    replacement.webSocket!.close();
+  });
+  it("does not forward relay requests into a host with no reply socket", async () => {
+    const h = await register(true),
+      c = await register();
+    const hr = await socket(h.id, h.token, "host");
+    const host = hr.webSocket!;
+    host.accept();
+    await message(host);
+    const p = crypto.randomUUID().replaceAll("-", "");
+    await post(
+      routes.request,
+      { id: p, host: h.id, envelope: "encrypted" },
+      c.token,
+    );
+    await post(
+      routes.respond,
+      { id: p, allow: true, reply: "encrypted" },
+      h.token,
+    );
+    const cr = await socket(h.id, c.token, "client");
+    const client = cr.webSocket!;
+    client.accept();
+    const welcome = await message(client);
+    const dr = await socket(
+      h.id,
+      c.token,
+      "client",
+      routes.relay,
+      welcome.peer as string,
+    );
+    const data = dr.webSocket!;
+    data.accept();
+    await message(data);
+    const closed = new Promise<CloseEvent>((resolve) =>
+      host.addEventListener("close", resolve, { once: true }),
+    );
+    data.send(JSON.stringify({ kind: "chunk", body: "opaque" }));
+    expect((await closed).code).toBe(1013);
+    client.close();
     data.close();
   });
   it("does not allow business data on signaling", async () => {

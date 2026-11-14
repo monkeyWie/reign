@@ -58,6 +58,9 @@ func Connect(ctx context.Context, p Pairing, opts Options) (*Client, error) {
 	w.dataWS = dataWS
 	go func() { defer close(c.relayDone); drainRelay(w.ctx, dataWS) }()
 	go keepAlive(w.ctx, ws)
+	if dataWS != nil {
+		go keepSocketAlive(w.ctx, dataWS, false)
+	}
 	go func() {
 		defer close(c.done)
 		defer w.close()
@@ -100,6 +103,7 @@ func Connect(ctx context.Context, p Pairing, opts Options) (*Client, error) {
 		return nil, fmt.Errorf("连接路径验证失败: %w", err)
 	}
 	connectivity.Report(ctx, "verify", "正在验证设备响应", connectivity.StageTimeout)
+	go c.watchPaths()
 	verifyCtx, stopVerify := context.WithTimeout(ctx, connectivity.StageTimeout)
 	defer stopVerify()
 	// Prove possession of the pairing key before presenting a connected UI.
@@ -108,7 +112,6 @@ func Connect(ctx context.Context, p Pairing, opts Options) (*Client, error) {
 		c.Close()
 		return nil, fmt.Errorf("配对验证失败: %w", err)
 	}
-	go c.watchPaths()
 	return c, nil
 }
 
@@ -202,6 +205,9 @@ func (c *Client) Call(ctx context.Context, r control.Request, out any) error {
 		}
 		return nil
 	case <-ctx.Done():
+		if control.ReadOnly(r.Method) {
+			return fmt.Errorf("等待设备读取响应超时或已取消: %w", ctx.Err())
+		}
 		return fmt.Errorf("请求超时或取消；操作结果可能尚未返回，请刷新后再决定是否重试: %w", ctx.Err())
 	case <-c.done:
 		return errors.New("relay 已断开；请重新连接，刷新后再重试操作")

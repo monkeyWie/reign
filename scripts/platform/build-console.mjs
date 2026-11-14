@@ -43,6 +43,7 @@ for (const file of readdirSync(built)) {
 const wasm = readFileSync(join(built, config.wasm));
 config.wasm += ".gz";
 const compressed = gzipSync(wasm, { level: 9 });
+config.wasmSize = compressed.length;
 writeFileSync(join(assets, config.wasm), compressed);
 writeFileSync(join(assets, "nsgo.json"), JSON.stringify(config) + "\n");
 const css = readFileSync(
@@ -53,8 +54,15 @@ const cssFile =
   createHash("sha256").update(css).digest("hex").slice(0, 10) +
   ".css";
 writeFileSync(join(assets, cssFile), css);
+const downloader = readFileSync(join(root, "clients/nsgo/web/download.mjs"));
+const downloaderFile =
+  "download." +
+  createHash("sha256").update(downloader).digest("hex").slice(0, 10) +
+  ".mjs";
+writeFileSync(join(assets, downloaderFile), downloader);
 const html = readFileSync(join(root, "clients/nsgo/web/index.html"), "utf8")
   .replace("__LOADER__", config.loader)
+  .replace("__DOWNLOADER__", downloaderFile)
   .replace("__LOADING_CSS__", cssFile)
   .replace(
     "__NSGO_CONFIG__",

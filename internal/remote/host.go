@@ -52,7 +52,17 @@ func serveHostObserved(ctx context.Context, p Pairing, opts Options, d *control.
 	life, cancel := context.WithCancel(ctx)
 	defer cancel()
 	go keepAlive(life, ws)
-	go drainRelay(life, dataWS)
+	if dataWS != nil {
+		go keepSocketAlive(life, dataWS, false)
+		go func() {
+			drainRelay(life, dataWS)
+			// A live signal with a dead response socket accepts handshakes but
+			// silently loses every relay reply. Rejoin with a fresh socket pair.
+			if life.Err() == nil {
+				_ = ws.CloseNow()
+			}
+		}()
+	}
 	peers := map[string]*wire{}
 	defer func() {
 		for _, w := range peers {

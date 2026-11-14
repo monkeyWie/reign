@@ -83,6 +83,11 @@ export class ReignHubRoom extends DurableObject<CoreEnv> {
           if (host) this.send(host, { peer: s.peer, kind: "bye" });
           this.ctx.waitUntil(this.release(s));
         }
+      } else if (s.role === "host" && reason !== "replaced") {
+        // The host writes responses through this socket. Keeping its signal
+        // online after losing it would allow handshakes that can never finish.
+        const host = this.host(s.generation);
+        if (host) this.disconnect(host, 1013, "host relay disconnected");
       }
     }
     try {
@@ -359,6 +364,21 @@ export class ReignHubRoom extends DurableObject<CoreEnv> {
       } else {
         const target = this.host(state.generation);
         if (!target) throw new APIError("HOST_OFFLINE", "设备离线");
+        if (
+          state.route === "relay" &&
+          !this.sockets("host", "relay").some(
+            (s) => this.state(s)?.generation === state.generation,
+          )
+        ) {
+          // Also repair hosts whose relay was lost before this Worker version
+          // observed its close event. Never forward into a missing reply path.
+          this.disconnect(target, 1013, "host relay unavailable");
+          throw new APIError(
+            "HOST_RELAY_UNAVAILABLE",
+            "被控设备中继已断开，正在重新接入",
+            503,
+          );
+        }
         this.send(target, {
           peer: state.peer,
           device: state.device,
