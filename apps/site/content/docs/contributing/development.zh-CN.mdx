@@ -29,7 +29,7 @@ pnpm exec wrangler d1 migrations apply DB --local
 pnpm exec wrangler dev --port 8787
 ```
 
-打开 `http://localhost:8787/chat`。只改文档或官网时可用 `pnpm dev` 启动 Next 开发服务；完整连接链路请使用上面的 Worker 环境。
+打开 `http://localhost:8787/chat`。只改文档或官网时可用 `pnpm dev` 启动 Next 开发服务；完整连接链路和浏览器语言选择请使用上面的 Worker 环境。英文页面不带语言前缀，中文页面使用 `/zh-CN`。构建时可通过 `SITE_URL` 检查 SEO 元数据中的绝对地址。
 
 ## 原生 UI
 

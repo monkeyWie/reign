@@ -29,7 +29,7 @@ pnpm exec wrangler d1 migrations apply DB --local
 pnpm exec wrangler dev --port 8787
 ```
 
-Open `http://localhost:8787/chat`. For website/docs only, use `pnpm dev`; full connection testing needs the Worker environment above. Marketing and docs use `/en` and `/zh-CN`. Set `SITE_URL` at build time to test absolute SEO metadata.
+Open `http://localhost:8787/chat`. For website/docs only, use `pnpm dev`; full connection testing and browser language selection need the Worker environment above. English pages have no language prefix; Chinese pages use `/zh-CN`. Set `SITE_URL` at build time to test absolute SEO metadata.
 
 ## Native UI
 
