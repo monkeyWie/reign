@@ -165,8 +165,13 @@ export class ReleaseService {
               refresh_after: now + refreshSeconds,
             };
           }
-        } catch {
+        } catch (error) {
           // Keep the last good metadata for outages, malformed responses and 429.
+          console.warn("release_refresh_failed", {
+            status: response?.status ?? null,
+            message:
+              error instanceof Error ? error.message : "Unknown upstream error",
+          });
           row = { ...row, refresh_after: retryTime(response, now) };
         }
         await this.store.save(lease, row);
