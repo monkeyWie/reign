@@ -2047,3 +2047,19 @@
   text-decoration: underline;
   text-underline-offset: 4px;
 }
+
+.download-assets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 20px;
+}
+.download-assets .button {
+  font-size: 12px;
+  padding: 10px 12px;
+}
+.download-size,
+.download-unavailable {
+  color: var(--muted-foreground, #808080);
+  font-size: 12px;
+}

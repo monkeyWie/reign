@@ -292,5 +292,15 @@
   "法律信息": "Legal information",
   "服务条款": "Terms of Service",
   "隐私政策": "Privacy Policy",
-  "客服邮箱": "Support email"
+  "客服邮箱": "Support email",
+  "下载并安装 APK，随时连接你的 Agent。": "Download the APK and connect to your agents anywhere.",
+  "最新版本": "Latest release",
+  "正在获取最新版本…": "Fetching the latest release…",
+  "获取 Reign": "Get Reign",
+  "发布于": "Released",
+  "正在加载各平台安装包。": "Loading downloads for every platform.",
+  "安装包发布后会自动显示在这里。": "Downloads appear here automatically when a release is published.",
+  "暂时无法获取版本，请在 GitHub Releases 查看下载。": "Downloads are temporarily unavailable. Visit GitHub Releases to get Reign.",
+  "正在加载…": "Loading…",
+  "安装包即将发布": "Download coming soon"
 }

@@ -61,6 +61,14 @@ try {
     assert.equal(response.status, 200, path);
     assert.match(await response.text(), /Reign/);
   }
+  const releaseResponse = await fetch(origin + "/api/releases");
+  assert.equal(releaseResponse.status, 200, "release catalogue");
+  assert.match(releaseResponse.headers.get("Cache-Control") || "", /max-age=/);
+  const catalogue = (await releaseResponse.json()) as {
+    release: unknown;
+    stale: boolean;
+  };
+  assert.ok("release" in catalogue && typeof catalogue.stale === "boolean");
   const service = new Service(origin, cache);
   const config = await service.config();
   assert.equal(config.deployment, "self-hosted");
