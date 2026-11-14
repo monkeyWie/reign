@@ -19,13 +19,16 @@ func (s *State) conversation(cx *core.Scope, narrow bool) core.Node {
 		return core.View{Style: fill.Merge(core.Style{AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter}), Children: []core.Node{label(cx, "选择一个会话，或创建新会话", 14, true)}}
 	}
 	children := []core.Node{}
+	floatingHeader := isMobile(cx)
 	header := []core.Node{}
 	if narrow {
 		header = append(header, button(cx, "back-sessions", "", lucide.ArrowLeft, "ghost", s.backSessions))
 	}
 	header = append(header, core.View{Style: core.Style{FlexGrow: 1, FlexShrink: 1, Gap: 4}, Children: []core.Node{singleLine(cx, func() string { s.read(); return str(s.selected, "title") }, 14, false), singleLine(cx, func() string { s.read(); return str(s.selected, "cwd") }, 11, true)}})
 	header = append(header, s.connectionIndicator(cx, func() string { return s.target }), glyph(cx, sessionIcon(s.selected), 18), button(cx, "attachment-cache", "", lucide.HardDrive, "ghost", func() { s.dialog.Set("clear-cache") }))
-	children = append(children, core.View{TestID: "conversation-header", Style: core.Style{Padding: core.All(18), Borders: core.Edges{Bottom: 1}}, StyleFunc: func() core.Style { return core.Style{BorderColor: palette(cx).border} }, Children: []core.Node{row(header...)}})
+	if !floatingHeader {
+		children = append(children, core.View{TestID: "conversation-header", Style: core.Style{Padding: core.All(18), Borders: core.Edges{Bottom: 1}}, StyleFunc: func() core.Style { return core.Style{BorderColor: palette(cx).border} }, Children: []core.Node{row(header...)}})
+	}
 	listRef := s.timeline
 	atBottom := core.NewSignal(cx, true)
 	viewport := core.NewSignal(cx, core.Size{})
@@ -100,17 +103,52 @@ func (s *State) conversation(cx *core.Scope, narrow bool) core.Node {
 				}
 				return s.messageInset(cx, s.message(cx, get))
 			})
-		}, Footer: core.Show{When: func() bool { s.read(); return str(s.transcript, "nextCursor") != "" }, Then: func(cx *core.Scope) core.Node {
+		}, Footer: core.View{TestID: "history-start-inset", Style: core.Style{Padding: core.Edges{Top: choose(floatingHeader, core.Points(88), core.Points(0))}}, Children: []core.Node{core.Show{When: func() bool { s.read(); return str(s.transcript, "nextCursor") != "" }, Then: func(cx *core.Scope) core.Node {
 			return button(cx, "load-older", "加载更早消息", nil, "ghost", s.older)
-		}},
+		}}}},
 	}
-	children = append(children, core.View{TestID: "timeline", Style: fill, Children: []core.Node{list, s.messageNavigation(cx, rows, listRef, viewport, tailCount), core.Show{When: func() bool { return !atBottom.Get() }, Then: func(cx *core.Scope) core.Node {
+	timelineChildren := []core.Node{list, s.messageNavigation(cx, rows, listRef, viewport, tailCount), core.Show{When: func() bool { return !atBottom.Get() }, Then: func(cx *core.Scope) core.Node {
 		return core.View{Style: core.Style{Position: core.Absolute, Bottom: core.Pt(12), Right: core.Pt(40)}, Children: []core.Node{button(cx, "jump-to-latest", "回到最新", lucide.ArrowDown, "outline", func() { listRef.ScrollToIndexAt(0, 1, 0, true) })}}
-	}}}})
+	}}}
+	if floatingHeader {
+		timelineChildren = append(timelineChildren, s.mobileConversationHeader(cx, narrow))
+	}
+	children = append(children, core.View{TestID: "timeline", Style: fill, Children: timelineChildren})
 	children = append(children, core.Show{When: func() bool { return !s.connected() }, Then: func(cx *core.Scope) core.Node {
 		return core.View{Style: core.Style{Padding: core.Symmetric(8, 18)}, Children: []core.Node{label(cx, "设备离线，显示本地缓存；连接恢复后同步最新消息。", 12, true)}}
 	}}, s.composer(cx))
 	return core.View{TestID: "conversation", Style: fill, Children: children}
+}
+
+// The mobile toolbar floats over the recycled list. Only the beginning of the
+// history has an inset, so scrolled messages pass beneath the fading backdrop.
+func (s *State) mobileConversationHeader(cx *core.Scope, back bool) core.Node {
+	pill := func(children ...core.Node) core.Node {
+		return core.View{Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter, Height: core.Pt(52), CornerRadius: 26, FlexShrink: 0, Padding: core.Symmetric(0, 4)}, StyleFunc: func() core.Style { return core.Style{Background: palette(cx).background} }, Children: children}
+	}
+	buttons := []core.Node{}
+	if back {
+		buttons = append(buttons, pill(button(cx, "back-sessions", "", lucide.ArrowLeft, "ghost", s.backSessions)))
+	}
+	buttons = append(buttons, core.View{TestID: "conversation-title-pill", Style: core.Style{FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0), Height: core.Pt(52), CornerRadius: 26, JustifyContent: core.JustifyCenter, Padding: core.Symmetric(6, 16), Gap: 2}, StyleFunc: func() core.Style { return core.Style{Background: palette(cx).background} }, Children: []core.Node{
+		singleLine(cx, func() string { s.read(); return str(s.selected, "title") }, 14, false),
+		singleLine(cx, func() string {
+			s.read()
+			cwd := strings.TrimRight(strings.ReplaceAll(str(s.selected, "cwd"), "\\", "/"), "/")
+			if i := strings.LastIndex(cwd, "/"); i >= 0 {
+				cwd = cwd[i+1:]
+			}
+			return cwd
+		}, 11, true),
+	}}, pill(s.connectionIndicator(cx, func() string { return s.target }), button(cx, "attachment-cache", "", lucide.HardDrive, "ghost", func() { s.dialog.Set("clear-cache") })))
+	return core.View{TestID: "conversation-header", PointerEvents: core.PointerEventsBoxNone, Style: core.Style{Position: core.Absolute, Top: core.Pt(0), Left: core.Pt(0), Right: core.Pt(0), Height: core.Pt(100), ZIndex: 5}, Children: []core.Node{
+		core.View{TestID: "conversation-header-fade", PointerEvents: core.PointerEventsNone, Style: core.Style{Position: core.Absolute, Top: core.Pt(0), Bottom: core.Pt(0), Left: core.Pt(0), Right: core.Pt(0)}, StyleFunc: func() core.Style {
+			bg := palette(cx).background
+			mask := core.LinearGradient(180, core.RGB(0xffffff), core.RGB(0xffffff), core.RGB(0xffffff).Faded(0))
+			return core.Style{Gradients: []core.Gradient{core.LinearGradient(180, bg.Faded(.9), bg.Faded(.6), bg.Faded(0))}, BackdropFilters: []core.Filter{core.Blur(10)}, Mask: &mask}
+		}},
+		core.View{PointerEvents: core.PointerEventsBoxNone, Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 8, Padding: core.Edges{Top: 8, Left: 12, Right: 12}, MinWidth: core.Pt(0)}, Children: buttons},
+	}}
 }
 func (s *State) messageInset(cx *core.Scope, content core.Node) core.Node {
 	return core.View{Style: core.Style{Width: core.Pct(100), MinWidth: core.Pt(0), AlignItems: core.AlignCenter}, Children: []core.Node{core.View{Style: core.Style{Width: core.Pct(100), MaxWidth: core.Pt(988)}, StyleFunc: func() core.Style {
