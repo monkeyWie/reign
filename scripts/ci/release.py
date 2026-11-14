@@ -6,12 +6,25 @@ import os
 from pathlib import Path
 import re
 import shutil
-import tarfile
-import zipfile
 
 ROOT = Path(__file__).resolve().parents[2]
 SEMVER = r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?'
 DESKTOP = ('macos_arm64', 'macos_x64', 'windows_x64', 'windows_arm64', 'linux_x64', 'linux_arm64')
+
+
+def desktop_suffixes(target):
+    if target.startswith('macos_'):
+        return ('.dmg',)
+    if target.startswith('windows_'):
+        return ('-setup.exe',)
+    if target.startswith('linux_'):
+        return ('.deb', '.pkg.tar.gz', '.AppImage')
+    raise SystemExit(f'Unsupported desktop target: {target}')
+
+
+def desktop_assets(v):
+    return [f'reign-{v}-{t.replace("_", "-")}{suffix}'
+            for t in DESKTOP for suffix in desktop_suffixes(t)]
 
 
 def digest(path):
@@ -52,18 +65,15 @@ def collect(args):
         stem = f'reign-{args.version}-{target.replace("_", "-")}'
         bundle = source / f'Reign-{args.version}-{target}'
         if target in DESKTOP:
-            if not bundle.is_dir():
-                raise SystemExit(f'Missing client bundle: {bundle}')
-            if target.startswith('windows_'):
-                archive = output / (stem + '.zip')
-                with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED) as z:
-                    for p in sorted(bundle.rglob('*')):
-                        if p.is_file():
-                            z.write(p, Path(bundle.name) / p.relative_to(bundle))
-            else:
-                archive = output / (stem + '.tar.gz')
-                with tarfile.open(archive, 'w:gz') as tar:
-                    tar.add(bundle, arcname=bundle.name)
+            for suffix in desktop_suffixes(target):
+                src = source / 'releases' / (stem + suffix)
+                if not src.is_file():
+                    raise SystemExit(f'Missing native installer: {src}; enable NSGo installers and install required packaging tools')
+                archive = output / src.name
+                shutil.copy2(src, archive)
+                checksum(archive)
+                print(archive)
+            continue
         elif target in ('android_arm64', 'web', 'ios'):
             suffix = {'android_arm64': '.apk', 'web': '.zip', 'ios': '.ipa'}[target]
             src = source / 'releases' / (stem + suffix)
@@ -87,7 +97,7 @@ def collect(args):
 
 def verify(args):
     output = Path(args.output)
-    expected = [f'reign-{args.version}-{t.replace("_", "-")}' + ('.zip' if t.startswith('windows_') else '.tar.gz') for t in DESKTOP]
+    expected = desktop_assets(args.version)
     expected += [f'reign-web-worker-{args.version}.tar.gz', f'reign-{args.version}-ios-unsigned.ipa']
     apks = list(output.glob(f'reign-{args.version}-android-arm64*.apk'))
     if len(apks) != 1:

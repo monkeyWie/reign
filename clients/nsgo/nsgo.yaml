@@ -6,11 +6,15 @@ dev:
   target: native
 build:
   output: dist
-  installers: false
+  installers: true
   jobs: 1
   targets: [macos_arm64, windows_x64, linux_x64, ios, android_arm64, web]
 android:
   permissions: [android.permission.INTERNET, android.permission.CAMERA]
+linux:
+  maintainer: "liwei <liwei2633@gmail.com>"
+  summary: Remote access to your AI agents
+  license: MIT
 apple:
   info:
     NSCameraUsageDescription: 扫描 Reign 设备二维码以连接电脑。

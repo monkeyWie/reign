@@ -25,7 +25,7 @@ class ReleaseContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             output = Path(tmp)
             v = '1.2.3'
-            names = [f'reign-{v}-{t.replace("_", "-")}' + ('.zip' if t.startswith('windows_') else '.tar.gz') for t in release.DESKTOP]
+            names = release.desktop_assets(v)
             names += [f'reign-web-worker-{v}.tar.gz', f'reign-{v}-ios-unsigned.ipa', f'reign-{v}-android-arm64-debug.apk']
             names += [f'reign-probe-{v}-linux-{a}.tar.gz' for a in ('amd64', 'arm64')]
             args = SimpleNamespace(version=v, output=tmp)
@@ -34,7 +34,7 @@ class ReleaseContractTests(unittest.TestCase):
                 path.write_bytes(b'fixture artifact')
                 release.checksum(path)
             release.verify(args)
-            self.assertEqual(len((output / 'SHA256SUMS').read_text().splitlines()), 11)
+            self.assertEqual(len((output / 'SHA256SUMS').read_text().splitlines()), 15)
             path.write_bytes(b'corrupted artifact')
             with self.assertRaises(SystemExit):
                 release.verify(args)
@@ -48,23 +48,23 @@ class ReleaseContractTests(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 release.verify(args)
 
-    def test_client_packaging_preserves_executable_and_symlink(self):
-        import tarfile
+    def test_collects_native_installers_without_repacking_or_publishing_bundles(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            bundle = root / 'build/Reign-1.2.3-macos-arm64'
-            # NSGo uses an underscore in the target directory name.
-            bundle = bundle.with_name('Reign-1.2.3-macos_arm64')
-            bundle.mkdir(parents=True)
-            executable = bundle / 'Reign'
-            executable.write_text('test fixture')
-            executable.chmod(0o755)
-            (bundle / 'link').symlink_to('Reign')
-            release.collect(SimpleNamespace(version='1.2.3', source=str(bundle.parent), output=str(root / 'out'), targets='macos_arm64'))
-            archive = root / 'out/reign-1.2.3-macos-arm64.tar.gz'
-            with tarfile.open(archive) as tar:
-                self.assertEqual(tar.getmember(bundle.name + '/Reign').mode & 0o777, 0o755)
-                self.assertTrue(tar.getmember(bundle.name + '/link').issym())
+            source = root / 'build/releases'
+            source.mkdir(parents=True)
+            for name in release.desktop_assets('1.2.3'):
+                (source / name).write_bytes(b'native installer fixture: ' + name.encode())
+            (source / 'reign-1.2.3-windows-x64.zip').write_bytes(b'portable archive')
+            args = SimpleNamespace(version='1.2.3', source=str(source.parent), output=str(root / 'out'), targets=','.join(release.DESKTOP))
+            release.collect(args)
+            names = {p.name for p in (root / 'out').iterdir() if p.suffix != '.sha256'}
+            self.assertEqual(names, set(release.desktop_assets('1.2.3')))
+            for name in names:
+                self.assertEqual((root / 'out' / name).read_bytes(), (source / name).read_bytes())
+            (source / 'reign-1.2.3-windows-x64-setup.exe').unlink()
+            with self.assertRaisesRegex(SystemExit, 'Missing native installer'):
+                release.collect(args)
 
 
 if __name__ == '__main__':

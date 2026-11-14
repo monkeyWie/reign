@@ -14,12 +14,16 @@ import type { D1Database } from "@cloudflare/workers-types";
 function fixture(version = "0.1.0-rc.1") {
   const tag = "v" + version;
   const names = [
-    "macos-arm64.tar.gz",
-    "macos-x64.tar.gz",
-    "windows-x64.zip",
-    "windows-arm64.zip",
-    "linux-x64.tar.gz",
-    "linux-arm64.tar.gz",
+    "macos-arm64.dmg",
+    "macos-x64.dmg",
+    "windows-x64-setup.exe",
+    "windows-arm64-setup.exe",
+    "linux-x64.deb",
+    "linux-x64.pkg.tar.gz",
+    "linux-x64.AppImage",
+    "linux-arm64.deb",
+    "linux-arm64.pkg.tar.gz",
+    "linux-arm64.AppImage",
     "android-arm64.apk",
     "ios-unsigned.ipa",
   ];
@@ -70,7 +74,7 @@ test("the native Worker fetch function is called with the global receiver", asyn
     nativeLikeFetch,
     () => 10000,
   );
-  assert.equal((await service.get()).release?.assets.length, 8);
+  assert.equal((await service.get()).release?.assets.length, 12);
 });
 test("published release assets match every CI client platform, excluding untrusted URLs and development signatures", () => {
   const release = fixture();
@@ -80,13 +84,35 @@ test("published release assets match every CI client platform, excluding untrust
     browser_download_url: `${releasesURL}/download/v0.1.0-rc.1/debug.apk`,
   });
   release.assets.push({
-    name: "reign-0.1.0-rc.1-windows-x64.zip",
+    name: "reign-0.1.0-rc.1-windows-x64-setup.exe",
     size: 123,
     browser_download_url: "https://malicious.test/download.exe",
   });
+  for (const suffix of [
+    "windows-x64.zip",
+    "macos-arm64.tar.gz",
+    "macos-arm64.deb",
+  ]) {
+    const name = `reign-0.1.0-rc.1-${suffix}`;
+    release.assets.push({
+      name,
+      size: 123,
+      browser_download_url: `${releasesURL}/download/v0.1.0-rc.1/${name}`,
+    });
+  }
   const parsed = parseReleases([release])!;
   assert.equal(parsed.version, "0.1.0-rc.1");
-  assert.equal(parsed.assets.length, 8);
+  assert.equal(parsed.assets.length, 12);
+  assert.equal(
+    parsed.assets.find((a) => a.platform === "windows")?.format,
+    "exe",
+  );
+  assert.deepEqual(
+    new Set(
+      parsed.assets.filter((a) => a.platform === "linux").map((a) => a.format),
+    ),
+    new Set(["deb", "arch", "appimage"]),
+  );
   assert.ok(parsed.checksumsURL?.endsWith("/SHA256SUMS"));
   assert.ok(
     parsed.assets.every((a) =>
@@ -149,7 +175,7 @@ test("ETag revalidation refreshes the shared snapshot without redownloading meta
   const next = await service.get();
   assert.equal(count, 2);
   assert.equal(next.stale, false);
-  assert.equal(next.release?.assets.length, 8);
+  assert.equal(next.release?.assets.length, 12);
 });
 test("429 respects GitHub's reset time and serves the last working downloads throughout the outage", async () => {
   const store = new MemoryStore();
@@ -210,7 +236,7 @@ test("network and malformed-response failures keep a cached release, cold failur
     assert.equal(
       (await new ReleaseService(store, fetcher, () => 11000).get()).release
         ?.assets.length,
-      8,
+      12,
     );
   }
 });

@@ -119,6 +119,11 @@ jobs:
           cache-dependency-path: |
             go.sum
             clients/nsgo/go.sum
+      - name: Install native installer tools
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y nsis p7zip-full
       - name: Build native clients
         working-directory: clients/nsgo
         run: ./scripts/build.sh "$TARGETS" -version "$VERSION" -build-number "$BUILD_NUMBER"
@@ -126,6 +131,8 @@ jobs:
         run: |
           python3 scripts/ci/release.py collect --source clients/nsgo/dist \
             --targets "$TARGETS" --version "$VERSION" --output dist/release
+      - name: Validate native installer payloads
+        run: python3 scripts/ci/smoke-installers.py --directory dist/release --version "$VERSION" --targets "$TARGETS"
       - uses: actions/upload-artifact@v7.0.2
         with:
           name: clients-${{ matrix.name }}
@@ -349,10 +356,12 @@ jobs:
           cat > build-notes.md <<'NOTES'
           Reign native clients, Cloudflare Worker with React Web, and optional probes.
 
-          - Desktop archives are portable; macOS builds are ad hoc signed and not notarized.
+          - macOS DMG: open and drag Reign into Applications. Builds are ad hoc signed and not notarized.
+          - Windows setup EXE: includes installation, shortcuts and an uninstaller.
+          - Linux: DEB, Arch Linux packages and AppImage for x64 and arm64; GTK 4 is required.
           - Android packages ending in `-debug.apk` use a temporary development signing key and cannot update previous builds with another key. A configured persistent signing identity removes this suffix.
           - iOS `-unsigned.ipa` requires your own signing/provisioning before installation.
-          - Linux desktop requires GTK 4. Probe binaries use TCP/UDP 26330 and do not contain Web or account services.
+          - Probe binaries use TCP/UDP 26330 and do not contain Web or account services.
           - Verify downloads against `SHA256SUMS` or the individual `.sha256` files.
           - Native clients default to https://myreign.cloud; self-hosted services can be configured in settings. Web uses its current origin.
           NOTES

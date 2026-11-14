@@ -302,5 +302,9 @@
   "安装包发布后会自动显示在这里。": "Downloads appear here automatically when a release is published.",
   "暂时无法获取版本，请在 GitHub Releases 查看下载。": "Downloads are temporarily unavailable. Visit GitHub Releases to get Reign.",
   "正在加载…": "Loading…",
-  "安装包即将发布": "Download coming soon"
+  "安装包即将发布": "Download coming soon",
+  "EXE 安装程序": "EXE installer",
+  "提供 x64 与 arm64 安装程序，包含快捷方式和卸载功能。": "Native x64 and arm64 installers with shortcuts and an uninstaller.",
+  "选择适合发行版的安装包，或使用 AppImage。运行需要 GTK 4。": "Choose a package for your distribution, or use AppImage. GTK 4 is required.",
+  "打开 DMG，将 Reign 拖入 Applications。当前预览尚未完成 Apple 公证。": "Open the DMG and drag Reign into Applications. This preview has not been Apple-notarized."
 }

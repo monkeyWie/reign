@@ -30,9 +30,9 @@ export function ReleaseDownloads({
       Icon: Monitor,
       title: "macOS",
       arch: "Apple Silicon / Intel",
-      format: t(".app 归档"),
+      format: "DMG",
       note: t(
-        "当前预览为 ad hoc 签名，尚未完成 Apple 公证。请在可信来源获取。",
+        "打开 DMG，将 Reign 拖入 Applications。当前预览尚未完成 Apple 公证。",
       ),
     },
     {
@@ -40,16 +40,16 @@ export function ReleaseDownloads({
       Icon: Laptop,
       title: "Windows",
       arch: "x64 / arm64",
-      format: t("便携 ZIP"),
-      note: t("提供 x64 与 arm64 原生构建，解压后启动。"),
+      format: t("EXE 安装程序"),
+      note: t("提供 x64 与 arm64 安装程序，包含快捷方式和卸载功能。"),
     },
     {
       id: "linux",
       Icon: Terminal,
       title: "Linux",
       arch: "x64 / arm64",
-      format: "tar.gz",
-      note: t("采用 GTK 4 原生界面。安装 GTK 4 运行库后，解压并启动。"),
+      format: "DEB / Arch / AppImage",
+      note: t("选择适合发行版的安装包，或使用 AppImage。运行需要 GTK 4。"),
     },
     {
       id: "android",
@@ -112,8 +112,11 @@ export function ReleaseDownloads({
             const assets =
               release?.assets
                 .filter((a) => a.platform === id)
-                .sort((a, b) => a.architecture.localeCompare(b.architecture)) ||
-              [];
+                .sort(
+                  (a, b) =>
+                    a.architecture.localeCompare(b.architecture) ||
+                    a.name.localeCompare(b.name),
+                ) || [];
             return (
               <article key={id}>
                 <Icon size={25} />
@@ -137,6 +140,15 @@ export function ReleaseDownloads({
                         : id === "ios"
                           ? "IPA"
                           : asset.architecture}
+                      {id === "linux" && (
+                        <span>
+                          {asset.format === "arch"
+                            ? "Arch"
+                            : asset.format === "appimage"
+                              ? "AppImage"
+                              : "DEB"}
+                        </span>
+                      )}
                       <span className="download-size">
                         {(asset.size / 1024 / 1024).toFixed(1)} MB
                       </span>

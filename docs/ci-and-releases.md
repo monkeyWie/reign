@@ -16,16 +16,16 @@ Linux 和 macOS 分别运行两个 Go module 的 `go vet`、`go test -race` 与�
 
 | 产物 | 格式 |
 | --- | --- |
-| macOS arm64 / x64 | `.tar.gz`，内含 `.app` |
-| Windows x64 / arm64 | `.zip`，便携目录 |
-| Linux x64 / arm64 桌面 | `.tar.gz`，运行需要 GTK 4 |
+| macOS arm64 / x64 | `.dmg`，拖入 Applications 安装 |
+| Windows x64 / arm64 | `-setup.exe`，包含快捷方式与卸载程序 |
+| Linux x64 / arm64 桌面 | `.deb`、`.pkg.tar.gz`（Arch）与 `.AppImage`，运行需要 GTK 4 |
 | Android arm64 | 含原生 QR host 的 APK |
 | iOS | `-unsigned.ipa`，需自行签名才能安装 |
 | iOS Simulator | 编译验证，不作为设备安装包发布 |
 | Web + Worker | `reign-web-worker-<version>.tar.gz`，官网、控制台和开源服务 |
 | Linux amd64 / arm64 探测服务 | `reign-probe-<version>-linux-<arch>.tar.gz`，独立 TCP/UDP 探测 |
 
-PR 和 main 构建的产物在对应 Actions run 的 Artifacts 中，保留 14 天；覆盖率保留 7 天。每次完整构建都会把公开产物合并到 `release-bundle` artifact，验证 11 个预期安装包/归档及各自 `.sha256`，生成总 `SHA256SUMS`；tag 发布直接使用这一份已验证的产物。缺失、额外文件或校验和错误都会阻止发布。
+PR 和 main 构建的产物在对应 Actions run 的 Artifacts 中，保留 14 天；覆盖率保留 7 天。每次完整构建都会把公开产物合并到 `release-bundle` artifact，验证 15 个预期安装包/归档及各自 `.sha256`，生成总 `SHA256SUMS`；tag 发布直接使用这一份已验证的产物。缺失、额外文件或校验和错误都会阻止发布。
 
 Web job 构建 React 网站与 Worker，并使用迁移后的本地 D1 验证原生客户端互通。Linux amd64 探测服务使用随机本地端口实际启动，验证 TCP/UDP 探测，不承载 Web 或账号服务。
 
@@ -60,8 +60,10 @@ git push origin v0.1.0
 
 ## 官网自动下载
 
-官网 `/download` 通过同源 `/api/releases` 读取 GitHub Release API 中最新已发布且带客户端附件的版本，包括预览版本。按平台显示实际安装包 URL 和大小，文件直接从 GitHub 下载，不经 Worker 转发，也不需要发版后修改官网。
+官网 `/download` 在服务端读取与同源 `/api/releases` 共用的版本缓存；首屏直接包含安装包链接。缓存从 GitHub Release API 获取最新已发布且带客户端附件的版本，包括预览版本。按平台显示实际安装包 URL 和大小，文件直接从 GitHub 下载，不经 Worker 转发，也不需要发版后修改官网。
 
 版本快照在 D1 永久保留，不设数据过期时间。有缓存就立即返回，只有首次没有缓存时同步读取 GitHub；距离上次 API 请求至少一小时才在后台异步刷新，并更新 D1、内存和边缘缓存。D1 同时保存 ETag。跨 Worker 实例通过 D1 短租约合并刷新，单实例合并并发请求，边缘缓存 5 分钟，浏览器缓存 1 分钟。GitHub 限流或故障时遵守 Retry-After / X-RateLimit-Reset 并继续提供上次成功的列表；空结果和冷启动失败也记录一小时的刷新间隔，不会由不同用户重复拉取。客户端不能指定仓库或强制刷新上游。
 
 可选地为实际部署的 Worker 设置 `GITHUB_RELEASE_TOKEN` secret，提高 GitHub API 配额；公开仓库读取无需 token。token 仅在 Worker 使用，不进入浏览器或响应。公开和商业部署复用相同下载组件、缓存实现及 `0002_release_cache.sql` 迁移。
+
+桌面安装包使用 NSGo 官方 `build.installers: true` 生成。Linux 构建环境安装 NSIS，确保 Windows 的安装 EXE 实际生成；缺失任何安装包都会阻止发版。CI 会挂载 DMG 验证应用和签名、检查 NSIS 内的程序，以及验证 DEB 的架构、GTK 依赖、桌面入口、Arch 包和 AppImage 标识。

@@ -8,6 +8,7 @@ export interface ReleaseAsset {
   size: number;
   platform: Platform;
   architecture: string;
+  format: "dmg" | "exe" | "deb" | "arch" | "appimage" | "apk" | "ipa";
 }
 export interface ReleaseVersion {
   version: string;
@@ -81,25 +82,50 @@ export function parseReleases(value: unknown): ReleaseVersion | null {
       const prefix = `reign-${version}-`;
       if (!a.name.startsWith(prefix)) continue;
       const suffix = a.name.slice(prefix.length);
-      const match = /^(macos|windows|linux)-(arm64|x64)\.(tar\.gz|zip)$/.exec(
-        suffix,
-      );
+      const match =
+        /^(macos|windows|linux)-(arm64|x64)(\.dmg|-setup\.exe|\.deb|\.pkg\.tar\.gz|\.AppImage)$/.exec(
+          suffix,
+        );
       let platform: Platform, architecture: string;
+      let format: ReleaseAsset["format"];
       if (match) {
         platform = match[1] as Platform;
-        if (match[3] !== (platform === "windows" ? "zip" : "tar.gz")) continue;
+        const extensions: Record<string, ReleaseAsset["format"]> = {
+          ".dmg": "dmg",
+          "-setup.exe": "exe",
+          ".deb": "deb",
+          ".pkg.tar.gz": "arch",
+          ".AppImage": "appimage",
+        };
+        format = extensions[match[3]];
+        if (
+          (platform === "macos" && format !== "dmg") ||
+          (platform === "windows" && format !== "exe") ||
+          (platform === "linux" &&
+            !["deb", "arch", "appimage"].includes(format))
+        )
+          continue;
         architecture = match[2];
       } else if (suffix === "android-arm64.apk") {
         platform = "android";
         architecture = "arm64";
+        format = "apk";
       } else if (suffix === "ios-unsigned.ipa") {
         platform = "ios";
         architecture = "universal";
+        format = "ipa";
       } else {
         continue;
       }
       if (typeof a.size !== "number" || a.size <= 0) continue;
-      assets.push({ name: a.name, url, size: a.size, platform, architecture });
+      assets.push({
+        name: a.name,
+        url,
+        size: a.size,
+        platform,
+        architecture,
+        format,
+      });
     }
     // Ignore incomplete/draft-only releases rather than advertising empty downloads.
     if (!assets.length) continue;

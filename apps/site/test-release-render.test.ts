@@ -11,12 +11,16 @@ import {
 
 const tag = "v1.2.3";
 const filenames = [
-  "macos-arm64.tar.gz",
-  "macos-x64.tar.gz",
-  "windows-arm64.zip",
-  "windows-x64.zip",
-  "linux-arm64.tar.gz",
-  "linux-x64.tar.gz",
+  "macos-arm64.dmg",
+  "macos-x64.dmg",
+  "windows-arm64-setup.exe",
+  "windows-x64-setup.exe",
+  "linux-arm64.deb",
+  "linux-arm64.pkg.tar.gz",
+  "linux-arm64.AppImage",
+  "linux-x64.deb",
+  "linux-x64.pkg.tar.gz",
+  "linux-x64.AppImage",
   "android-arm64.apk",
   "ios-unsigned.ipa",
 ].map((suffix) => `reign-1.2.3-${suffix}`);
