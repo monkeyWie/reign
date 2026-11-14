@@ -183,13 +183,12 @@ func (s *State) uploadPreviews(cx *core.Scope) core.Node {
 			}
 			s.changed()
 		}
-		tile := core.Dynamic(func(cx *core.Scope) core.Node {
-			s.read()
-			if strings.HasPrefix(u.MIME, "image/") || strings.HasSuffix(strings.ToLower(u.Name), ".png") || strings.HasSuffix(strings.ToLower(u.Name), ".jpg") {
-				return chat.AttachmentPreview{Label: u.Name, Image: core.ImageSource{Data: u.Data}, RemoveLabel: "移除附件", OnRemove: remove}
-			}
-			return chat.Attachment{Label: u.Name, Detail: fmt.Sprintf("%.1f KB", float64(len(u.Data))/1024), RemoveLabel: "移除附件", OnRemove: remove}
-		})
+		// Bytes and metadata are immutable for this keyed upload. Only progress
+		// changes; remounting the image on every poll restarts native decoding.
+		var tile core.Node = chat.Attachment{Label: u.Name, Detail: fmt.Sprintf("%.1f KB", float64(len(u.Data))/1024), RemoveLabel: "移除附件", OnRemove: remove}
+		if strings.HasPrefix(u.MIME, "image/") || strings.HasSuffix(strings.ToLower(u.Name), ".png") || strings.HasSuffix(strings.ToLower(u.Name), ".jpg") {
+			tile = chat.AttachmentPreview{Label: u.Name, Image: core.ImageSource{Data: u.Data}, RemoveLabel: "移除附件", OnRemove: remove}
+		}
 		status := core.Show{When: func() bool { s.read(); return u.Status != "ready" }, Then: func(cx *core.Scope) core.Node {
 			progress := dynamicText(cx, func() string {
 				s.read()

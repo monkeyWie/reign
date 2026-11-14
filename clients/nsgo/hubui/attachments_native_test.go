@@ -55,16 +55,18 @@ func TestClipboardUploadAndImageGallery(t *testing.T) {
 	var buffer bytes.Buffer
 	_ = png.Encode(&buffer, img)
 	photo := buffer.Bytes()
+	var refresh func()
 	app := nsgotest.Start(t, func(cx *core.Scope) core.Node {
 		cx.SetTheme(core.DefaultTheme())
 		s := newState(cx, f)
+		refresh = func() { cx.Post(s.changed) }
 		s.target = "fixture"
 		s.selected = Object{"id": "session", "providerId": "codex-app", "title": "附件测试"}
 		s.devices = []Object{{"id": "fixture", "connected": true}}
 		s.setTranscript(Object{"turns": []Object{}})
 		return core.View{Style: fill, Children: []core.Node{button(cx, "fixture-paste", "粘贴测试图片", nil, "outline", func() {
 			s.paste(cx, core.PasteEvent{Files: []core.PastedFile{{Name: "fixture.png", MIME: "image/png", Data: photo}}})
-		}), button(cx, "fixture-publish", "显示已上传图片", nil, "outline", func() {
+		}), button(cx, "fixture-refresh", "刷新状态", nil, "outline", s.changed), button(cx, "fixture-publish", "显示已上传图片", nil, "outline", func() {
 			if len(s.uploads) == 0 || s.uploads[0].Status != "ready" {
 				return
 			}
@@ -88,7 +90,14 @@ func TestClipboardUploadAndImageGallery(t *testing.T) {
 		app.Press("id:fixture-paste")
 	}
 	app.WaitFor("id:upload-fixture.png", 3*time.Second)
+	uploadImage := app.Find("role:image fixture.png").ID
 	app.WaitUntil(3*time.Second, func() bool { return f.finished.Load() && !app.Exists("id:upload-progress-fixture.png") })
+	for range 3 {
+		app.Press("id:fixture-refresh")
+		if app.Find("role:image fixture.png").ID != uploadImage {
+			t.Fatal("progress or polling remounted the upload image")
+		}
+	}
 	app.Press("id:fixture-publish")
 	app.WaitFor("id:image-second", 3*time.Second)
 	app.Press("id:image-second")
@@ -100,6 +109,12 @@ func TestClipboardUploadAndImageGallery(t *testing.T) {
 		v := app.Find("id:preview-image")
 		return len(v.Image.Source.Data) > 0 && v.Frame.Size.Width > 100 && v.Frame.Size.Height > 100
 	})
+	previewImage := app.Find("id:preview-image").ID
+	refresh()
+	app.Settle()
+	if app.Find("id:preview-image").ID != previewImage {
+		t.Fatal("status update remounted the full-size image")
+	}
 	app.Screenshot("attachment-gallery")
 	app.Press("id:preview-close")
 	// Independently read back the finished bytes through the same scoped RPCs.

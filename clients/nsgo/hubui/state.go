@@ -52,6 +52,11 @@ type State struct {
 	watchCancel                                             context.CancelFunc
 	prompted                                                map[string]bool
 	retrying                                                map[string]time.Time
+	connections                                             map[string]*connectionHealth
+	connectionDetailTarget                                  string
+	suspended                                               bool
+	pollCancel                                              context.CancelFunc
+	pollGeneration                                          uint64
 	timeline                                                *core.Ref
 }
 
@@ -100,6 +105,7 @@ func (s *State) call(method string, p Object, done func(any)) {
 	})
 }
 func (s *State) initialize() {
+	s.observeLifecycle()
 	resolveDeviceName(s.cx, func(name string) { s.clientName = name; s.changed() })
 	s.async(func(ctx context.Context) (any, error) {
 		if s.api.CanHost() {
@@ -150,25 +156,38 @@ type pollResult struct {
 }
 
 func (s *State) poll() {
-	if !s.ready || s.polling || s.ctx.Err() != nil {
+	if !s.ready || s.polling || s.suspended || s.ctx.Err() != nil {
 		return
 	}
 	s.polling = true
+	s.pollGeneration++
+	generation := s.pollGeneration
+	ctx, cancel := context.WithTimeout(s.ctx, 12*time.Second)
+	s.pollCancel = cancel
 	target := s.target
 	go func() {
+		defer cancel()
 		r := pollResult{target: target}
-		v, err := s.api.Call(s.ctx, "client.list", nil, "", nil)
-		r.devices = objects(v)
+		v, err := s.api.Call(ctx, "client.list", nil, "", nil)
+		if err == nil {
+			r.devices = objects(v)
+		}
 		if s.api.CanHost() && err == nil {
-			v, err = s.api.Call(s.ctx, "host.info", nil, "", nil)
-			r.host = object(v)
+			v, err = s.api.Call(ctx, "host.info", nil, "", nil)
 			if err == nil {
-				v, err = s.api.Call(s.ctx, "providers", nil, "", nil)
-				r.local = visibleProviders(objects(v))
+				r.host = object(v)
+			}
+			if err == nil {
+				v, err = s.api.Call(ctx, "providers", nil, "", nil)
+				if err == nil {
+					r.local = visibleProviders(objects(v))
+				}
 			}
 		}
+		issueTarget := ""
 		if target != "" && err == nil {
-			v, err = rpc(s.ctx, s.api, target, "", "", "providers", nil)
+			issueTarget = target
+			v, err = rpc(ctx, s.api, target, "", "", "providers", nil)
 			r.providers = visibleProviders(objects(v))
 			if err == nil {
 				for _, p := range r.providers {
@@ -176,7 +195,7 @@ func (s *State) poll() {
 						continue
 					}
 					var list any
-					list, err = s.api.Call(s.ctx, "client.sync", Object{"provider": p["id"]}, target, nil)
+					list, err = s.api.Call(ctx, "client.sync", Object{"provider": p["id"]}, target, nil)
 					if err != nil {
 						break
 					}
@@ -185,7 +204,11 @@ func (s *State) poll() {
 			}
 		}
 		s.cx.Post(func() {
+			if generation != s.pollGeneration {
+				return
+			}
 			s.polling = false
+			s.pollCancel = nil
 			if s.ctx.Err() != nil {
 				return
 			}
@@ -199,9 +222,11 @@ func (s *State) poll() {
 			if r.local != nil {
 				s.localProviders = r.local
 			}
-			if err != nil {
-				s.error = err.Error()
-			} else if s.target == r.target {
+			s.setConnectionIssue(issueTarget, "catalogue", err)
+			if issueTarget != "" {
+				s.setConnectionIssue("", "catalogue", nil)
+			}
+			if err == nil && s.target == r.target {
 				s.providers = r.providers
 				s.sessions = r.sessions
 			}
@@ -290,14 +315,31 @@ func (s *State) selectSession(session Object) {
 	s.timeline = &core.Ref{}
 	s.showPhoneChat()
 	s.changed()
-	target, p, id, key := s.target, str(session, "providerId"), str(session, "id"), s.key()
+	s.startSessionWatch()
+}
+func (s *State) startSessionWatch() {
+	if s.selected == nil || s.suspended {
+		return
+	}
+	if s.watchCancel != nil {
+		s.watchCancel()
+	}
+	target, p, id, key := s.target, str(s.selected, "providerId"), str(s.selected, "id"), s.key()
 	ctx, cancel := context.WithCancel(s.ctx)
 	s.watchCancel = cancel
-	s.async(func(ctx context.Context) (any, error) { return rpc(ctx, s.api, target, p, id, "models", nil) }, func(v any) {
-		if key == s.key() {
-			s.models = objects(v)
-		}
-	})
+	go func() {
+		v, err := rpc(ctx, s.api, target, p, id, "models", nil)
+		s.cx.Post(func() {
+			if ctx.Err() != nil || key != s.key() {
+				return
+			}
+			s.setConnectionIssue(target, "models", err)
+			if err == nil {
+				s.models = objects(v)
+			}
+			s.changed()
+		})
+	}()
 	go s.watch(ctx, target, p, id, key)
 }
 func (s *State) setTranscript(t Object) {
@@ -313,13 +355,16 @@ func (s *State) watch(ctx context.Context, target, p, id, key string) {
 	var cursor int64
 	snapshot := func() error {
 		v, e := rpc(ctx, s.api, target, p, id, "transcript", nil)
-		if e == nil {
-			s.cx.Post(func() {
-				if ctx.Err() == nil && s.key() == key {
+		s.cx.Post(func() {
+			if ctx.Err() == nil && s.key() == key {
+				s.setConnectionIssue(target, "transcript", e)
+				if e == nil {
 					s.setTranscript(object(v))
+				} else {
+					s.changed()
 				}
-			})
-		}
+			}
+		})
 		return e
 	}
 	_ = snapshot()
@@ -328,6 +373,13 @@ func (s *State) watch(ctx context.Context, target, p, id, key string) {
 		if ctx.Err() != nil {
 			return
 		}
+		watchErr := e
+		s.cx.Post(func() {
+			if ctx.Err() == nil && s.key() == key {
+				s.setConnectionIssue(target, "watch", watchErr)
+				s.changed()
+			}
+		})
 		if e != nil {
 			epoch = ""
 			_ = snapshot()
@@ -474,11 +526,13 @@ func (s *State) decision(a Object, decision string) {
 	}, func(any) { s.approvals = nil })
 }
 func (s *State) autoReconnect() {
+	if s.suspended {
+		return
+	}
 	for _, d := range s.devices {
-		if !flag(d, "connected") && flag(d, "autoReconnect") && time.Now().After(s.retrying[str(d, "id")]) {
+		if (!flag(d, "connected") || s.connection(str(d, "id")).needsReconnect) && flag(d, "autoReconnect") && time.Now().After(s.retrying[str(d, "id")]) {
 			id := str(d, "id")
-			s.retrying[id] = time.Now().Add(15 * time.Second)
-			go func() { _, _ = s.api.Call(s.ctx, "client.reconnect", Object{"id": id}, "", nil) }()
+			s.reconnectDevice(id)
 		}
 	}
 }

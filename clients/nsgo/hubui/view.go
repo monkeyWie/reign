@@ -261,9 +261,9 @@ func (s *State) navigation(cx *core.Scope, compact bool) core.Node {
 				bg = c.muted
 			}
 			return core.Style{Background: bg, BorderColor: c.border, Hover: &core.Style{Background: c.muted}}
-		}, Children: []core.Node{dynamicText(cx, func() string { return deviceName(d()) }, 13, false), dynamicText(cx, func() string { return deviceStatus(d()) }, 10, true)}}
+		}, Children: []core.Node{row(core.View{Style: fill, Children: []core.Node{dynamicText(cx, func() string { return deviceName(d()) }, 13, false)}}, s.connectionIndicator(cx, func() string { return str(d(), "id") })), dynamicText(cx, func() string { return deviceStatus(d()) }, 10, true)}}
 	})}})
-	nodes = append(nodes, button(cx, "account-menu", choose(compact, "", "账号与设备同步"), lucide.User, "ghost", func() { s.dialog.Set("account") }))
+	nodes = append(nodes, core.Show{When: func() bool { s.read(); return s.connectionProblem("") }, Then: func(cx *core.Scope) core.Node { return s.connectionIndicator(cx, func() string { return "" }) }}, button(cx, "account-menu", choose(compact, "", "账号与设备同步"), lucide.User, "ghost", func() { s.dialog.Set("account") }))
 	nodes = append(nodes, button(cx, "theme-toggle", choose(compact, "", "切换主题"), lucide.SunMoon, "ghost", s.toggleTheme))
 	if s.api.CanHost() && !compact {
 		nodes = append(nodes, button(cx, "server-settings", "服务设置", lucide.Settings, "ghost", func() { s.dialog.Set("settings") }))
@@ -366,7 +366,7 @@ func (s *State) directory(cx *core.Scope) core.Node {
 	}, Class: "dark:bg-zinc-950", Children: []core.Node{
 		core.View{Style: core.Style{Padding: core.Edges{Top: 20, Left: 18, Right: 12, Bottom: 6}}, Children: []core.Node{row(core.Show{When: func() bool { return s.width.Get() < 650 }, Then: func(cx *core.Scope) core.Node {
 			return button(cx, "back-devices", "设备", lucide.ArrowLeft, "ghost", s.backDevices)
-		}}, core.View{Style: fill, Children: []core.Node{singleLine(cx, func() string { s.read(); return deviceName(s.device()) }, 14, false), singleLine(cx, func() string { s.read(); return deviceStatus(s.device()) }, 11, true)}}, button(cx, "refresh-sessions", "", lucide.RefreshCw, "ghost", s.poll))}},
+		}}, core.View{Style: fill, Children: []core.Node{singleLine(cx, func() string { s.read(); return deviceName(s.device()) }, 14, false), singleLine(cx, func() string { s.read(); return deviceStatus(s.device()) }, 11, true)}}, s.connectionIndicator(cx, func() string { return s.target }), button(cx, "refresh-sessions", "", lucide.RefreshCw, "ghost", s.poll))}},
 		core.View{Style: core.Style{Padding: core.Symmetric(6, 12)}, Children: []core.Node{leftButton(button(cx, "new-session", "新聊天", lucide.SquarePen, "ghost", func() { s.createDirectory = ""; s.dialog.Set("create") }))}},
 		core.View{Style: core.Style{Padding: core.Edges{Left: 22, Top: 16, Right: 16}}, Children: []core.Node{label(cx, "项目", 12, true)}},
 		core.List{TestID: "session-list", Style: fill, Count: func() int { return len(rows.Get()) }, Key: func(i int) any { return rows.Get()[i].ID }, EstimatedSize: 36, Row: func(cx *core.Scope, r core.ListRow) core.Node {
@@ -407,7 +407,7 @@ func (s *State) directory(cx *core.Scope) core.Node {
 				}, Children: []core.Node{row(core.Icon{SVG: sessionIcon(data.Session)(), Style: core.Style{Width: core.Pt(14), Height: core.Pt(14)}, StyleFunc: func() core.Style { return core.Style{Color: palette(cx).mutedText} }}, core.Text{ContentFunc: func() string { return item().Title }, MaxLines: 1, Style: core.Style{FontSize: 13, FlexShrink: 1, MinWidth: core.Pt(0)}})}}
 			})
 		}},
-		core.View{Style: core.Style{Padding: core.All(8)}, Children: []core.Node{row(button(cx, "reconnect-device", "重连", nil, "ghost", func() { s.call("client.reconnect", Object{"id": s.target}, nil) }), button(cx, "disconnect-device", "断开", nil, "ghost", func() { s.call("client.disconnect", Object{"id": s.target}, nil) }), spacer(), button(cx, "forget-device", "", lucide.Trash, "ghost", func() { s.dialog.Set("forget") }))}},
+		core.View{Style: core.Style{Padding: core.All(8)}, Children: []core.Node{row(button(cx, "reconnect-device", "重连", nil, "ghost", func() { s.reconnectDevice(s.target) }), button(cx, "disconnect-device", "断开", nil, "ghost", func() { s.call("client.disconnect", Object{"id": s.target}, nil) }), spacer(), button(cx, "forget-device", "", lucide.Trash, "ghost", func() { s.dialog.Set("forget") }))}},
 	}}
 }
 func sessionIcon(s Object) func() *core.SVG {

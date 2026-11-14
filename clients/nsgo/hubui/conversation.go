@@ -24,7 +24,7 @@ func (s *State) conversation(cx *core.Scope, narrow bool) core.Node {
 		header = append(header, button(cx, "back-sessions", "", lucide.ArrowLeft, "ghost", s.backSessions))
 	}
 	header = append(header, core.View{Style: core.Style{FlexGrow: 1, FlexShrink: 1, Gap: 4}, Children: []core.Node{singleLine(cx, func() string { s.read(); return str(s.selected, "title") }, 14, false), singleLine(cx, func() string { s.read(); return str(s.selected, "cwd") }, 11, true)}})
-	header = append(header, glyph(cx, sessionIcon(s.selected), 18), button(cx, "attachment-cache", "", lucide.HardDrive, "ghost", func() { s.dialog.Set("clear-cache") }))
+	header = append(header, s.connectionIndicator(cx, func() string { return s.target }), glyph(cx, sessionIcon(s.selected), 18), button(cx, "attachment-cache", "", lucide.HardDrive, "ghost", func() { s.dialog.Set("clear-cache") }))
 	children = append(children, core.View{TestID: "conversation-header", Style: core.Style{Padding: core.All(18), Borders: core.Edges{Bottom: 1}}, StyleFunc: func() core.Style { return core.Style{BorderColor: palette(cx).border} }, Children: []core.Node{row(header...)}})
 	listRef := s.timeline
 	atBottom := core.NewSignal(cx, true)

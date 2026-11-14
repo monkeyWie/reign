@@ -77,6 +77,12 @@ func Shutdown() {
 }
 
 func Call(raw string) string {
+	return CallContext(context.Background(), raw)
+}
+
+// CallContext lets in-process clients cancel foreground reads when the app is
+// suspended or the user switches sessions, without stopping the shared host.
+func CallContext(parent context.Context, raw string) string {
 	lifecycle.RLock()
 	defer lifecycle.RUnlock()
 	if bridgeContext.Err() != nil {
@@ -105,8 +111,13 @@ func Call(raw string) string {
 		hubs[in.DataDir] = h
 	}
 	mu.Unlock()
-	ctx, cancel := context.WithTimeout(bridgeContext, 140*time.Second)
+	ctx, cancel := context.WithTimeout(parent, 140*time.Second)
 	defer cancel()
+	stop := context.AfterFunc(bridgeContext, cancel)
+	defer stop()
+	if err := ctx.Err(); err != nil {
+		return answer(nil, err)
+	}
 	var p struct {
 		Service, Code, Public, Password, Name, ID, Provider string
 		Remember, RelayOnly                                 bool

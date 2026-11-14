@@ -42,7 +42,7 @@ func (n *nativeAPI) Call(ctx context.Context, method string, params Object, targ
 		Result any    `json:"result"`
 		Error  string `json:"error"`
 	}
-	if err = json.Unmarshal([]byte(bridge.Call(string(b))), &answer); err != nil {
+	if err = json.Unmarshal([]byte(bridge.CallContext(ctx, string(b))), &answer); err != nil {
 		return nil, err
 	}
 	if answer.Error != "" {

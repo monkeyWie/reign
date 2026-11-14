@@ -95,7 +95,7 @@ func deviceStatus(d Object) string {
 func (s *State) phoneDevices(cx *core.Scope) core.Node {
 	nodes := []core.Node{
 		core.View{Style: core.Style{Padding: core.All(20), Gap: 16}, Children: []core.Node{
-			row(label(cx, "Reign", 24, false), spacer(), button(cx, "mobile-account", "", lucide.User, "ghost", func() { s.dialog.Set("account") }), button(cx, "theme-toggle", "", lucide.SunMoon, "ghost", s.toggleTheme)),
+			row(label(cx, "Reign", 24, false), spacer(), core.Show{When: func() bool { s.read(); return s.connectionProblem("") }, Then: func(cx *core.Scope) core.Node { return s.connectionIndicator(cx, func() string { return "" }) }}, button(cx, "mobile-account", "", lucide.User, "ghost", func() { s.dialog.Set("account") }), button(cx, "theme-toggle", "", lucide.SunMoon, "ghost", s.toggleTheme)),
 			label(cx, "选择设备，查看与管理它的 Agent 会话", 13, true),
 			row(button(cx, "connect-device", "连接设备", lucide.Plus, "primary", func() { s.scanned = nil; s.dialog.Set("connect") }), core.Show{When: func() bool { return isMobile(cx) }, Then: func(cx *core.Scope) core.Node {
 				return button(cx, "scan-qr", "扫一扫", lucide.ScanLine, "outline", func() { s.scan(cx) })
@@ -114,7 +114,7 @@ func (s *State) phoneDevices(cx *core.Scope) core.Node {
 				p := palette(cx)
 				return core.Style{Background: p.background, BorderColor: p.border, Hover: &core.Style{Background: p.muted}}
 			}, Children: []core.Node{
-				row(glyph(cx, lucide.Monitor, 20), singleLine(cx, func() string { return deviceName(d()) }, 16, false), spacer(), glyph(cx, lucide.ChevronRight, 18)),
+				row(glyph(cx, lucide.Monitor, 20), singleLine(cx, func() string { return deviceName(d()) }, 16, false), spacer(), s.connectionIndicator(cx, func() string { return str(d(), "id") }), glyph(cx, lucide.ChevronRight, 18)),
 				dynamicText(cx, func() string { return "ID " + str(d(), "connectionId") }, 12, true),
 				dynamicText(cx, func() string { return deviceStatus(d()) }, 12, true),
 			}}
