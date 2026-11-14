@@ -64,10 +64,13 @@ If your service has its own terms and privacy policy, configure their URLs at bu
 ```sh
 NEXT_PUBLIC_TERMS_URL='https://example.com{localePrefix}/terms' \
 NEXT_PUBLIC_PRIVACY_URL='https://example.com{localePrefix}/privacy' \
+NEXT_PUBLIC_SUPPORT_EMAIL='support@example.com' \
 pnpm build:web
 ```
 
 `{localePrefix}` is empty for English and `/zh-CN` for Chinese; fixed URLs also work. Once both URLs are configured, the website footer and account page show the links. Host the content on your own site; the open-source build does not include another operator's policies.
+
+Configure `NEXT_PUBLIC_SUPPORT_EMAIL` to display your own clickable support mailbox in the website and documentation footers. This is a public build-time value; rebuild after changing it.
 
 ## Local verification
 

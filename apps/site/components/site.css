@@ -718,6 +718,20 @@
   color: var(--muted);
   font-size: 10px;
 }
+.footer-contact {
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  margin-top: 16px;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--fg);
+  overflow-wrap: anywhere;
+  text-underline-offset: 4px;
+}
+.footer-contact:hover {
+  text-decoration: underline;
+}
 .footer-links {
   display: flex;
   flex-direction: column;

@@ -1336,3 +1336,15 @@ hr {
   text-decoration: underline;
   text-underline-offset: 3px;
 }
+/* The account screen shares the deployment's public support contact. */
+.account-support-footer {
+  padding: 24px 20px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.account-support-footer a:hover {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}

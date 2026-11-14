@@ -64,10 +64,13 @@ pnpm run deploy
 ```sh
 NEXT_PUBLIC_TERMS_URL='https://example.com{localePrefix}/terms' \
 NEXT_PUBLIC_PRIVACY_URL='https://example.com{localePrefix}/privacy' \
+NEXT_PUBLIC_SUPPORT_EMAIL='support@example.com' \
 pnpm build:web
 ```
 
 `{localePrefix}` 在英文中为空，中文中为 `/zh-CN`；不需要多语言时也可填写固定链接。配置两个地址后，官网页脚和账号页会显示对应入口。正文由你自己的站点托管，开源版本不附带其他运营者的条款。
+
+配置 `NEXT_PUBLIC_SUPPORT_EMAIL` 后，官网和文档页脚会展示可点击的客服邮箱。这是公开的构建变量，修改后需要重新构建。
 
 ## 本地验证
 

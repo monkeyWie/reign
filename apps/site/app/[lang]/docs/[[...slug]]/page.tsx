@@ -12,6 +12,7 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { source } from "../../../../lib/source";
 import { getMDXComponents } from "../../../../components/mdx";
+import { DocsFooter } from "../../../../components/docs-footer";
 
 type Props = { params: Promise<{ slug?: string[]; lang: string }> };
 export default async function Page({ params }: Props) {
@@ -21,7 +22,11 @@ export default async function Page({ params }: Props) {
   if (!page) notFound();
   const MDX = page.data.body;
   return (
-    <DocsPage toc={page.data.toc} full={page.data.full}>
+    <DocsPage
+      toc={page.data.toc}
+      full={page.data.full}
+      slots={{ footer: DocsFooter }}
+    >
       <DocsTitle>{page.data.title}</DocsTitle>
       <DocsDescription>{page.data.description}</DocsDescription>
       <DocsBody>

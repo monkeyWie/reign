@@ -6,6 +6,7 @@ import "./site.css";
 import { ArrowUpRight } from "lucide-react";
 import type { ReactNode } from "react";
 import { SiteHeader } from "./site-header";
+import { SupportContact } from "./support-contact";
 
 export function SiteShell({ children }: { children: ReactNode }) {
   const t = useT();
@@ -36,6 +37,7 @@ export function SiteFooter() {
             {t("从任何屏幕，继续你的工作。")}
           </p>
           <span className="footer-caption">Your agents. Anywhere.</span>
+          <SupportContact className="footer-contact" />
         </div>
         {[
           [
