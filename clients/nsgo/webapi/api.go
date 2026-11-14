@@ -134,10 +134,16 @@ func (a *API) connect(ctx context.Context, p Object) (any, error) {
 	}
 	token := str(i, "token")
 	connectivity.Note(ctx, "service", "service", "本机身份已验证", service, "success")
-	connectivity.Report(ctx, "lookup", "正在查找被控设备", connectivity.StageTimeout)
-	r, e := post(ctx, service, token, "/p2p/devices/resolve", Object{"connectionId": p["code"]})
-	if e != nil {
-		return nil, e
+	var r Object
+	cached := obj(p["cached"])
+	if len(cached) > 0 {
+		r = Object{"online": true, "device": Object{"id": cached["host"], "public": cached["public"], "name": cached["name"], "connectionId": cached["connectionId"]}}
+	} else {
+		connectivity.Report(ctx, "lookup", "正在查找被控设备", connectivity.StageTimeout)
+		r, e = post(ctx, service, token, "/p2p/devices/resolve", Object{"connectionId": p["code"]})
+		if e != nil {
+			return nil, e
+		}
 	}
 	d := obj(r["device"])
 	if r["online"] == false {
@@ -227,7 +233,16 @@ func (a *API) connect(ctx context.Context, p Object) (any, error) {
 	policy := Object{}
 	if p["relayOnly"] != true {
 		connectivity.Report(ctx, "config", "正在获取直连探测配置", connectivity.StageTimeout)
-		policy, e = post(ctx, service, "", "/p2p/config", Object{})
+		entry, _ := a.store.Get("network:" + service)
+		cache := obj(entry)
+		if len(cached) > 0 && num(cache, "at") > time.Now().Add(-10*time.Minute).Unix() {
+			policy = obj(cache["policy"])
+		} else {
+			policy, e = post(ctx, service, "", "/p2p/config", Object{})
+			if e == nil {
+				_ = a.store.Put("network:"+service, Object{"policy": policy, "at": time.Now().Unix()})
+			}
+		}
 		if e != nil {
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
@@ -310,7 +325,31 @@ func (a *API) Call(ctx context.Context, method string, p Object, target string, 
 				if str(p, "service") != "" {
 					service = p["service"]
 				}
-				return a.connect(ctx, Object{"service": service, "code": s["connectionId"], "public": s["public"], "relayOnly": s["relayOnly"], "reconnectOnly": true})
+				if s["reconnectDisabled"] == true || str(s, "key") == "" || (num(s, "expires") > 0 && num(s, "expires") <= time.Now().Unix()) {
+					return nil, errors.New("自动重连已停止或授权已过期，请手动连接")
+				}
+				if old := a.client(str(s, "id")); old != nil {
+					connectivity.Report(ctx, "resume", "正在恢复原有连接", connectivity.StageTimeout)
+					probe, stop := context.WithTimeout(ctx, 8*time.Second)
+					err := old.Resume(probe)
+					stop()
+					if err == nil {
+						return a.list()
+					}
+					if ctx.Err() != nil {
+						return nil, ctx.Err()
+					}
+					old.Close()
+				}
+				params := Object{"service": service, "code": s["connectionId"], "public": s["public"], "relayOnly": s["relayOnly"], "reconnectOnly": true, "cached": s}
+				connectivity.Report(ctx, "resume", "正在复用设备配对与连接配置", connectivity.StageTimeout)
+				result, err := a.connect(ctx, params)
+				if err == nil || ctx.Err() != nil {
+					return result, err
+				}
+				connectivity.Note(ctx, "resume-fallback", "retry", "快速恢复未成功，重新查找设备", err.Error(), "warning")
+				delete(params, "cached")
+				return a.connect(ctx, params)
 			}
 		}
 		return nil, errors.New("设备配对不存在")
