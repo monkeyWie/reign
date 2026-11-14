@@ -31,11 +31,18 @@
   color: var(--color-fd-foreground);
   background: var(--color-fd-background);
 }
-#nd-docs-layout button,
-.docs-search-dialog button {
-  background: revert-layer;
-  border-width: revert-layer;
-  border-style: solid;
+@layer base {
+  /* Reset browser chrome without overriding Fumadocs' normal/hover utilities. */
+  :where(#nd-docs-layout, .docs-search-dialog) :where(*, ::before, ::after) {
+    border-width: 0;
+    border-style: solid;
+    border-color: var(--color-fd-border);
+  }
+  :where(#nd-docs-layout, .docs-search-dialog) button {
+    appearance: none;
+    background-color: transparent;
+    background-image: none;
+  }
 }
 .docs-search-dialog input {
   border: 0;

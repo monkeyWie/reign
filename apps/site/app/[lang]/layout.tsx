@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { LocaleProvider } from "../../components/locale";
 import { isLocale } from "../../lib/i18n";
+import { NavigationProgress } from "../../components/navigation-progress";
 import "../globals.css";
 
 export const dynamicParams = false;
@@ -20,6 +21,7 @@ export default async function RootLayout({
   return (
     <html lang={lang} suppressHydrationWarning>
       <body>
+        <NavigationProgress />
         <LocaleProvider locale={lang}>{children}</LocaleProvider>
       </body>
     </html>

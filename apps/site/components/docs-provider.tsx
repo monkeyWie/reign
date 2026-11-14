@@ -5,6 +5,7 @@ import { i18n, isLocale, switchLocale, type Locale } from "../lib/i18n";
 import { useLocale } from "./locale";
 import { i18nProvider, uiTranslations } from "fumadocs-ui/i18n";
 import { useStaticSearch } from "fumadocs-core/search/client";
+import { startNavigation } from "../lib/navigation-progress";
 import {
   SearchDialog,
   SearchDialogClose,
@@ -96,6 +97,7 @@ export function DocsProvider({
           const url = new URL(location.href);
           url.pathname = switchLocale(url.pathname, next);
           url.searchParams.set("lang", next);
+          startNavigation(url.href);
           location.assign(url);
         },
       }}

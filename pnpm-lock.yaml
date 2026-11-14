@@ -71,6 +71,9 @@ importers:
       next:
         specifier: 16.4.6
         version: 16.4.6(@types/node@24.19.2)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      nprogress:
+        specifier: 0.2.0
+        version: 0.2.0
       rclone.js:
         specifier: ^0.6.6
         version: 0.6.6
@@ -84,6 +87,9 @@ importers:
         specifier: 4.3.0
         version: 4.3.0
     devDependencies:
+      '@types/nprogress':
+        specifier: 0.2.3
+        version: 0.2.3
       '@types/react':
         specifier: ^19.2.0
         version: 19.3.0
@@ -2364,6 +2370,9 @@ packages:
   '@types/node@24.19.2':
     resolution: {integrity: sha512-93d49wCWJkCyN87MxLpNN6KXPCwFw7bVUg79mGUV1OS40JGWwVCr8n61DXCSqz7CV6/VfPkb7xec7uP2M+QHWQ==}
 
+  '@types/nprogress@0.2.3':
+    resolution: {integrity: sha512-k7kRA033QNtC+gLc4VPlfnue58CM1iQLgn1IMAU8VPHGOj7oIHPp9UlhedEnD/Gl8evoCjwkZjlBORtZ3JByUA==}
+
   '@types/qrcode@1.5.6':
     resolution: {integrity: sha512-te7NQcV2BOvdj2b1hCAHzAoMNuj65kNBMz0KBaxM6c3VGBOhU0dURQKOtH8CFNI/dsKkwlv32p26qYQTWoB5bw==}
 
@@ -3743,6 +3752,9 @@ packages:
   npm-to-yarn@3.2.0:
     resolution: {integrity: sha512-K1HmQeZT2HrjpsR6KgqbN2FAXL2NrJJmNUSD9ck7HGTVu1JKXox8n9SB+tjbU8m8JGLF4OscrroPepew/L7/Xw==}
     engines: {node: ^12.22.0 || ^14.17.0 || >=16.0.0}
+
+  nprogress@0.2.0:
+    resolution: {integrity: sha512-I19aIingLgR1fmhftnbWWO3dXc0hSxqHQHQb3H8m+K3TnEn/iSeTZZOyvKXWqQESMwuUVnatlCnZdLBZZt2VSA==}
 
   object-inspect@1.13.4:
     resolution: {integrity: sha512-W67iLl4J2EXEGTbfeHCffrjDfitvLANg0UlX3wFUUSTx92KXRFegMHUVgSqE+wvhAbi4WqjGg9czysTV2Epbew==}
@@ -6675,6 +6687,8 @@ snapshots:
     dependencies:
       undici-types: 7.24.6
 
+  '@types/nprogress@0.2.3': {}
+
   '@types/qrcode@1.5.6':
     dependencies:
       '@types/node': 24.19.2
@@ -8232,6 +8246,8 @@ snapshots:
       whatwg-url: 5.0.0
 
   npm-to-yarn@3.2.0: {}
+
+  nprogress@0.2.0: {}
 
   object-inspect@1.13.4: {}
 
