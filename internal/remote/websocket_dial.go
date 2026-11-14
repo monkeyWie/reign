@@ -20,10 +20,12 @@ import (
 // share the caller's stage deadline; application rejections are never retried.
 func dialWebSocket(ctx context.Context, endpoint, token, stage string) (*websocket.Conn, *http.Response, error) {
 	for attempt := 1; ; attempt++ {
-		ws, response, err := websocket.Dial(ctx, endpoint, &websocket.DialOptions{
+		traceCtx, trace := traceSocketDial(ctx, stage, attempt)
+		ws, response, err := websocket.Dial(traceCtx, endpoint, &websocket.DialOptions{
 			HTTPClient: connectivity.ConnectionHTTPClient,
 			HTTPHeader: http.Header{"Authorization": []string{"Bearer " + token}},
 		})
+		err = trace.finish(response, err)
 		if err == nil {
 			return ws, response, nil
 		}

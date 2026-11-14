@@ -33,7 +33,11 @@ export function recordProgress(
   return steps.map((step, i) => (i === at ? { ...next, at: step.at } : step));
 }
 
-export function archiveProgress(steps: ConnectionProgress[], error?: string) {
+export function archiveProgress(
+  steps: ConnectionProgress[],
+  error?: string,
+  reason = "手动重试连接",
+) {
   const round = crypto.randomUUID();
   const history: ConnectionProgress[] = steps.slice(-60).map((step) => ({
     ...step,
@@ -52,8 +56,5 @@ export function archiveProgress(steps: ConnectionProgress[], error?: string) {
         "warning",
       ),
     );
-  return [
-    ...history,
-    progressStep("retry", "retry", "开始新一轮连接", "", "info"),
-  ];
+  return [...history, progressStep("retry", "retry", reason, "", "info")];
 }

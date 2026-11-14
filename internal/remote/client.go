@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/monkeyWie/reignhub/internal/connectivity"
@@ -17,6 +18,7 @@ type Client struct {
 	mu         sync.Mutex
 	pending    map[string]chan control.Response
 	done       chan struct{}
+	relayDone  chan struct{}
 	cache      map[string]snapshot
 	cacheBytes int
 }
@@ -31,7 +33,7 @@ func Connect(ctx context.Context, p Pairing, opts Options) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	c := &Client{pending: make(map[string]chan control.Response), done: make(chan struct{})}
+	c := &Client{pending: make(map[string]chan control.Response), done: make(chan struct{}), relayDone: make(chan struct{})}
 	w, err := newWire(context.Background(), ws, peer, p.Key, false, opts, func(data []byte) {
 		var r control.Response
 		if json.Unmarshal(data, &r) != nil {
@@ -53,7 +55,7 @@ func Connect(ctx context.Context, p Pairing, opts Options) (*Client, error) {
 	}
 	c.wire = w
 	w.dataWS = dataWS
-	go drainRelay(w.ctx, dataWS)
+	go func() { defer close(c.relayDone); drainRelay(w.ctx, dataWS) }()
 	go keepAlive(w.ctx, ws)
 	go func() {
 		defer close(c.done)
@@ -112,7 +114,16 @@ func (c *Client) Path() string {
 	case <-c.done:
 		return "Disconnected"
 	default:
-		return c.wire.path()
+	}
+	path := c.wire.path()
+	if strings.HasPrefix(path, "P2P") {
+		return path
+	}
+	select {
+	case <-c.relayDone:
+		return "Disconnected"
+	default:
+		return path
 	}
 }
 func (c *Client) Close() error {

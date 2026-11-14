@@ -159,3 +159,33 @@ func TestNeverConnectedDeviceDoesNotStartAutomaticRetries(t *testing.T) {
 		}
 	})
 }
+
+func TestReadTimeoutsDoNotReconnectAHealthyDevice(t *testing.T) {
+	f := &connectionFixture{demoAPI: newDemoAPI()}
+	app, s := conversationFixture(t, f, 390, Object{}, true)
+	checked := make(chan bool, 1)
+	app.Post(func() {
+		s.cx.Post(func() {
+			s.devices[0]["autoReconnect"] = true
+			s.connection("demo-device").established = true
+			for _, source := range []string{"models", "catalogue", "transcript", "watch"} {
+				s.setConnectionIssue("demo-device", source, context.DeadlineExceeded)
+				s.autoReconnect()
+			}
+			checked <- s.connection("demo-device").reconnecting
+		})
+	})
+	app.WaitUntil(time.Second, func() bool {
+		select {
+		case retrying := <-checked:
+			if retrying || f.reconnects.Load() != 0 {
+				t.Fatal("read timeout rebuilt a healthy connection")
+			}
+			return true
+		default:
+			return false
+		}
+	})
+	app.Post(func() { s.cx.Post(func() { s.devices[0]["connected"] = false; s.autoReconnect() }) })
+	app.WaitUntil(time.Second, func() bool { return f.reconnects.Load() == 1 })
+}

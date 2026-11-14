@@ -155,6 +155,7 @@ export function RemoteApp() {
     key: string,
     data: Omit<ConnectionAttempt, "active" | "steps" | "started">,
     seed?: ConnectionAttempt,
+    reason = "手动重试连接",
   ) {
     const previous = attemptResources.current.get(key);
     if (previous) {
@@ -178,6 +179,7 @@ export function RemoteApp() {
           ? archiveProgress(
               attemptsRef.current[key].steps,
               attemptsRef.current[key].error,
+              reason,
             )
           : []),
       started: seed?.started || Date.now(),
@@ -277,6 +279,7 @@ export function RemoteApp() {
       key,
       { name: d.name, service: d.service, code: d.connectionId },
       seed,
+      automatic ? "连接已断开，正在自动重连" : "手动重试连接",
     );
     setReconnecting((x) => ({ ...x, [key]: true }));
     try {

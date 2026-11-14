@@ -38,6 +38,9 @@ func (s *State) connect(p Object) {
 	ctx, cancel := context.WithCancel(s.ctx)
 	a := &connectAttempt{params: copyObject(p), cancel: cancel, active: true, started: time.Now(), stepStarted: time.Now(), step: connectivity.Progress{Stage: "service", Message: "正在连接服务并验证本机身份", Timeout: connectivity.StageTimeout}}
 	a.inherit(s.connectAttempt)
+	if s.connectAttempt != nil {
+		a.record(connectivity.Progress{ID: "retry", Stage: "retry", Message: "手动重试连接", State: "info"})
+	}
 	a.record(a.step)
 	s.connectAttempt = a
 	s.error, s.notice = "", ""
@@ -70,13 +73,14 @@ func (s *State) connect(p Object) {
 	}()
 	go func() {
 		v, err := s.api.Call(ctx, "client.connect", a.params, "", nil)
+		finished := time.Now()
 		cancel()
 		s.cx.Post(func() {
 			if s.ctx.Err() != nil || s.connectAttempt != a || !a.active {
 				return
 			}
 			a.active = false
-			a.finished = time.Now()
+			a.finished = finished
 			if err != nil {
 				a.err = err.Error()
 				s.changed()
@@ -155,7 +159,6 @@ func (a *connectAttempt) inherit(previous *connectAttempt) {
 	if previous.err != "" {
 		a.record(connectivity.Progress{ID: fmt.Sprintf("history:%d:failure", previous.started.UnixNano()), Stage: "retry", Message: "上一轮连接失败", Detail: previous.err, State: "warning"})
 	}
-	a.record(connectivity.Progress{ID: "retry", Stage: "retry", Message: "开始新一轮连接", State: "info"})
 }
 
 func (a *connectAttempt) record(p connectivity.Progress) {

@@ -589,7 +589,7 @@ func (s *State) autoReconnect() {
 		if flag(d, "connected") && s.connection(str(d, "id")).attempt == nil {
 			s.connection(str(d, "id")).established = true
 		}
-		if s.connection(str(d, "id")).established && (!flag(d, "connected") || s.connection(str(d, "id")).needsReconnect) && flag(d, "autoReconnect") && time.Now().After(s.retrying[str(d, "id")]) {
+		if s.connection(str(d, "id")).established && !flag(d, "connected") && flag(d, "autoReconnect") && time.Now().After(s.retrying[str(d, "id")]) {
 			id := str(d, "id")
 			s.reconnect(id, true)
 		}

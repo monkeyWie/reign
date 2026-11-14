@@ -16,10 +16,10 @@ import (
 // independent read failures until that read succeeds; a heartbeat must not
 // hide a failed catalogue or transcript refresh.
 type connectionHealth struct {
-	attempt                      *connectAttempt
-	issues                       map[string]string
-	reconnecting, needsReconnect bool
-	established                  bool
+	attempt      *connectAttempt
+	issues       map[string]string
+	reconnecting bool
+	established  bool
 }
 
 func (s *State) connection(id string) *connectionHealth {
@@ -52,12 +52,6 @@ func (s *State) setConnectionIssue(id, source string, err error) {
 		delete(h.issues, source)
 	} else if !errors.Is(err, context.Canceled) {
 		h.issues[source] = err.Error()
-	}
-	h.needsReconnect = false
-	for _, value := range h.issues {
-		if transportError(errors.New(value)) {
-			h.needsReconnect = true
-		}
 	}
 }
 func (s *State) connectionProblem(id string) bool {
@@ -164,6 +158,13 @@ func (s *State) reconnect(id string, automatic bool) {
 	}
 	a := &connectAttempt{params: params, target: id, cancel: cancel, active: true, started: time.Now(), stepStarted: time.Now()}
 	a.inherit(h.attempt)
+	reason := "手动重新连接"
+	detail := "用户发起重新连接"
+	if automatic {
+		reason = "连接已断开，正在自动重连"
+		detail = "后台检测到与设备的连接已断开"
+	}
+	a.record(connectivity.Progress{ID: "retry", Stage: "retry", Message: reason, Detail: detail, State: "info"})
 	a.record(connectivity.Progress{ID: "service", Stage: "service", Message: "正在重新连接服务", State: "running"})
 	h.attempt = a
 	ctx = connectivity.WithProgress(ctx, func(p connectivity.Progress) {
@@ -194,13 +195,14 @@ func (s *State) reconnect(id string, automatic bool) {
 	s.changed()
 	go func() {
 		v, err := s.api.Call(ctx, "client.reconnect", Object{"id": id}, "", nil)
+		finished := time.Now()
 		cancel()
 		s.cx.Post(func() {
 			if s.ctx.Err() != nil || h.attempt != a {
 				return
 			}
 			a.active = false
-			a.finished = time.Now()
+			a.finished = finished
 			a.complete = err == nil
 			if err != nil && !errors.Is(err, context.Canceled) {
 				a.err = err.Error()
@@ -208,7 +210,6 @@ func (s *State) reconnect(id string, automatic bool) {
 			h.reconnecting = false
 			s.setConnectionIssue(id, "reconnect", err)
 			if err == nil {
-				h.needsReconnect = false
 				h.established = true
 				s.devices = objects(v)
 				if id == s.target {

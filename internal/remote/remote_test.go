@@ -213,6 +213,15 @@ func TestRelayAndP2P(t *testing.T) {
 			if fake.sends.Load() != 4 {
 				t.Fatalf("executed %d times", fake.sends.Load())
 			}
+			if relayOnly {
+				_ = client.wire.dataWS.CloseNow()
+				waitFor(t, func() bool { return client.Path() == "Disconnected" })
+				probeCtx, stop := context.WithTimeout(ctx, time.Second)
+				defer stop()
+				if err := client.wire.ws.Ping(probeCtx); err != nil {
+					t.Fatalf("relay loss unexpectedly closed signaling: %v", err)
+				}
+			}
 			if !relayOnly {
 				client.wire.mu.Lock()
 				pc := client.wire.pc
@@ -233,7 +242,7 @@ func TestRelayAndP2P(t *testing.T) {
 					_ = hostPC.Close()
 				}
 				if tc.directOnly {
-					waitFor(t, func() bool { return !strings.HasPrefix(client.Path(), "P2P") })
+					waitFor(t, func() bool { return client.Path() == "Disconnected" })
 					if client.wire.dataWS != nil {
 						t.Fatal("free connection opened relay")
 					}
