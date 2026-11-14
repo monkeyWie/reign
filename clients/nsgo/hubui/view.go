@@ -298,7 +298,7 @@ func (s *State) local(cx *core.Scope) core.Node {
 				name = "本机"
 			}
 			return name
-		}, 14, false), spacer(), dynamicText(cx, func() string { s.read(); return str(s.host, "status") }, 12, true)), label(cx, "你的设备 ID", 12, true), core.Text{TestID: "device-code", ContentFunc: func() string {
+		}, 14, false), spacer(), dynamicText(cx, func() string { s.read(); return str(s.host, "status") }, 12, true), s.connectionIndicator(cx, func() string { return "" })), label(cx, "你的设备 ID", 12, true), core.Text{TestID: "device-code", ContentFunc: func() string {
 			s.read()
 			v := str(s.host, "connectionId")
 			if len(v) == 6 {

@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
+	"github.com/monkeyWie/reignhub/internal/connectivity"
 	"github.com/monkeyWie/reignhub/internal/control"
 	"github.com/monkeyWie/reignhub/internal/relay"
 )
@@ -21,7 +23,10 @@ type Client struct {
 }
 
 func Connect(ctx context.Context, p Pairing, opts Options) (*Client, error) {
-	ws, dataWS, peer, err := dial(ctx, p, "client")
+	connectivity.Report(ctx, "signal", "正在建立信令连接", 12*time.Second)
+	dialCtx, stopDial := context.WithTimeout(ctx, 12*time.Second)
+	ws, dataWS, peer, err := dial(dialCtx, p, "client")
+	stopDial()
 	if err != nil {
 		return nil, err
 	}
@@ -64,10 +69,26 @@ func Connect(ctx context.Context, p Pairing, opts Options) (*Client, error) {
 			}
 		}
 	}()
-	if err = w.handshake(ctx); err != nil {
+	connectivity.Report(ctx, "handshake", "正在与被控电脑建立加密握手", 10*time.Second)
+	handshakeCtx, stopHandshake := context.WithTimeout(ctx, 10*time.Second)
+	err = w.handshake(handshakeCtx)
+	stopHandshake()
+	if err != nil {
 		c.Close()
 		return nil, fmt.Errorf("配对握手失败: %w", err)
 	}
+	message := "正在尝试 P2P 直连；此服务未授予中继权限"
+	if dataWS != nil {
+		message = "优先尝试 P2P 直连，必要时自动使用中继"
+	}
+	if opts.RelayOnly {
+		if dataWS == nil {
+			c.Close()
+			return nil, errors.New("当前服务未提供中继权限，请关闭“仅用中继”后尝试直连，或使用支持中继的服务")
+		}
+		message = "正在验证中继连接"
+	}
+	connectivity.Report(ctx, "direct", message, 25*time.Second)
 	go w.offer()
 	// Prove possession of the pairing key before presenting a connected UI.
 	var statuses json.RawMessage

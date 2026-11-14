@@ -375,7 +375,21 @@ func (m *Manager) Local(ctx context.Context, r control.Request) (any, error) {
 			grants = append(grants, map[string]any{"client": g.Client, "name": g.Name, "fingerprint": device.Fingerprint(g.Public), "expires": g.Expires})
 		}
 		sort.Slice(pending, func(a, b int) bool { return pending[a]["id"].(string) < pending[b]["id"].(string) })
-		return map[string]any{"deviceId": i.ID, "connectionId": i.ConnectionID, "public": i.Public, "name": i.Name, "serviceUrl": m.cfg.ServiceURL, "status": m.status, "passwordEnabled": m.state.PasswordHash != "", "pending": pending, "grants": grants, "qr": map[string]any{"version": 2, "service": i.Service, "connectionId": i.ConnectionID, "public": i.Public}}, nil
+		status := m.status
+		network := m.network.Snapshot()
+		if m.network != nil {
+			switch network.State {
+			case "connected":
+				status = "在线 · 可连接"
+			case "connecting":
+				status = "正在连接服务"
+			case "error":
+				status = "连接异常 · 正在重试"
+			default:
+				status = "离线"
+			}
+		}
+		return map[string]any{"deviceId": i.ID, "connectionId": i.ConnectionID, "public": i.Public, "name": i.Name, "serviceUrl": m.cfg.ServiceURL, "status": status, "network": network, "passwordEnabled": m.state.PasswordHash != "", "pending": pending, "grants": grants, "qr": map[string]any{"version": 2, "service": i.Service, "connectionId": i.ConnectionID, "public": i.Public}}, nil
 	case "host.configure":
 		url, e := device.ServiceURL(in.ServiceURL)
 		if e != nil {

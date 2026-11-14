@@ -111,7 +111,11 @@ func CallContext(parent context.Context, raw string) string {
 		hubs[in.DataDir] = h
 	}
 	mu.Unlock()
-	ctx, cancel := context.WithTimeout(parent, 140*time.Second)
+	timeout := 140 * time.Second
+	if in.Method == "client.connect" {
+		timeout = 190 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
 	stop := context.AfterFunc(bridgeContext, cancel)
 	defer stop()

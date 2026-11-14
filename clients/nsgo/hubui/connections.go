@@ -58,6 +58,12 @@ func (s *State) setConnectionIssue(id, source string, err error) {
 	}
 }
 func (s *State) connectionProblem(id string) bool {
+	if id == "" && s.api.CanHost() {
+		network := object(s.host["network"])
+		if state := str(network, "state"); state != "" && state != "connected" {
+			return true
+		}
+	}
 	h := s.connection(id)
 	if len(h.issues) > 0 || h.reconnecting || id != "" && len(s.connection("").issues) > 0 {
 		return true
@@ -114,6 +120,12 @@ func (s *State) connectionDetails(id string) string {
 	// Multiple automatic reads may fail with the same transport error.
 	// Display that error once in the details panel.
 	unique := map[string]bool{}
+	if id == "" && s.api.CanHost() {
+		network := object(s.host["network"])
+		if str(network, "state") != "connected" && str(network, "detail") != "" {
+			unique[str(network, "detail")] = true
+		}
+	}
 	for _, value := range h.issues {
 		unique[value] = true
 	}

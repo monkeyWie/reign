@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/monkeyWie/reignhub/internal/assets"
+	"github.com/monkeyWie/reignhub/internal/connectivity"
 	"github.com/monkeyWie/reignhub/internal/control"
 	"github.com/monkeyWie/reignhub/internal/device"
 	"github.com/monkeyWie/reignhub/internal/deviceservice"
@@ -32,6 +33,7 @@ type Saved struct {
 type Hub struct {
 	Assets      *assets.Cache
 	mu          sync.Mutex
+	identityMu  sync.Mutex
 	DB          *store.DB
 	connections map[string]*remote.Client
 	busy        map[string]bool
@@ -58,8 +60,8 @@ func (h *Hub) Close() error {
 	return h.DB.Close()
 }
 func (h *Hub) identity(ctx context.Context, service, name string) (device.Identity, error) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
+	h.identityMu.Lock()
+	defer h.identityMu.Unlock()
 	var i device.Identity
 	k := "identity:" + service
 	if e := h.DB.Get(k, &i); e == nil {
@@ -122,10 +124,13 @@ func (h *Hub) Reconnect(ctx context.Context, id string) (Saved, error) {
 }
 
 func (h *Hub) connect(ctx context.Context, service, code, public, password, name string, remember, relayOnly, reconnectOnly bool) (Saved, error) {
+	ctx, cancelAttempt := context.WithTimeout(ctx, 190*time.Second)
+	defer cancelAttempt()
 	service, e := device.ServiceURL(service)
 	if e != nil {
 		return Saved{}, e
 	}
+	connectivity.Report(ctx, "service", "正在连接服务并验证本机身份", 15*time.Second)
 	i, e := h.identity(ctx, service, name)
 	if e != nil {
 		return Saved{}, e
@@ -134,8 +139,12 @@ func (h *Hub) connect(ctx context.Context, service, code, public, password, name
 		Device deviceservice.Device
 		Online bool
 	}
+	connectivity.Report(ctx, "resolve", "正在查找设备并检查在线状态", 12*time.Second)
 	if e = device.Post(ctx, service, i.Token, "/p2p/devices/resolve", map[string]any{"connectionId": code}, &r); e != nil {
 		return Saved{}, e
+	}
+	if !r.Online {
+		return Saved{}, fmt.Errorf("被控设备离线，请在电脑上打开 ReignHub，并确认两端使用相同的服务地址")
 	}
 	d := r.Device
 	if public != "" && public != d.Public {
@@ -160,6 +169,7 @@ func (h *Hub) connect(ctx context.Context, service, code, public, password, name
 		return Saved{}, fmt.Errorf("设备身份已变化，需要删除旧配对再确认")
 	}
 	if s.Key == "" || (s.Expires > 0 && s.Expires <= time.Now().Unix()) {
+		connectivity.Report(ctx, "request", "正在向被控电脑请求授权", 12*time.Second)
 		reqID := device.Random()[:32]
 		envelope, e := device.Seal(i.Private, d.Public, "reignhub/pair/request/"+reqID, map[string]any{"password": password, "remember": remember})
 		if e != nil {
@@ -168,6 +178,11 @@ func (h *Hub) connect(ctx context.Context, service, code, public, password, name
 		if e = device.Post(ctx, service, i.Token, "/p2p/pairings/request", map[string]any{"host": d.ID, "id": reqID, "envelope": envelope}, nil); e != nil {
 			return s, e
 		}
+		message := "请在被控电脑的 ReignHub 中允许此次连接"
+		if password != "" {
+			message = "正在等待被控电脑验证访问密码"
+		}
+		connectivity.Report(ctx, "approval", message, 125*time.Second)
 		deadline := time.NewTimer(125 * time.Second)
 		defer deadline.Stop()
 		tick := time.NewTicker(time.Second)
@@ -201,7 +216,7 @@ func (h *Hub) connect(ctx context.Context, service, code, public, password, name
 			case <-ctx.Done():
 				return s, ctx.Err()
 			case <-deadline.C:
-				return s, fmt.Errorf("等待主机授权超时")
+				return s, fmt.Errorf("等待主机授权超时，请在被控电脑上允许连接后重试")
 			case <-tick.C:
 			}
 		}
@@ -210,6 +225,7 @@ func (h *Hub) connect(ctx context.Context, service, code, public, password, name
 	defer cancel()
 	opts := remote.Options{RelayOnly: relayOnly}
 	if !relayOnly {
+		connectivity.Report(ctx, "network", "授权已通过，正在获取直连配置", 3*time.Second)
 		policy := device.Network(connectCtx, service)
 		opts.ICEServers = policy.Servers()
 		opts.TCPSTUN = policy.TCPSTUN
@@ -217,6 +233,10 @@ func (h *Hub) connect(ctx context.Context, service, code, public, password, name
 	c, e := remote.Connect(connectCtx, remote.Pairing{Relay: "ws" + strings.TrimPrefix(service, "http"), Host: d.ID, Key: s.Key, RelayToken: i.Token}, opts)
 	if e != nil {
 		return s, e
+	}
+	if ctx.Err() != nil {
+		_ = c.Close()
+		return s, ctx.Err()
 	}
 	h.mu.Lock()
 	if h.generation[id] != generation {
@@ -237,6 +257,7 @@ func (h *Hub) connect(ctx context.Context, service, code, public, password, name
 	if old != nil {
 		old.Close()
 	}
+	connectivity.Report(ctx, "connected", "连接成功", 0)
 	return s, nil
 }
 func (h *Hub) Disconnect(id string) error {

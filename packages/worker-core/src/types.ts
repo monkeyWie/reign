@@ -12,6 +12,7 @@ export interface CoreEnv {
 export interface Policy {
   deployment: "self-hosted" | "saas";
   loginProviders(env: CoreEnv): string[];
+  accountRequired?(env: CoreEnv): boolean;
   admit(
     env: CoreEnv,
     device: DeviceRow,

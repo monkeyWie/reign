@@ -61,6 +61,7 @@ type State struct {
 	pendingSends                                            map[string]string
 	streamKey, streamEpoch                                  string
 	streamCursor                                            int64
+	connectAttempt                                          *connectAttempt
 }
 
 func newState(cx *core.Scope, api API) *State {
@@ -633,21 +634,4 @@ func (s *State) toggleTheme() {
 	_ = s.cx.Storage().SetItem("appearance", fmt.Sprint(s.dark))
 	s.changed()
 }
-func (s *State) connect(p Object) {
-	s.busy = true
-	s.notice = "正在连接，首次访问请在被控电脑确认…"
-	s.changed()
-	s.async(func(ctx context.Context) (any, error) { return s.api.Call(ctx, "client.connect", p, "", nil) }, func(v any) {
-		s.devices = objects(v)
-		s.notice = "已连接，正在同步会话"
-		for _, d := range s.devices {
-			if str(d, "connectionId") == strings.ReplaceAll(str(p, "code"), " ", "") {
-				s.selectDevice(str(d, "id"))
-				break
-			}
-		}
-		s.poll()
-	})
-}
-
 func pairingCode(v Object) string { b, _ := json.Marshal(v); return "agenthub2:" + base64URL(b) }

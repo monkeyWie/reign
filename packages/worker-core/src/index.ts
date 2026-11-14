@@ -188,7 +188,7 @@ export async function handleCore(
       result = json({
         protocol: PROTOCOL,
         deployment: policy.deployment,
-        accountRequired: false,
+        accountRequired: policy.accountRequired?.(env) ?? false,
         loginProviders: policy.loginProviders(env),
         serviceId: identity.serviceId,
         grantPublicKey: identity.public,

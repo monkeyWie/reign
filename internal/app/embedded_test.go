@@ -3,8 +3,10 @@ package app
 import (
 	"context"
 	"net"
+	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -86,13 +88,57 @@ func waitEmbeddedOnline(t *testing.T, r *Embedded) map[string]any {
 		if err := r.Call(context.Background(), control.Request{Method: "host.info"}, &info); err != nil {
 			t.Fatal(err)
 		}
-		if info["connectionId"] != "" && info["status"] == "在线" {
+		network, _ := info["network"].(map[string]any)
+		if info["connectionId"] != "" && network["state"] == "connected" {
 			return info
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatal("embedded registration timed out")
 	return nil
+}
+
+func TestRejectedSignalingDoesNotAdvertiseHostOnline(t *testing.T) {
+	service, err := deviceservice.New(filepath.Join(t.TempDir(), "devices.db"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/p2p/signal" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(403)
+			_, _ = w.Write([]byte(`{"code":"ACCOUNT_REQUIRED","message":"请在被控端登录并绑定账号"}`))
+			return
+		}
+		service.ServeHTTP(w, r)
+	}))
+	defer server.Close()
+	c, err := config.Load(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.ServiceURL = server.URL
+	r, err := startEmbedded(context.Background(), c, map[string]provider.Provider{"demo": testagent.New()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	until := time.Now().Add(8 * time.Second)
+	for time.Now().Before(until) {
+		var info map[string]any
+		if err := r.Call(context.Background(), control.Request{Method: "host.info"}, &info); err != nil {
+			t.Fatal(err)
+		}
+		network, _ := info["network"].(map[string]any)
+		if network["state"] == "error" {
+			if strings.Contains(info["status"].(string), "在线") || !strings.Contains(network["detail"].(string), "登录并绑定") {
+				t.Fatalf("incorrect host status: %v", info["status"])
+			}
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("host never reported the signal rejection")
 }
 
 type blockingProvider struct {

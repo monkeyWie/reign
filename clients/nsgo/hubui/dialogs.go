@@ -20,6 +20,16 @@ import (
 )
 
 func (s *State) dialogView(cx *core.Scope, kind string) core.Node {
+	if kind == "connecting" {
+		mode := core.NewMemo(cx, func() string {
+			s.read()
+			if s.connectAttempt == nil {
+				return ""
+			}
+			return fmt.Sprintf("%p|%t", s.connectAttempt, s.connectAttempt.active)
+		})
+		return core.Dynamic(func(cx *core.Scope) core.Node { _ = mode.Get(); return s.connectAttemptView(cx) })
+	}
 	if kind == "" {
 		return nil
 	}
@@ -127,7 +137,11 @@ func (s *State) dialogView(cx *core.Scope, kind string) core.Node {
 		relay := core.NewSignal(cx, false)
 		if s.scanned != nil {
 			service.Set(str(s.scanned, "service"))
-			code.Set(str(s.scanned, "connectionId"))
+			initialCode := str(s.scanned, "connectionId")
+			if initialCode == "" {
+				initialCode = str(s.scanned, "code")
+			}
+			code.Set(initialCode)
 		}
 		if !isWeb() {
 			children = append(children, field("connection-service", "服务地址（HTTP / HTTPS）", service, false))

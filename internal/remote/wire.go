@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"sync"
@@ -90,7 +91,14 @@ func dial(ctx context.Context, p Pairing, role string) (*websocket.Conn, *websoc
 	ws, resp, err := websocket.Dial(ctx, u.String(), &websocket.DialOptions{HTTPHeader: http.Header{"Authorization": []string{"Bearer " + p.RelayToken}}})
 	if err != nil {
 		if resp != nil && resp.Body != nil {
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, 2000))
 			resp.Body.Close()
+			var detail struct {
+				Message string `json:"message"`
+			}
+			if json.Unmarshal(body, &detail) == nil && detail.Message != "" {
+				err = fmt.Errorf("信令服务拒绝连接（HTTP %d）：%s", resp.StatusCode, detail.Message)
+			}
 		}
 		return nil, nil, "", err
 	}
