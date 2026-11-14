@@ -205,6 +205,18 @@ export interface ReleaseEnv {
 // DB bindings may have a new wrapper per request. One fixed catalogue per Worker
 // isolate, plus the D1 lease, coalesces requests within and across data centres.
 let service: ReleaseService | undefined;
+export function getReleaseCatalog(
+  env: ReleaseEnv,
+  waitUntil: (task: Promise<ReleaseCatalog>) => void,
+): Promise<ReleaseCatalog> {
+  service ??= new ReleaseService(
+    new D1ReleaseStore(env.DB),
+    fetch,
+    undefined,
+    env.GITHUB_RELEASE_TOKEN,
+  );
+  return service.get(waitUntil);
+}
 export async function handleReleaseCatalog(
   request: Request,
   env: ReleaseEnv,
@@ -220,15 +232,9 @@ export async function handleReleaseCatalog(
       : undefined;
   const hit = await edge?.match(cacheKey);
   if (hit) return request.method === "HEAD" ? new Response(null, hit) : hit;
-  service ??= new ReleaseService(
-    new D1ReleaseStore(env.DB),
-    fetch,
-    undefined,
-    env.GITHUB_RELEASE_TOKEN,
-  );
   try {
     let background: Promise<ReleaseCatalog> | undefined;
-    const value = await service.get((task) => {
+    const value = await getReleaseCatalog(env, (task) => {
       background = task;
       ctx.waitUntil(task);
     });

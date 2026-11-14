@@ -5,6 +5,7 @@ import { LocalizedLink as Link } from "../../../components/locale";
 import { ArrowUpRight, Globe } from "lucide-react";
 import { ReleaseDownloads } from "../../../components/release-downloads";
 import { PageIntro, SiteShell } from "../../../components/site";
+import { getServerReleaseCatalog } from "../../../lib/release-server";
 
 export default async function DownloadPage({
   params,
@@ -14,6 +15,7 @@ export default async function DownloadPage({
   const { lang } = await params;
   if (!isLocale(lang)) notFound();
   const t = translate(lang);
+  const catalog = await getServerReleaseCatalog();
   return (
     <SiteShell>
       <main id="main">
@@ -46,7 +48,7 @@ export default async function DownloadPage({
             <ArrowUpRight size={16} />
           </Link>
         </section>
-        <ReleaseDownloads lang={lang} />
+        <ReleaseDownloads lang={lang} catalog={catalog} />
         <section className="site-width download-help">
           <h2>{t("第一次使用？")}</h2>
           <p>

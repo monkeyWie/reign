@@ -1,6 +1,3 @@
-"use client";
-
-import { useEffect, useState } from "react";
 import {
   ArrowUpRight,
   Code2,
@@ -18,29 +15,15 @@ import {
 } from "../lib/releases";
 import { LocalizedLink as Link } from "./locale";
 
-export function ReleaseDownloads({ lang }: { lang: Locale }) {
+export function ReleaseDownloads({
+  lang,
+  catalog,
+}: {
+  lang: Locale;
+  catalog: ReleaseCatalog;
+}) {
   const t = translate(lang);
-  const [catalog, setCatalog] = useState<ReleaseCatalog | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [retry, setRetry] = useState(0);
-  useEffect(() => {
-    const abort = new AbortController();
-    setLoading(true);
-    fetch("/api/releases", { signal: abort.signal })
-      .then(async (response) => {
-        if (!response.ok) throw new Error("release catalogue unavailable");
-        const value: ReleaseCatalog = await response.json();
-        if (!abort.signal.aborted) setCatalog(value);
-      })
-      .catch(() => {
-        /* Keep an already loaded list when a refresh fails. */
-      })
-      .finally(() => {
-        if (!abort.signal.aborted) setLoading(false);
-      });
-    return () => abort.abort();
-  }, [retry]);
-  const release = catalog?.release;
+  const release = catalog.release;
   const platforms = [
     {
       id: "macos",
@@ -94,11 +77,7 @@ export function ReleaseDownloads({ lang }: { lang: Locale }) {
   }[];
   return (
     <>
-      <section
-        className="site-width release-notice"
-        aria-live="polite"
-        aria-busy={loading}
-      >
+      <section className="site-width release-notice">
         <span className="site-tag">
           {release
             ? release.prerelease
@@ -107,21 +86,13 @@ export function ReleaseDownloads({ lang }: { lang: Locale }) {
             : "REIGN"}
         </span>
         <div>
-          <h2>
-            {release
-              ? `Reign ${release.version}`
-              : loading
-                ? t("正在获取最新版本…")
-                : t("获取 Reign")}
-          </h2>
+          <h2>{release ? `Reign ${release.version}` : t("获取 Reign")}</h2>
           <p>
             {release
               ? `${t("发布于")} ${new Intl.DateTimeFormat(lang, { dateStyle: "medium", timeZone: "UTC" }).format(new Date(release.publishedAt))}`
-              : loading
-                ? t("正在加载各平台安装包。")
-                : catalog?.checkedAt
-                  ? t("安装包发布后会自动显示在这里。")
-                  : t("暂时无法获取版本，请在 GitHub Releases 查看下载。")}
+              : catalog.checkedAt
+                ? t("安装包发布后会自动显示在这里。")
+                : t("暂时无法获取版本，请在 GitHub Releases 查看下载。")}
           </p>
           <div className="site-actions">
             <a href={release?.url || releasesURL} className="site-text-link">
@@ -131,15 +102,6 @@ export function ReleaseDownloads({ lang }: { lang: Locale }) {
               <a href={release.checksumsURL} className="site-text-link">
                 SHA256SUMS <ArrowUpRight size={14} />
               </a>
-            )}
-            {!loading && !release && (
-              <button
-                type="button"
-                className="button"
-                onClick={() => setRetry((value) => value + 1)}
-              >
-                {t("重新加载")}
-              </button>
             )}
           </div>
         </div>
@@ -182,7 +144,7 @@ export function ReleaseDownloads({ lang }: { lang: Locale }) {
                   ))}
                   {!assets.length && (
                     <span className="download-unavailable">
-                      {loading ? t("正在加载…") : t("安装包即将发布")}
+                      {t("安装包即将发布")}
                     </span>
                   )}
                 </div>
