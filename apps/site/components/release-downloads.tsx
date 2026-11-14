@@ -152,7 +152,7 @@ export function ReleaseDownloads({
                         </span>
                       )}
                       <span className="download-size">
-                        {(asset.size / 1024 / 1024).toFixed(1)} MB
+                        {(asset.size / 1_000_000).toFixed(1)} MB
                       </span>
                     </a>
                   ))}
