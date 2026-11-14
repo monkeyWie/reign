@@ -115,8 +115,10 @@ export interface Session {
   status: string;
   model?: string;
   activeTurnId?: string;
+  sourceKind?: string;
 }
 export interface Attachment {
+  source?: string;
   id: string;
   name: string;
   kind: string;
@@ -134,6 +136,7 @@ export interface Item {
   text: string;
   status?: string;
   timestampMs?: number;
+  phase?: string;
   attachments?: Attachment[];
   activities?: {
     kind: string;

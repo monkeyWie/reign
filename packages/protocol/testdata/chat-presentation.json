@@ -1,0 +1,50 @@
+[
+  {
+    "name": "completed turn shows only the conversation",
+    "transcript": {
+      "session": {"id":"session","providerId":"codex-app","status":"idle"},
+      "turns": [{"id":"done","status":"completed","items":[
+        {"id":"u","role":"user","type":"userMessage","text":"Please check"},
+        {"id":"reason","role":"reasoning","type":"reasoning","text":"private reasoning"},
+        {"id":"comment","role":"assistant","type":"agentMessage","phase":"commentary","text":"Checking"},
+        {"id":"tool","role":"tool","type":"commandExecution","text":"cat secret.txt","activities":[{"kind":"command","title":"运行命令"}]},
+        {"id":"output","role":"tool","type":"functionCallOutput","text":"raw output"},
+        {"id":"final","role":"assistant","type":"agentMessage","phase":"final_answer","text":"All done"}
+      ]}]
+    },
+    "ids": ["done|u","done|final"], "roles": ["user","assistant"], "live": [false,false], "thinking": false
+  },
+  {
+    "name": "active mixed text and tool groups keep source order",
+    "transcript": {
+      "session": {"id":"session","providerId":"codex-app","status":"running"},
+      "turns": [
+        {"id":"old","status":"completed","items":[{"id":"u","role":"user","type":"userMessage","text":"Earlier"}]},
+        {"id":"live","status":"inProgress","items":[
+          {"id":"u","role":"user","type":"userMessage","text":"Check again"},
+          {"id":"r","role":"reasoning","type":"reasoning","text":"private"},
+          {"id":"a","role":"assistant","type":"agentMessage","phase":"commentary","text":"Checking files"},
+          {"id":"t1","role":"tool","type":"commandExecution","status":"completed","text":"raw command","activities":[{"kind":"read","title":"读取 a.go"}]},
+          {"id":"o","role":"tool","type":"functionCallOutput","text":"raw output"},
+          {"id":"t2","role":"tool","type":"commandExecution","status":"inProgress","text":"raw command","activities":[{"kind":"search","title":"搜索引用"}]},
+          {"id":"b","role":"assistant","type":"agentMessage","phase":"commentary","text":"Found the issue"},
+          {"id":"t3","role":"tool","type":"fileChange","status":"inProgress","text":"raw patch","activities":[{"kind":"edit","title":"编辑 a.go"}]}
+        ]}
+      ]
+    },
+    "ids": ["old|u","live|u","live|a","live|tools|t1","live|b","live|tools|t3"],
+    "roles": ["user","user","assistant","activity","assistant","activity"],
+    "live": [false,false,true,true,true,true], "thinking": false
+  },
+  {
+    "name": "thinking only before visible text or tool activity",
+    "transcript": {
+      "session": {"id":"session","providerId":"codex-app","status":"running"},
+      "turns": [{"id":"live","status":"inProgress","items":[
+        {"id":"u","role":"user","type":"userMessage","text":"Hi"},
+        {"id":"r","role":"reasoning","type":"reasoning","text":"private"}
+      ]}]
+    },
+    "ids": ["live|u"], "roles": ["user"], "live": [false], "thinking": true
+  }
+]

@@ -5,6 +5,8 @@ import { MessageContent } from "./message-content-view";
 import { readableMessage } from "./message-content";
 import {
   ArrowLeft,
+  ArrowDown,
+  Wrench,
   ArrowUp,
   Check,
   ChevronDown,
@@ -20,6 +22,7 @@ import {
   Settings,
   Shield,
   Square,
+  Sparkles,
   Terminal,
   Trash2,
   User,
@@ -34,10 +37,22 @@ import {
 import type { Item, Provider, Session } from "@reignhub/protocol";
 import { Button, Dialog, ErrorNotice, copyText } from "./ui";
 import { Attachments, upload } from "./attachments";
-import { applyEvents, type Batch, type Transcript } from "./transcript";
+import {
+  applyEvents,
+  reconcileTranscript,
+  type Batch,
+  type Transcript,
+} from "./transcript";
+import {
+  messages,
+  isRunning,
+  activeTurn,
+  showThinking,
+  activityLabel,
+  navigationRows,
+  uniqueSessions,
+} from "./presentation";
 const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
-const isRunning = (s?: string) =>
-  ["running", "inProgress", "in_progress"].includes(s || "");
 interface Selected {
   device: string;
   provider: string;
@@ -63,6 +78,9 @@ export function RemoteApp() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [selected, setSelected] = useState<Selected>();
   const [transcript, setTranscript] = useState<Transcript>();
+  const transcriptScope = useRef("");
+  const transcriptRef = useRef(transcript);
+  transcriptRef.current = transcript;
   const [error, setError] = useState("");
   const [pairDialog, setPairDialog] = useState(false);
   const [settings, setSettings] = useState(false);
@@ -83,6 +101,7 @@ export function RemoteApp() {
   const active = connections[selectedDevice];
   const current = devices.find((d) => deviceKey(d) === selectedDevice);
   useEffect(() => {
+    disposed.current = false;
     const params = new URLSearchParams(location.search);
     if (params.get("device")) {
       setCode(params.get("device")!.replace(/[^0-9]/g, ""));
@@ -118,6 +137,10 @@ export function RemoteApp() {
       const identity = await api.identity();
       const config = await api.config();
       const resolved = await api.resolve(d.connectionId);
+      if (!resolved.online)
+        throw Error(
+          "被控设备离线，请确认电脑上的 ReignHub 正在运行并已连接服务",
+        );
       if (resolved.device.id !== d.id || resolved.device.public !== d.public)
         throw Error("设备身份已改变，请重新配对");
       const latest = { ...d, name: resolved.device.name };
@@ -201,8 +224,11 @@ export function RemoteApp() {
   }
   useEffect(() => {
     if (!active || active.path === "Disconnected") {
-      setProviders([]);
-      setSessions([]);
+      // Keep the last catalogue visible while reconnecting.
+      if (!selectedDevice) {
+        setProviders([]);
+        setSessions([]);
+      }
       return;
     }
     let alive = true;
@@ -228,7 +254,7 @@ export function RemoteApp() {
             cursor = page.nextCursor || "";
           } while (cursor && ++pages < 100);
         }
-        all.sort((a, b) => b.updatedAt - a.updatedAt);
+        all = uniqueSessions(all);
         if (alive) {
           setProviders(ps);
           setSessions(all);
@@ -246,15 +272,23 @@ export function RemoteApp() {
     };
   }, [active, selectedDevice]);
   useEffect(() => {
-    setTranscript(undefined);
     if (!selected || !active) return;
+    const scope = [selected.device, selected.provider, selected.id].join("|");
+    if (transcriptScope.current !== scope) {
+      transcriptRef.current = undefined;
+      setTranscript(undefined);
+    }
+    transcriptScope.current = scope;
     let alive = true;
     let snapshot: Transcript | undefined;
     let epoch = "",
       cursor = 0;
     const key = [selected.device, selected.provider, selected.id].join("|");
     void cache.snapshots.get(key).then((r) => {
-      if (alive && r && !snapshot) setTranscript(r.value as Transcript);
+      if (alive && r && !snapshot && !transcriptRef.current) {
+        transcriptRef.current = r.value as Transcript;
+        setTranscript(r.value as Transcript);
+      }
     });
     async function full() {
       const t = await active.call<Transcript>({
@@ -262,56 +296,75 @@ export function RemoteApp() {
         provider: selected!.provider,
         session: selected!.id,
       });
-      snapshot = t;
+      if (!alive) return t;
+      snapshot = reconcileTranscript(
+        t,
+        transcriptScope.current === key ? transcriptRef.current : undefined,
+      );
       if (alive) {
-        setTranscript(t);
-        void cache.putSnapshot(key, t);
+        transcriptRef.current = snapshot;
+        setTranscript(snapshot);
+        void cache.putSnapshot(key, snapshot);
       }
       return t;
     }
     void (async () => {
-      try {
-        let baseline = await active.call<Batch>({
-          method: "watch",
-          provider: selected.provider,
-          session: selected.id,
-          epoch: "",
-          after: 0,
-        });
-        epoch = baseline.epoch;
-        cursor = baseline.cursor;
-        await full();
-        while (alive && active.path !== "Disconnected") {
-          const batch = await active.call<Batch>({
+      while (alive && active.path !== "Disconnected") {
+        try {
+          const baseline = await active.call<Batch>({
             method: "watch",
             provider: selected.provider,
             session: selected.id,
-            epoch,
-            after: cursor,
+            epoch: "",
+            after: 0,
           });
-          if (!alive) return;
-          if (batch.reset || batch.events.some((e) => e.kind === "snapshot")) {
-            await full();
-          } else if (snapshot && batch.events.length) {
-            snapshot = applyEvents(snapshot, batch.events);
-            setTranscript(snapshot);
-            void cache.putSnapshot(key, snapshot);
+          epoch = baseline.epoch;
+          cursor = baseline.cursor;
+          await full();
+          while (alive && active.path !== "Disconnected") {
+            const batch = await active.call<Batch>({
+              method: "watch",
+              provider: selected.provider,
+              session: selected.id,
+              epoch,
+              after: cursor,
+            });
+            if (!alive) return;
             if (
-              batch.events.some(
-                (e) => e.kind === "turn" && !isRunning(e.status),
-              )
-            )
+              batch.reset ||
+              batch.events.some((e) => e.kind === "snapshot")
+            ) {
               await full();
+            } else if (snapshot && batch.events.length) {
+              try {
+                snapshot = reconcileTranscript(
+                  applyEvents(snapshot, batch.events),
+                  transcriptRef.current,
+                );
+              } catch {
+                await full();
+              }
+              transcriptRef.current = snapshot;
+              setTranscript(snapshot);
+              void cache.putSnapshot(key, snapshot);
+              if (
+                batch.events.some(
+                  (e) => e.kind === "turn" && !isRunning(e.status),
+                )
+              )
+                await full();
+            }
+            epoch = batch.epoch;
+            cursor = batch.cursor;
           }
-          epoch = batch.epoch;
-          cursor = batch.cursor;
-        }
-      } catch (e) {
-        if (alive) {
-          try {
-            await full();
-          } catch {}
-          onError(e);
+        } catch (e) {
+          if (alive) {
+            try {
+              await full();
+            } catch {}
+            // Retry transient watch errors without clearing the cached transcript.
+            await new Promise((resolve) => setTimeout(resolve, 1500));
+          }
         }
       }
     })();
@@ -322,7 +375,7 @@ export function RemoteApp() {
   function selectSession(s: Session) {
     setSelected({ device: selectedDevice, provider: s.providerId, id: s.id });
     setView("chat");
-    if (matchMedia("(max-width: 760px)").matches)
+    if (matchMedia("(max-width: 999px)").matches)
       history.pushState({ reignChat: true }, "");
   }
   async function create() {
@@ -392,6 +445,10 @@ export function RemoteApp() {
               >
                 <button
                   onClick={() => {
+                    if (k !== selectedDevice) {
+                      setSelected(undefined);
+                      setSessions([]);
+                    }
                     setSelectedDevice(k);
                     setView("sessions");
                     if (!c || c.path === "Disconnected") void connect(d);
@@ -506,8 +563,8 @@ export function RemoteApp() {
                   key={s.providerId + s.id}
                   onClick={() => selectSession(s)}
                 >
-                  <Terminal
-                    size={14}
+                  <SessionIcon
+                    session={s}
                     className={
                       s.providerId.includes("app")
                         ? "app-provider"
@@ -535,6 +592,35 @@ export function RemoteApp() {
             cache={cache}
             selected={selected}
             transcript={transcript}
+            onOlder={async () => {
+              if (!transcript?.nextCursor) return;
+              const key = [
+                selected.device,
+                selected.provider,
+                selected.id,
+              ].join("|");
+              const page = await active.call<Transcript>({
+                method: "transcript",
+                provider: selected.provider,
+                session: selected.id,
+                cursor: transcript.nextCursor,
+              });
+              if (transcriptScope.current !== key) return;
+              const latest = transcriptRef.current;
+              if (!latest) return;
+              const ids = new Set(latest.turns.map((turn) => turn.id));
+              const value = {
+                ...latest,
+                turns: [
+                  ...page.turns.filter((turn) => !ids.has(turn.id)),
+                  ...latest.turns,
+                ],
+                nextCursor: page.nextCursor,
+              };
+              transcriptRef.current = value;
+              setTranscript(value);
+              await cache.putSnapshot(key, value);
+            }}
             onError={onError}
             onBack={() => {
               setView("sessions");
@@ -642,11 +728,12 @@ export function RemoteApp() {
     </div>
   );
 }
-function Chat({
+export function Chat({
   c,
   cache,
   selected,
   transcript: t,
+  onOlder,
   onError,
   onBack,
 }: {
@@ -654,6 +741,7 @@ function Chat({
   cache: ReignHubCache;
   selected: Selected;
   transcript?: Transcript;
+  onOlder: () => Promise<void>;
   onError: (e: unknown) => void;
   onBack: () => void;
 }) {
@@ -664,6 +752,7 @@ function Chat({
   >([]);
   const [uploads, setUploads] = useState<{ file: File; url?: string }[]>([]);
   const [sending, setSending] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
   const [copied, setCopied] = useState("");
   const [approvals, setApprovals] = useState<
     { id: string; method: string; params: unknown }[]
@@ -672,34 +761,20 @@ function Chat({
   const fileRef = useRef<HTMLInputElement>(null);
   const scroll = useRef<HTMLDivElement>(null);
   const bottom = useRef(true);
-  const running =
-    isRunning(t?.session.status) ||
-    !!t?.turns.some((turn) => isRunning(turn.status));
-  const rows = useMemo(
-    () =>
-      t?.turns.flatMap((turn) =>
-        turn.items
-          .filter(
-            (item) =>
-              item.text ||
-              item.attachments?.some((a) => a.state === "ready") ||
-              (isRunning(turn.status) && item.activities?.length),
-          )
-          .filter((item) => !["reasoning", "thinking"].includes(item.type))
-          .map((item) => ({
-            ...item,
-            live: isRunning(turn.status) && item.role !== "user",
-            turn: turn.id,
-          })),
-      ) || [],
-    [t],
-  );
+  const connected = c.path !== "Disconnected";
+  const running = !!activeTurn(t);
+  const rows = useMemo(() => messages(t), [t]);
+  const [atBottom, setAtBottom] = useState(true);
+  const content = useRef<HTMLDivElement>(null);
+  const initialBottom = useRef(true);
   const v = useVirtualizer({
     count: rows.length,
     getScrollElement: () => scroll.current,
-    estimateSize: () => 140,
-    overscan: 5,
+    estimateSize: () => 120,
+    overscan: 6,
+    paddingStart: t?.nextCursor ? 44 : 0,
     getItemKey: (i) => rows[i].id,
+    // Avoid moving the viewport when rows below the reading position change.
   });
   useEffect(() => {
     void c
@@ -713,7 +788,7 @@ function Chat({
           t?.session.model || ms.find((m) => m.default)?.id || ms[0]?.id || "",
         );
       })
-      .catch(onError);
+      .catch(() => {});
     let active = true;
     const timer = setInterval(() => {
       void c
@@ -735,20 +810,29 @@ function Chat({
     if (t?.session.model) setModel(t.session.model);
   }, [t?.session.model]);
   useEffect(() => {
-    if (bottom.current && rows.length)
-      requestAnimationFrame(() =>
-        v.scrollToIndex(rows.length - 1, { align: "end" }),
-      );
-  }, [rows]);
+    bottom.current = true;
+    initialBottom.current = true;
+    setAtBottom(true);
+  }, [selected.id, selected.provider]);
   useEffect(() => {
-    const el = scroll.current;
-    if (!el) return;
+    if (bottom.current && rows.length) {
+      v.scrollToIndex(rows.length - 1, { align: "end" });
+    }
+  }, [rows, v]);
+  useEffect(() => {
+    const el = scroll.current,
+      inner = content.current;
+    if (!el || !inner) return;
     const observer = new ResizeObserver(() => {
-      if (bottom.current) el.scrollTop = el.scrollHeight;
+      if (bottom.current || initialBottom.current) {
+        el.scrollTop = el.scrollHeight;
+        if (rows.length) initialBottom.current = false;
+      }
     });
     observer.observe(el);
+    observer.observe(inner);
     return () => observer.disconnect();
-  }, []);
+  }, [rows.length > 0]);
   const urlsRef = useRef(uploads);
   urlsRef.current = uploads;
   useEffect(
@@ -778,7 +862,7 @@ function Chat({
     ]);
   }
   async function send() {
-    if (sending || (!text.trim() && !uploads.length)) return;
+    if (!connected || sending || (!text.trim() && !uploads.length)) return;
     setSending(true);
     try {
       const attachments: string[] = [];
@@ -849,16 +933,41 @@ function Chat({
           onScroll={() => {
             const el = scroll.current!;
             bottom.current =
-              el.scrollHeight - el.scrollTop - el.clientHeight < 100;
+              el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+            setAtBottom(bottom.current);
           }}
         >
           <div
+            ref={content}
+            className="message-virtual-content"
             style={{
               height: v.getTotalSize(),
               position: "relative",
               width: "100%",
             }}
           >
+            {t?.nextCursor && (
+              <div className="load-older">
+                <Button
+                  variant="ghost"
+                  size="small"
+                  disabled={loadingOlder || !connected}
+                  onClick={async () => {
+                    bottom.current = false;
+                    setLoadingOlder(true);
+                    try {
+                      await onOlder();
+                    } catch (e) {
+                      onError(e);
+                    } finally {
+                      setLoadingOlder(false);
+                    }
+                  }}
+                >
+                  {loadingOlder ? "加载中…" : "加载更早消息"}
+                </Button>
+              </div>
+            )}
             {v.getVirtualItems().map((row) => {
               const item = rows[row.index];
               return (
@@ -875,63 +984,66 @@ function Chat({
                   }}
                 >
                   <article
+                    data-message-role={item.role}
                     className={
                       "message " +
-                      (item.role === "user"
-                        ? "user-message"
-                        : "assistant-message")
+                      (item.role === "activity"
+                        ? "activity-message"
+                        : item.role === "user"
+                          ? "user-message"
+                          : "assistant-message")
                     }
                   >
                     <div className="message-content">
-                      {!!item.attachments?.length && (
-                        <Attachments
-                          items={item.attachments}
-                          c={c}
-                          cache={cache}
-                          provider={selected.provider}
-                          session={selected.id}
-                          onError={onError}
+                      {item.role === "activity" ? (
+                        <Activity
+                          tools={item.tools || []}
+                          running={connected}
                         />
-                      )}
-                      <MessageContent role={item.role} text={item.text} />
-                      {item.live && item.activities?.length ? (
-                        <details className="activity">
-                          <summary>
-                            <span className="shimmer">
-                              {item.activities.at(-1)?.title || "处理中"}
-                            </span>
-                            <ChevronDown size={14} />
-                          </summary>
-                          <ul>
-                            {item.activities.map((a, i) => (
-                              <li key={i}>
-                                {a.title}
-                                {a.detail && <small>{a.detail}</small>}
-                              </li>
-                            ))}
-                          </ul>
-                        </details>
-                      ) : null}
-                      {!item.live && (
-                        <div className="message-actions">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            aria-label="复制完整消息"
-                            onClick={() => void copy(item)}
-                          >
-                            {copied === item.id ? (
-                              <Check size={14} />
-                            ) : (
-                              <Copy size={14} />
-                            )}
-                          </Button>
-                          {item.timestampMs && (
-                            <time>
-                              {new Date(item.timestampMs).toLocaleString()}
-                            </time>
+                      ) : (
+                        <>
+                          {!!item.attachments?.length && (
+                            <Attachments
+                              items={item.attachments}
+                              c={c}
+                              cache={cache}
+                              provider={selected.provider}
+                              session={selected.id}
+                              onError={onError}
+                            />
                           )}
-                        </div>
+                          <MessageContent role={item.role} text={item.text} />
+                          {!item.live && (
+                            <div className="message-actions">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                aria-label="复制完整消息"
+                                onClick={() => void copy(item)}
+                              >
+                                {copied === item.id ? (
+                                  <Check size={14} />
+                                ) : (
+                                  <Copy size={14} />
+                                )}
+                              </Button>
+                              {item.timestampMs && (
+                                <time
+                                  title={new Date(
+                                    item.timestampMs,
+                                  ).toLocaleString()}
+                                >
+                                  {new Date(
+                                    item.timestampMs,
+                                  ).toLocaleTimeString([], {
+                                    hour: "2-digit",
+                                    minute: "2-digit",
+                                  })}
+                                </time>
+                              )}
+                            </div>
+                          )}
+                        </>
                       )}
                     </div>
                   </article>
@@ -939,30 +1051,44 @@ function Chat({
               );
             })}
           </div>
-          {running &&
-            !rows.some(
-              (item) => item.live && (item.text || item.activities?.length),
-            ) && <div className="thinking shimmer">Thinking…</div>}
+          {connected && showThinking(t) && (
+            <div className="thinking shimmer">Thinking…</div>
+          )}
         </div>
         <div className="message-nav">
-          {rows
-            .filter((r) => r.role === "user")
-            .slice(-30)
-            .map((item) => (
-              <button
-                key={item.id}
-                title={readableMessage(item).slice(0, 100)}
-                aria-label="跳转到消息"
-                onClick={() => {
-                  bottom.current = false;
-                  v.scrollToIndex(
-                    rows.findIndex((r) => r.id === item.id),
-                    { align: "center" },
-                  );
-                }}
-              />
-            ))}
+          {navigationRows(rows).map((item) => (
+            <button
+              key={item.id}
+              title={readableMessage(item).slice(0, 100)}
+              aria-label="跳转到消息"
+              onClick={() => {
+                bottom.current = false;
+                setAtBottom(false);
+                v.scrollToIndex(
+                  rows.findIndex((r) => r.id === item.id),
+                  { align: "center" },
+                );
+              }}
+            >
+              <span />
+            </button>
+          ))}
         </div>
+        {!atBottom && (
+          <Button
+            className="jump-latest"
+            variant="default"
+            size="icon"
+            aria-label="回到最新"
+            onClick={() => {
+              bottom.current = true;
+              setAtBottom(true);
+              v.scrollToIndex(rows.length - 1, { align: "end" });
+            }}
+          >
+            <ArrowDown size={16} />
+          </Button>
+        )}
       </div>
       {approvals.length > 0 && (
         <div className="approval-card">
@@ -1007,6 +1133,11 @@ function Chat({
               </Button>
             </div>
           ))}
+        </div>
+      )}
+      {!connected && (
+        <div className="connection-cache-note" role="status">
+          设备离线，显示本地缓存；连接恢复后同步最新消息。
         </div>
       )}
       <div
@@ -1089,6 +1220,7 @@ function Chat({
                 e.target.value = "";
               }}
             />
+            <span className="composer-spacer" />
             <select
               aria-label="模型"
               value={model}
@@ -1103,8 +1235,7 @@ function Chat({
                 </option>
               ))}
             </select>
-            <span className="composer-spacer" />
-            {running && (
+            {running && connected && (
               <Button
                 size="icon"
                 variant="ghost"
@@ -1126,7 +1257,9 @@ function Chat({
             <Button
               variant="primary"
               size="icon"
-              disabled={sending || (!text.trim() && !uploads.length)}
+              disabled={
+                !connected || sending || (!text.trim() && !uploads.length)
+              }
               aria-label="发送"
               onClick={() => void send()}
             >
@@ -1144,4 +1277,56 @@ function Chat({
       </div>
     </>
   );
+}
+
+export function Activity({
+  tools,
+  running = true,
+}: {
+  tools: Item[];
+  running?: boolean;
+}) {
+  return (
+    <details className="activity">
+      <summary>
+        <Wrench size={14} className="activity-icon" />
+        <span className={running ? "shimmer" : ""}>{activityLabel(tools)}</span>
+        <ChevronDown size={14} className="activity-chevron" />
+      </summary>
+      <ul>
+        {tools.flatMap((tool) =>
+          (tool.activities?.length
+            ? tool.activities
+            : [
+                {
+                  title:
+                    tool.status === "completed" ? "操作已完成" : "正在执行…",
+                  detail: undefined,
+                },
+              ]
+          ).map((a, i) => (
+            <li key={`${tool.id}|${i}`}>
+              <span>{a.title}</span>
+              {a.detail && <small>{a.detail}</small>}
+            </li>
+          )),
+        )}
+      </ul>
+    </details>
+  );
+}
+
+function SessionIcon({
+  session,
+  className,
+}: {
+  session: Session;
+  className?: string;
+}) {
+  const Icon = session.providerId.includes("claude")
+    ? Sparkles
+    : session.sourceKind === "app" || session.providerId === "codex-app"
+      ? Monitor
+      : Terminal;
+  return <Icon size={14} className={className} />;
 }

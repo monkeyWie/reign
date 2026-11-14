@@ -7,6 +7,7 @@ import {
   type ServiceConfig,
 } from "@reignhub/protocol";
 import { keypair, envelope, hex, random } from "./crypto";
+import { browserDeviceName } from "./browser-identity";
 import { ReignHubCache, type SavedDevice } from "./cache";
 export class Service {
   constructor(
@@ -51,20 +52,18 @@ export class Service {
   config() {
     return this.post<ServiceConfig>(routes.config);
   }
-  async identity() {
+  private identityTask?: Promise<Identity>;
+  identity(): Promise<Identity> {
+    return (this.identityTask ||= this.loadIdentity().catch((error) => {
+      this.identityTask = undefined;
+      throw error;
+    }));
+  }
+  private async loadIdentity(): Promise<Identity> {
     let i = await this.cache.identities.get(this.origin);
+    const name = await browserDeviceName();
     if (!i) {
       const pair = keypair();
-      const name =
-        typeof navigator === "undefined"
-          ? "Browser"
-          : /Firefox/.test(navigator.userAgent)
-            ? "Firefox"
-            : /Edg\//.test(navigator.userAgent)
-              ? "Edge"
-              : /Chrome/.test(navigator.userAgent)
-                ? "Chrome"
-                : "Safari";
       const r = await this.post<{
         id: string;
         connectionId: string;
@@ -72,6 +71,15 @@ export class Service {
       }>(routes.register, { name, public: pair.public, isHost: false });
       i = { ...r, ...pair, name, service: this.origin };
       await this.cache.identities.put(i);
+    } else if (i.name !== name) {
+      // Rename the same device; keep keys, token and existing authorizations.
+      try {
+        await this.post(routes.presence, { name }, i.token);
+        i = { ...i, name };
+        await this.cache.identities.put(i);
+      } catch {
+        /* A name refresh must not prevent an existing pairing from connecting. */
+      }
     }
     return i;
   }
@@ -90,7 +98,9 @@ export class Service {
     onWaiting?: () => void,
   ) {
     const i = await this.identity();
-    const { device: d } = await this.resolve(code);
+    const { device: d, online } = await this.resolve(code);
+    if (!online)
+      throw Error("被控设备离线，请确认电脑上的 ReignHub 正在运行并已连接服务");
     const previous = await this.cache.devices.get([
       this.origin,
       d.id,
