@@ -72,12 +72,16 @@ export class ReleaseService {
   private inFlight: Promise<ReleaseCatalog> | null = null;
   private cached: { until: number; value: ReleaseCatalog } | null = null;
   private refreshing: Promise<ReleaseCatalog> | null = null;
+  private fetcher: typeof fetch;
   constructor(
     private store: ReleaseStore,
-    private fetcher: typeof fetch = fetch,
+    fetcher: typeof fetch = fetch,
     private clock: () => number = () => Math.floor(Date.now() / 1000),
     private token?: string,
-  ) {}
+  ) {
+    // Workers requires the global receiver for its native fetch function.
+    this.fetcher = fetcher.bind(globalThis);
+  }
   get(
     waitUntil?: (task: Promise<ReleaseCatalog>) => void,
   ): Promise<ReleaseCatalog> {

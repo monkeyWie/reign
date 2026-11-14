@@ -60,6 +60,18 @@ class MemoryStore implements ReleaseStore {
     }
   }
 }
+test("the native Worker fetch function is called with the global receiver", async () => {
+  const nativeLikeFetch = async function (this: unknown) {
+    assert.equal(this, globalThis);
+    return Response.json([fixture()]);
+  };
+  const service = new ReleaseService(
+    new MemoryStore(),
+    nativeLikeFetch,
+    () => 10000,
+  );
+  assert.equal((await service.get()).release?.assets.length, 8);
+});
 test("published release assets match every CI client platform, excluding untrusted URLs and development signatures", () => {
   const release = fixture();
   release.assets.push({
