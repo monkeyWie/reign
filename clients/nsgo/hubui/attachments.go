@@ -140,7 +140,8 @@ func (s *State) upload(u *Upload) {
 			}
 			offset = next
 			progress := offset
-			s.cx.Post(func() { u.ID = id; u.Sent = progress; s.changed() })
+			progressID := id
+			s.cx.Post(func() { u.ID = progressID; u.Sent = progress; s.changed() })
 		}
 		if u.cancelled.Load() {
 			_, _ = call("attachment.abort", Object{"id": id})
