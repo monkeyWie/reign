@@ -62,6 +62,6 @@ git push origin v0.1.0
 
 官网 `/download` 通过同源 `/api/releases` 读取 GitHub Release API 中最新已发布且带客户端附件的版本，包括预览版本。按平台显示实际安装包 URL 和大小，文件直接从 GitHub 下载，不经 Worker 转发，也不需要发版后修改官网。
 
-元数据每 15 分钟刷新一次，D1 持久化成功的列表和 ETag。跨 Worker 实例通过 D1 短租约合并刷新，单实例合并并发请求，边缘缓存 5 分钟，浏览器缓存 1 分钟。GitHub 限流或故障时遵守 Retry-After / X-RateLimit-Reset 并继续提供上次成功的列表；空结果和冷启动失败也有短缓存。客户端不能指定仓库或强制刷新上游。
+版本快照在 D1 永久保留，不设数据过期时间。有缓存就立即返回，只有首次没有缓存时同步读取 GitHub；距离上次 API 请求至少一小时才在后台异步刷新，并更新 D1、内存和边缘缓存。D1 同时保存 ETag。跨 Worker 实例通过 D1 短租约合并刷新，单实例合并并发请求，边缘缓存 5 分钟，浏览器缓存 1 分钟。GitHub 限流或故障时遵守 Retry-After / X-RateLimit-Reset 并继续提供上次成功的列表；空结果和冷启动失败也记录一小时的刷新间隔，不会由不同用户重复拉取。客户端不能指定仓库或强制刷新上游。
 
 可选地为实际部署的 Worker 设置 `GITHUB_RELEASE_TOKEN` secret，提高 GitHub API 配额；公开仓库读取无需 token。token 仅在 Worker 使用，不进入浏览器或响应。公开和商业部署复用相同下载组件、缓存实现及 `0002_release_cache.sql` 迁移。

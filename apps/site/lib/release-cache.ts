@@ -7,7 +7,7 @@ import {
 } from "./releases";
 
 const key = "github-releases:" + releaseRepository;
-const refreshSeconds = 15 * 60;
+const refreshSeconds = 60 * 60;
 export interface ReleaseRow {
   body: string | null;
   etag: string | null;
@@ -36,9 +36,9 @@ export class D1ReleaseStore implements ReleaseStore {
   async acquire(now: number, token: string): Promise<boolean> {
     const row = await this.db
       .prepare(
-        "UPDATE release_cache SET lease_until = ?, lease_token = ? WHERE id = ? AND refresh_after <= ? AND lease_until <= ? RETURNING id",
+        "UPDATE release_cache SET lease_until = ?, lease_token = ?, refresh_after = ? WHERE id = ? AND refresh_after <= ? AND lease_until <= ? RETURNING id",
       )
-      .bind(now + 20, token, key, now, now)
+      .bind(now + 20, token, now + refreshSeconds, key, now, now)
       .first();
     return !!row;
   }
@@ -62,7 +62,7 @@ function retryTime(response: Response | null, now: number): number {
   // Back off even for upstream 5xx/network failures; rate-limit headers win.
   return Math.ceil(
     Math.max(
-      now + 5 * 60,
+      now + refreshSeconds,
       Number.isFinite(delay) ? delay : 0,
       Number.isFinite(reset) ? reset : 0,
     ),
@@ -71,23 +71,26 @@ function retryTime(response: Response | null, now: number): number {
 export class ReleaseService {
   private inFlight: Promise<ReleaseCatalog> | null = null;
   private cached: { until: number; value: ReleaseCatalog } | null = null;
+  private refreshing: Promise<ReleaseCatalog> | null = null;
   constructor(
     private store: ReleaseStore,
     private fetcher: typeof fetch = fetch,
     private clock: () => number = () => Math.floor(Date.now() / 1000),
     private token?: string,
   ) {}
-  get(): Promise<ReleaseCatalog> {
+  get(
+    waitUntil?: (task: Promise<ReleaseCatalog>) => void,
+  ): Promise<ReleaseCatalog> {
     const now = this.clock();
-    if (this.cached && now < this.cached.until)
+    if (this.cached && now < this.cached.until) {
+      if (this.refreshing && waitUntil) waitUntil(this.refreshing);
       return Promise.resolve(this.cached.value);
+    }
     if (this.inFlight) return this.inFlight;
-    this.inFlight = this.load()
+    this.inFlight = this.load(waitUntil)
       .then((value) => {
-        this.cached = {
-          until: this.clock() + (value.checkedAt ? 60 : 5),
-          value,
-        };
+        this.remember(value);
+
         return value;
       })
       .finally(() => {
@@ -95,9 +98,41 @@ export class ReleaseService {
       });
     return this.inFlight;
   }
-  private async load(): Promise<ReleaseCatalog> {
+  private remember(value: ReleaseCatalog) {
+    // A fast background refresh may complete before the stale read settles.
+    if (
+      this.cached?.value.checkedAt &&
+      (!value.checkedAt || value.checkedAt < this.cached.value.checkedAt)
+    )
+      return;
+    this.cached = { until: this.clock() + (value.checkedAt ? 60 : 5), value };
+  }
+  private async load(
+    waitUntil?: (task: Promise<ReleaseCatalog>) => void,
+  ): Promise<ReleaseCatalog> {
     const now = this.clock();
-    let row = await this.store.read();
+    const row = await this.store.read();
+    if (now < row.refresh_after) return this.catalog(row, now);
+    const task = this.refresh(row, now);
+    if (row.body === null) return task; // Only the initial cache fill blocks.
+    // Stale-while-revalidate: a cached catalogue is always returned first.
+    if (waitUntil) waitUntil(task);
+    else void task.catch(() => {});
+    return this.catalog(row, now);
+  }
+  private refresh(row: ReleaseRow, now: number): Promise<ReleaseCatalog> {
+    if (this.refreshing) return this.refreshing;
+    this.refreshing = this.update(row, now)
+      .then((value) => {
+        this.remember(value);
+        return value;
+      })
+      .finally(() => {
+        this.refreshing = null;
+      });
+    return this.refreshing;
+  }
+  private async update(row: ReleaseRow, now: number): Promise<ReleaseCatalog> {
     if (now >= row.refresh_after) {
       const lease = crypto.randomUUID();
       if (await this.store.acquire(now, lease)) {
@@ -118,7 +153,7 @@ export class ReleaseService {
             row = {
               ...row,
               checked_at: now,
-              refresh_after: now + (row.body === "null" ? 60 : refreshSeconds),
+              refresh_after: now + refreshSeconds,
             };
           } else {
             if (!response.ok) throw new Error("GitHub releases unavailable");
@@ -127,7 +162,7 @@ export class ReleaseService {
               body: JSON.stringify(release),
               etag: response.headers.get("etag"),
               checked_at: now,
-              refresh_after: now + (release ? refreshSeconds : 60),
+              refresh_after: now + refreshSeconds,
             };
           }
         } catch {
@@ -139,6 +174,9 @@ export class ReleaseService {
         row = await this.store.read();
       }
     }
+    return this.catalog(row, now);
+  }
+  private catalog(row: ReleaseRow, now: number): ReleaseCatalog {
     return {
       release: row.body
         ? (JSON.parse(row.body) as ReleaseVersion | null)
@@ -180,19 +218,36 @@ export async function handleReleaseCatalog(
     env.GITHUB_RELEASE_TOKEN,
   );
   try {
-    const value = await service.get();
-    const response = Response.json(value, {
-      headers: {
-        "Cache-Control": value.release
-          ? "public, max-age=60, s-maxage=300, stale-while-revalidate=600, stale-if-error=86400"
-          : value.checkedAt
-            ? "public, max-age=30, s-maxage=30"
-            : "public, max-age=5, s-maxage=5",
-        "X-Content-Type-Options": "nosniff",
-      },
+    let background: Promise<ReleaseCatalog> | undefined;
+    const value = await service.get((task) => {
+      background = task;
+      ctx.waitUntil(task);
     });
-    if (edge)
-      ctx.waitUntil(edge.put(cacheKey, response.clone()).catch(() => {}));
+    const makeResponse = (value: ReleaseCatalog) =>
+      Response.json(value, {
+        headers: {
+          "Cache-Control": value.release
+            ? "public, max-age=60, s-maxage=300, stale-while-revalidate=600, stale-if-error=86400"
+            : value.checkedAt
+              ? "public, max-age=30, s-maxage=30"
+              : "public, max-age=5, s-maxage=5",
+          "X-Content-Type-Options": "nosniff",
+        },
+      });
+    const response = makeResponse(value);
+    if (edge) {
+      const write = edge.put(cacheKey, response.clone()).catch(() => {});
+      ctx.waitUntil(write);
+      if (background)
+        ctx.waitUntil(
+          background
+            .then(async (fresh) => {
+              await write;
+              await edge.put(cacheKey, makeResponse(fresh));
+            })
+            .catch(() => {}),
+        );
+    }
     return request.method === "HEAD" ? new Response(null, response) : response;
   } catch {
     return Response.json(

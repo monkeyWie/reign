@@ -49,6 +49,7 @@ class MemoryStore implements ReleaseStore {
     if (this.row.refresh_after > now || this.until > now) return false;
     this.until = now + 20;
     this.token = token;
+    this.row.refresh_after = now + 3600;
     return true;
   }
   async save(token: string, row: ReleaseRow) {
@@ -128,7 +129,11 @@ test("ETag revalidation refreshes the shared snapshot without redownloading meta
     () => now,
   );
   await service.get();
-  now += 901;
+  now += 3601;
+  const tasks: Promise<unknown>[] = [];
+  const stale = await service.get((task) => tasks.push(task));
+  assert.equal(stale.stale, true);
+  await Promise.all(tasks);
   const next = await service.get();
   assert.equal(count, 2);
   assert.equal(next.stale, false);
@@ -148,19 +153,21 @@ test("429 respects GitHub's reset time and serves the last working downloads thr
             {},
             {
               status: 429,
-              headers: { "x-ratelimit-reset": "15000", "retry-after": "120" },
+              headers: { "x-ratelimit-reset": "20000", "retry-after": "120" },
             },
           );
     },
     () => now,
   );
   await service.get();
-  now = 11000;
-  assert.equal((await service.get()).stale, true);
   now = 14000;
+  const tasks: Promise<unknown>[] = [];
+  assert.equal((await service.get((task) => tasks.push(task))).stale, true);
+  await Promise.all(tasks);
+  now = 17000;
   assert.equal((await service.get()).release?.version, "0.1.0-rc.1");
   assert.equal(requests, 2);
-  assert.equal(store.row.refresh_after, 15000);
+  assert.equal(store.row.refresh_after, 20000);
 });
 test("network and malformed-response failures keep a cached release, cold failures are negatively cached", async () => {
   for (const fail of [
@@ -227,7 +234,8 @@ test("actual SQLite schema enforces leases and rejects stale lease writers", asy
   assert.equal((await store.read()).body, null);
   assert.equal(await store.acquire(10000, "first"), true);
   assert.equal(await store.acquire(10001, "other"), false);
-  assert.equal(await store.acquire(10021, "newer"), true);
+  assert.equal(await store.acquire(10021, "newer"), false);
+  assert.equal(await store.acquire(13601, "newer"), true);
   await store.save("first", {
     body: "old",
     etag: null,
@@ -238,10 +246,71 @@ test("actual SQLite schema enforces leases and rejects stale lease writers", asy
   await store.save("newer", {
     body: "new",
     etag: '"etag"',
-    checked_at: 10021,
+    checked_at: 13601,
     refresh_after: 20000,
   });
   assert.equal((await store.read()).body, "new");
-  assert.equal(await store.acquire(10022, "extra"), false);
+  assert.equal(await store.acquire(13602, "extra"), false);
   db.close();
+});
+
+test("persistent snapshots never block on GitHub; attempts are globally spaced by at least an hour", async () => {
+  const store = new MemoryStore();
+  let now = 10000,
+    requests = 0;
+  let releaseGate!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    releaseGate = resolve;
+  });
+  const service = new ReleaseService(
+    store,
+    async () => {
+      requests++;
+      if (requests > 1) await gate;
+      return Response.json([fixture(requests === 1 ? "0.1.0" : "0.2.0")]);
+    },
+    () => now,
+  );
+  assert.equal((await service.get()).release?.version, "0.1.0");
+  now = 13599;
+  for (let i = 0; i < 100; i++)
+    assert.equal(
+      (
+        await new ReleaseService(
+          store,
+          async () => {
+            throw Error("must not fetch before one hour");
+          },
+          () => now,
+        ).get()
+      ).release?.version,
+      "0.1.0",
+    );
+  assert.equal(requests, 1);
+  now = 13601;
+  const tasks: Promise<unknown>[] = [];
+  // The upstream gate stays closed: a stale cached response must still resolve.
+  const stale = await service.get((task) => tasks.push(task));
+  assert.equal(stale.release?.version, "0.1.0");
+  assert.equal(stale.stale, true);
+  assert.equal(tasks.length, 1);
+  releaseGate();
+  await Promise.all(tasks);
+  assert.equal((await service.get()).release?.version, "0.2.0");
+  assert.equal(requests, 2);
+});
+
+test("cold-cache failures do not retry from new isolates within one hour", async () => {
+  const store = new MemoryStore();
+  let requests = 0;
+  const fetcher: typeof fetch = async () => {
+    requests++;
+    return new Response(null, { status: 503 });
+  };
+  await new ReleaseService(store, fetcher, () => 10000).get();
+  for (const now of [10001, 10300, 12000, 13599])
+    await new ReleaseService(store, fetcher, () => now).get();
+  assert.equal(requests, 1);
+  await new ReleaseService(store, fetcher, () => 13600).get();
+  assert.equal(requests, 2);
 });
