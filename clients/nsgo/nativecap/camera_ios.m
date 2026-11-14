@@ -133,3 +133,6 @@ char *ras_device_name(void) {
     if([NSThread isMainThread]) read(); else dispatch_sync(dispatch_get_main_queue(),read);
     return name;
 }
+
+char *ras_timezone_name(void) { return strdup([NSTimeZone localTimeZone].name.UTF8String); }
+int ras_timezone_offset(void) { return (int)[[NSTimeZone localTimeZone] secondsFromGMT]; }

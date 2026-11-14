@@ -172,6 +172,19 @@ func displayText(m Message) string {
 	if m.Role != "user" || len(m.Attachments) == 0 {
 		return body
 	}
+	// Older cached transcripts may contain a provider's synthetic image marker.
+	// Remove only trailing markers backed by actual image attachments.
+	for _, a := range m.Attachments {
+		if str(a, "kind") == "image" {
+			trimmed := strings.TrimSpace(body)
+			for _, marker := range []string{"[localImage]", "[image]"} {
+				if strings.HasSuffix(trimmed, marker) {
+					body = strings.TrimSpace(strings.TrimSuffix(trimmed, marker))
+					break
+				}
+			}
+		}
+	}
 	sources := map[string]bool{}
 	for _, a := range m.Attachments {
 		sources[str(a, "source")] = true
@@ -208,7 +221,7 @@ func displayText(m Message) string {
 
 func messageCopyText(m Message) string {
 	if m.Role == "user" {
-		return messagecontent.PlainText(messagecontent.Parse(m.Text))
+		return messagecontent.PlainText(messagecontent.Parse(displayText(m)))
 	}
 	return m.Text
 }

@@ -17,6 +17,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/monkeyWie/reignhub/internal/connectivity"
+	"github.com/monkeyWie/reignhub/internal/control"
 )
 
 type Object = map[string]any
@@ -245,6 +246,7 @@ func Connect(ctx context.Context, p Pairing) (*Client, error) {
 func (c *Client) keepRelayAlive() {
 	tick := time.NewTicker(25 * time.Second)
 	defer tick.Stop()
+	lastTick := time.Now()
 	for {
 		select {
 		case <-c.ctx.Done():
@@ -252,6 +254,10 @@ func (c *Client) keepRelayAlive() {
 		case <-c.relayDone:
 			return
 		case <-tick.C:
+			if time.Since(lastTick) > 45*time.Second {
+				c.relayBeat.Store(time.Now().UnixNano())
+			}
+			lastTick = time.Now()
 			if time.Since(time.Unix(0, c.relayBeat.Load())) > 85*time.Second {
 				c.dataWS.CloseNow()
 				return
@@ -302,30 +308,76 @@ func (c *Client) relayAvailable() bool {
 		return true
 	}
 }
+
+func (c *Client) recoveringICE() bool {
+	c.mu.Lock()
+	pc := c.pc
+	c.mu.Unlock()
+	p, ok := pc.(interface{ Recovering() bool })
+	return ok && p.Recovering()
+}
+
+// Resume probes the original authenticated data path without re-pairing or
+// replaying any command. A brief ICE interruption can heal on this same peer.
+func (c *Client) Resume(ctx context.Context) error {
+	tick := time.NewTicker(100 * time.Millisecond)
+	defer tick.Stop()
+	for c.Path() == "Disconnected" {
+		if !c.recoveringICE() {
+			return errors.New("连接已断开")
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-c.ctx.Done():
+			return errors.New("连接已断开")
+		case <-tick.C:
+		}
+	}
+	_, err := c.Call(ctx, Object{"method": "network"})
+	return err
+}
+
 func (c *Client) watchPaths() {
 	tick := time.NewTicker(time.Second)
 	defer tick.Stop()
+	var lost time.Time
 	for {
 		select {
 		case <-c.ctx.Done():
 			return
 		case <-tick.C:
-			if c.Path() == "Disconnected" {
+			if c.Path() != "Disconnected" {
+				lost = time.Time{}
+				continue
+			}
+			if lost.IsZero() {
+				lost = time.Now()
+			}
+			// ICE disconnected is transient: allow the existing DTLS/SCTP
+			// channel to recover before destroying it and its encryption state.
+			if !c.recoveringICE() || time.Since(lost) >= 20*time.Second {
 				c.Close()
 				return
 			}
 		}
 	}
 }
+
 func (c *Client) keepAlive() {
 	tick := time.NewTicker(25 * time.Second)
 	defer tick.Stop()
 	pulses := 0
+	lastTick := time.Now()
 	for {
 		select {
 		case <-c.ctx.Done():
 			return
 		case <-tick.C:
+			if time.Since(lastTick) > 45*time.Second {
+				c.heartbeat.Store(time.Now().UnixNano())
+			}
+			lastTick = time.Now()
 			if time.Since(time.Unix(0, c.heartbeat.Load())) > 85*time.Second {
 				c.Close()
 				return
@@ -385,6 +437,7 @@ func (c *Client) readLoop() {
 	for {
 		_, raw, e := c.ws.Read(c.ctx)
 		if e != nil {
+			c.note("signal-lost", "signal", "信令连接已断开", e.Error(), "warning")
 			return
 		}
 		c.heartbeat.Store(time.Now().UnixNano())
@@ -534,7 +587,7 @@ func (c *Client) Call(ctx context.Context, request Object) (any, error) {
 	raw, _ := json.Marshal(r)
 	cacheKey := string(raw)
 	method, _ := r["method"].(string)
-	read := method == "providers" || method == "transcript" || method == "sessions" || method == "models" || method == "approvals" || method == "network"
+	read := control.ReadOnly(method)
 	c.mu.Lock()
 	previous := c.cache[cacheKey]
 	c.mu.Unlock()
@@ -566,8 +619,14 @@ func (c *Client) Call(ctx context.Context, request Object) (any, error) {
 	select {
 	case response = <-pending:
 	case <-ctx.Done():
-		return nil, errors.New("结果尚未确认，请刷新后再决定是否重试")
+		if read || method == "watch" || method == "attachment.read" {
+			return nil, ctx.Err()
+		}
+		return nil, fmt.Errorf("结果尚未确认，请刷新后再决定是否重试: %w", ctx.Err())
 	case <-c.ctx.Done():
+		if read {
+			return nil, errors.New("连接已断开，请重新连接")
+		}
 		return nil, errors.New("连接已断开，指令结果尚未确认")
 	}
 	if e, _ := response["error"].(string); e != "" {

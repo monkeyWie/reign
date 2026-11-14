@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"syscall/js"
 	"testing"
 	"time"
 )
@@ -87,6 +88,22 @@ func browserDirectInterop(t *testing.T) {
 	defer c.Close()
 	if c.dataWS != nil || !strings.HasPrefix(c.Path(), "P2P") {
 		t.Fatal("free connection did not select direct-only path", c.Path())
+	}
+	// Simulate browser connection-state events without changing the underlying
+	// local fixture sockets. Reconnection must restore the same open DataChannel.
+	pconn := c.pc.(*jsPeer)
+	original := c.id
+	js.Global().Get("Object").Call("defineProperty", pconn.pc, "connectionState", map[string]any{"value": "disconnected", "configurable": true})
+	pconn.pc.Call("dispatchEvent", js.Global().Get("Event").New("connectionstatechange"))
+	time.Sleep(1200 * time.Millisecond)
+	if c.ctx.Err() != nil {
+		t.Fatal("temporary ICE interruption destroyed peer")
+	}
+	js.Global().Get("Object").Call("defineProperty", pconn.pc, "connectionState", map[string]any{"value": "connected", "configurable": true})
+	pconn.pc.Call("dispatchEvent", js.Global().Get("Event").New("connectionstatechange"))
+	js.Global().Get("Reflect").Call("deleteProperty", pconn.pc, "connectionState")
+	if err := c.Resume(ctx); err != nil || c.id != original || !strings.HasPrefix(c.Path(), "P2P") {
+		t.Fatalf("same-peer recovery failed: %s, %v", c.Path(), err)
 	}
 	if _, err := c.Call(ctx, Object{"method": "sessions", "provider": "fixture"}); err != nil {
 		t.Fatal(err)

@@ -57,6 +57,9 @@ type State struct {
 	suspended                                               bool
 	pollCancel                                              context.CancelFunc
 	pollGeneration                                          uint64
+	presencePolling                                         bool
+	presenceGeneration                                      uint64
+	timezone                                                *time.Location
 	timeline                                                *core.Ref
 	pendingSends                                            map[string]string
 	streamKey, streamEpoch                                  string
@@ -110,6 +113,7 @@ func (s *State) call(method string, p Object, done func(any)) {
 }
 func (s *State) initialize() {
 	s.observeLifecycle()
+	s.refreshTimezone()
 	resolveDeviceName(s.cx, func(name string) { s.clientName = name; s.changed() })
 	s.async(func(ctx context.Context) (any, error) {
 		if s.api.CanHost() {
@@ -154,28 +158,30 @@ func (s *State) initialize() {
 }
 
 type pollResult struct {
-	devices, local, providers, sessions []Object
-	host                                Object
-	target                              string
+	local, providers, sessions []Object
+	host                       Object
+	target                     string
 }
 
 func (s *State) poll() {
-	if !s.ready || s.polling || s.suspended || s.ctx.Err() != nil {
+	if !s.ready || s.suspended || s.ctx.Err() != nil {
+		return
+	}
+	s.pollPresence()
+	if s.polling {
 		return
 	}
 	s.polling = true
 	s.pollGeneration++
 	generation := s.pollGeneration
-	ctx, cancel := context.WithTimeout(s.ctx, 12*time.Second)
+	ctx, cancel := context.WithCancel(s.ctx)
 	s.pollCancel = cancel
 	target := s.target
 	go func() {
 		defer cancel()
 		r := pollResult{target: target}
-		v, err := s.api.Call(ctx, "client.list", nil, "", nil)
-		if err == nil {
-			r.devices = objects(v)
-		}
+		var v any
+		var err error
 		if s.api.CanHost() && err == nil {
 			v, err = s.api.Call(ctx, "host.info", nil, "", nil)
 			if err == nil {
@@ -216,10 +222,6 @@ func (s *State) poll() {
 			if s.ctx.Err() != nil {
 				return
 			}
-			// Presence must still refresh if a remote catalogue request fails.
-			if r.devices != nil {
-				s.devices = r.devices
-			}
 			if r.host != nil {
 				s.host = r.host
 			}
@@ -236,6 +238,35 @@ func (s *State) poll() {
 			}
 			s.changed()
 			s.promptHost()
+			s.autoReconnect()
+		})
+	}()
+}
+
+// Presence is local transport state. Never block reconnect detection behind a
+// slow transcript/catalogue transfer, and never impose a business-read deadline.
+func (s *State) pollPresence() {
+	if s.presencePolling {
+		return
+	}
+	s.presencePolling = true
+	s.presenceGeneration++
+	generation := s.presenceGeneration
+	go func() {
+		v, err := s.api.Call(s.ctx, "client.list", nil, "", nil)
+		s.cx.Post(func() {
+			if generation != s.presenceGeneration {
+				return
+			}
+			s.presencePolling = false
+			if s.ctx.Err() != nil || s.suspended {
+				return
+			}
+			s.setConnectionIssue("", "presence", err)
+			if err == nil {
+				s.devices = objects(v)
+			}
+			s.changed()
 			s.autoReconnect()
 		})
 	}()

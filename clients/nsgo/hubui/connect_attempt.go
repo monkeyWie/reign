@@ -277,7 +277,7 @@ func (s *State) connectionPanel(cx *core.Scope, id string, a *connectAttempt, in
 				}
 				title := label(cx, v.Message, 12, false)
 				title.TestID = "connect-stage"
-				children := []core.Node{row(glyph(cx, icon, 12), core.View{Style: fill, Children: []core.Node{title}}, label(cx, v.at.Format("15:04:05"), 10, true))}
+				children := []core.Node{row(glyph(cx, icon, 12), core.View{Style: fill, Children: []core.Node{title}}, label(cx, s.localTime(v.at).Format("15:04:05"), 10, true))}
 				if v.Detail != "" {
 					detail := label(cx, v.Detail, 11, true)
 					detail.Selectable = core.SelectableOn

@@ -448,6 +448,11 @@ func (w *wire) setup() (*webrtc.PeerConnection, error) {
 		if s == webrtc.PeerConnectionStateFailed {
 			w.progress("ice-check", "udp", "UDP 直连暂未建立", "继续使用可用的 TCP 直连或中继通道", "warning")
 		}
+		if s == webrtc.PeerConnectionStateConnected {
+			w.mu.Lock()
+			w.direct = w.dc != nil && w.dc.ReadyState() == webrtc.DataChannelStateOpen
+			w.mu.Unlock()
+		}
 		if s == webrtc.PeerConnectionStateFailed || s == webrtc.PeerConnectionStateClosed || s == webrtc.PeerConnectionStateDisconnected {
 			w.mu.Lock()
 			w.direct = false

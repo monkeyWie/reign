@@ -111,7 +111,7 @@ func (h *Hub) List() ([]map[string]any, error) {
 	return r, nil
 }
 func (h *Hub) Connect(ctx context.Context, service, code, public, password, name string, remember, relayOnly bool) (Saved, error) {
-	return h.connect(ctx, service, code, public, password, name, remember, relayOnly, false)
+	return h.connect(ctx, service, code, public, password, name, remember, relayOnly, false, nil)
 }
 
 // Reconnect only reuses an existing valid grant. It never requests new approval
@@ -121,10 +121,35 @@ func (h *Hub) Reconnect(ctx context.Context, id string) (Saved, error) {
 	if err := h.DB.Get("saved:"+id, &s); err != nil {
 		return s, err
 	}
-	return h.connect(ctx, s.Service, s.ConnectionID, s.Public, "", "", true, s.RelayOnly, true)
+	if s.ReconnectDisabled || s.Key == "" || (s.Expires > 0 && s.Expires <= time.Now().Unix()) {
+		return s, fmt.Errorf("自动重连已停止或授权已过期，请手动连接")
+	}
+	h.mu.Lock()
+	old := h.connections[id]
+	h.mu.Unlock()
+	if old != nil {
+		connectivity.Report(ctx, "resume", "正在恢复原有连接", connectivity.StageTimeout)
+		probe, stop := context.WithTimeout(ctx, 8*time.Second)
+		err := old.Resume(probe)
+		stop()
+		if err == nil {
+			return s, nil
+		}
+		if ctx.Err() != nil {
+			return s, ctx.Err()
+		}
+		_ = old.Close()
+	}
+	connectivity.Report(ctx, "resume", "正在复用设备配对与连接配置", connectivity.StageTimeout)
+	result, err := h.connect(ctx, s.Service, s.ConnectionID, s.Public, "", "", true, s.RelayOnly, true, &s)
+	if err == nil || ctx.Err() != nil {
+		return result, err
+	}
+	connectivity.Note(ctx, "resume-fallback", "retry", "快速恢复未成功，重新查找设备", err.Error(), "warning")
+	return h.connect(ctx, s.Service, s.ConnectionID, s.Public, "", "", true, s.RelayOnly, true, nil)
 }
 
-func (h *Hub) connect(ctx context.Context, service, code, public, password, name string, remember, relayOnly, reconnectOnly bool) (Saved, error) {
+func (h *Hub) connect(ctx context.Context, service, code, public, password, name string, remember, relayOnly, reconnectOnly bool, cached *Saved) (Saved, error) {
 	ctx, cancelAttempt := context.WithCancel(ctx)
 	defer cancelAttempt()
 	service, e := device.ServiceURL(service)
@@ -140,9 +165,14 @@ func (h *Hub) connect(ctx context.Context, service, code, public, password, name
 		Device deviceservice.Device
 		Online bool
 	}
-	connectivity.Report(ctx, "resolve", "正在查找设备并检查在线状态", connectivity.StageTimeout)
-	if e = device.Post(ctx, service, i.Token, "/p2p/devices/resolve", map[string]any{"connectionId": code}, &r); e != nil {
-		return Saved{}, e
+	if cached != nil {
+		r.Device = deviceservice.Device{ID: cached.Host, ConnectionID: cached.ConnectionID, Public: cached.Public, Name: cached.Name}
+		r.Online = true // The new signal lease and encrypted handshake verify liveness and authorization.
+	} else {
+		connectivity.Report(ctx, "resolve", "正在查找设备并检查在线状态", connectivity.StageTimeout)
+		if e = device.Post(ctx, service, i.Token, "/p2p/devices/resolve", map[string]any{"connectionId": code}, &r); e != nil {
+			return Saved{}, e
+		}
 	}
 	if !r.Online {
 		return Saved{}, fmt.Errorf("被控设备离线，请在电脑上打开 ReignHub，并确认两端使用相同的服务地址")
@@ -227,7 +257,19 @@ func (h *Hub) connect(ctx context.Context, service, code, public, password, name
 	opts := remote.Options{RelayOnly: relayOnly}
 	if !relayOnly {
 		connectivity.Report(ctx, "network", "授权已通过，正在获取直连配置", connectivity.StageTimeout)
-		policy := device.Network(connectCtx, service)
+		var cache struct {
+			Policy connectivity.Policy
+			At     time.Time
+		}
+		_ = h.DB.Get("network:"+service, &cache)
+		policy := cache.Policy
+		if cached == nil || cache.At.IsZero() || time.Since(cache.At) > 10*time.Minute {
+			policy = device.Network(connectCtx, service)
+			cache.Policy, cache.At = policy, time.Now()
+			if err := h.DB.Put("network:"+service, cache); err != nil {
+				return s, err
+			}
+		}
 		opts.PublicSTUN, opts.SelfSTUN = policy.PublicSTUN, policy.SelfSTUN
 		opts.ICEServers = policy.Servers()
 		opts.TCPSTUN = policy.TCPSTUN

@@ -189,3 +189,52 @@ func TestReadTimeoutsDoNotReconnectAHealthyDevice(t *testing.T) {
 	app.Post(func() { s.cx.Post(func() { s.devices[0]["connected"] = false; s.autoReconnect() }) })
 	app.WaitUntil(time.Second, func() bool { return f.reconnects.Load() == 1 })
 }
+
+type slowCatalogueFixture struct {
+	*connectionFixture
+	started chan bool
+}
+
+func (f *slowCatalogueFixture) Call(ctx context.Context, method string, p Object, target string, r Object) (any, error) {
+	if method == "client.sync" {
+		_, deadline := ctx.Deadline()
+		select {
+		case f.started <- deadline:
+		default:
+		}
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	return f.connectionFixture.Call(ctx, method, p, target, r)
+}
+func TestSlowCatalogueHasNoDeadlineAndDoesNotBlockPresence(t *testing.T) {
+	f := &slowCatalogueFixture{connectionFixture: &connectionFixture{demoAPI: newDemoAPI()}, started: make(chan bool, 1)}
+	f.autoReconnect.Store(true)
+	app, s := conversationFixture(t, f, 390, Object{}, true)
+	app.Post(func() { s.cx.Post(func() { s.ready = true; s.connection("demo-device").established = true; s.poll() }) })
+	app.WaitUntil(time.Second, func() bool {
+		select {
+		case deadline := <-f.started:
+			if deadline {
+				t.Fatal("catalogue has fixed deadline")
+			}
+			return true
+		default:
+			return false
+		}
+	})
+	f.offline.Store(true)
+	// The catalogue remains blocked. A second local presence read must still
+	// detect the lost transport and start recovery.
+	app.Post(func() { s.cx.Post(s.poll) })
+	app.WaitUntil(time.Second, func() bool { return f.reconnects.Load() == 1 })
+	app.Post(func() { s.cx.Post(func() { s.setBackground(true) }) })
+}
+func TestReconnectStatusShowsAnimatedIndicator(t *testing.T) {
+	f := &connectionFixture{demoAPI: newDemoAPI()}
+	app, s := conversationFixture(t, f, 390, Object{}, true)
+	app.Post(func() { s.cx.Post(func() { s.connection("demo-device").reconnecting = true; s.changed() }) })
+	app.WaitFor("id:connection-retrying", time.Second)
+	app.Find("role:button 正在重新连接")
+	app.Screenshot("phone-connection-retrying")
+}

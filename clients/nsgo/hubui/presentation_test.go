@@ -113,3 +113,22 @@ func TestStaleSnapshotsDoNotEraseStreamedTail(t *testing.T) {
 		t.Fatal("final authoritative snapshot was not applied")
 	}
 }
+
+func TestImageMarkersAreNotUserMessageText(t *testing.T) {
+	m := Message{Role: "user", Text: "看看图片\n[localImage]\n[localImage]\n", Attachments: []Object{{"kind": "image"}, {"kind": "image"}}}
+	if got := displayText(m); got != "看看图片" {
+		t.Fatal(got)
+	}
+	if got := messageCopyText(m); got != "看看图片" {
+		t.Fatal(got)
+	}
+	m.Attachments = nil
+	if got := displayText(m); got != m.Text {
+		t.Fatal("removed literal text without attachment")
+	}
+	m.Attachments = []Object{{"kind": "image"}}
+	m.Text = "解释 [localImage] 的意思，看看这张图。"
+	if got := displayText(m); got != m.Text {
+		t.Fatal("removed inline literal text")
+	}
+}

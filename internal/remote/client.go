@@ -12,6 +12,7 @@ import (
 	"github.com/monkeyWie/reignhub/internal/connectivity"
 	"github.com/monkeyWie/reignhub/internal/control"
 	"github.com/monkeyWie/reignhub/internal/relay"
+	"github.com/pion/webrtc/v4"
 )
 
 type Client struct {
@@ -68,6 +69,7 @@ func Connect(ctx context.Context, p Pairing, opts Options) (*Client, error) {
 		for {
 			_, raw, err := ws.Read(w.ctx)
 			if err != nil {
+				w.progress("signal-lost", "signal", "信令连接已断开", err.Error(), "warning")
 				return
 			}
 			var f relay.Frame
@@ -117,21 +119,61 @@ func Connect(ctx context.Context, p Pairing, opts Options) (*Client, error) {
 
 // Business RPCs have no total deadline. End their wait when every usable data
 // path has actually gone away, even if the signaling socket remains open.
+func (c *Client) recoveringICE() bool {
+	c.wire.mu.Lock()
+	pc, dc := c.wire.pc, c.wire.dc
+	c.wire.mu.Unlock()
+	return pc != nil && dc != nil && dc.ReadyState() == webrtc.DataChannelStateOpen && pc.ConnectionState() == webrtc.PeerConnectionStateDisconnected
+}
+
+// Resume probes the original authenticated data path without re-pairing or
+// replaying any command. A brief ICE interruption can heal on this same peer.
+func (c *Client) Resume(ctx context.Context) error {
+	tick := time.NewTicker(100 * time.Millisecond)
+	defer tick.Stop()
+	for c.Path() == "Disconnected" {
+		if !c.recoveringICE() {
+			return errors.New("连接已断开")
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-c.done:
+			return errors.New("连接已断开")
+		case <-tick.C:
+		}
+	}
+	var statuses json.RawMessage
+	err := c.Call(ctx, control.Request{Method: "network"}, &statuses)
+	return err
+}
+
 func (c *Client) watchPaths() {
 	tick := time.NewTicker(time.Second)
 	defer tick.Stop()
+	var lost time.Time
 	for {
 		select {
 		case <-c.done:
 			return
 		case <-tick.C:
-			if c.Path() == "Disconnected" {
+			if c.Path() != "Disconnected" {
+				lost = time.Time{}
+				continue
+			}
+			if lost.IsZero() {
+				lost = time.Now()
+			}
+			// ICE disconnected is transient: allow the existing DTLS/SCTP
+			// channel to recover before destroying it and its encryption state.
+			if !c.recoveringICE() || time.Since(lost) >= 20*time.Second {
 				_ = c.Close()
 				return
 			}
 		}
 	}
 }
+
 func (c *Client) Path() string {
 	select {
 	case <-c.done:

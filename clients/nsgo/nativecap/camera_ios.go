@@ -26,6 +26,11 @@ type cameraView struct {
 
 func platformOptions() []nsgo.Option {
 	host := core.NewHost()
+	host.Handle("ras.timezone", func(call *core.HostCall) {
+		p := C.ras_timezone_name()
+		defer C.free(unsafe.Pointer(p))
+		call.Resolve(map[string]any{"name": C.GoString(p), "offsetSeconds": int(C.ras_timezone_offset())})
+	})
 	host.Handle("ras.device", func(call *core.HostCall) {
 		p := C.ras_device_name()
 		defer C.free(unsafe.Pointer(p))

@@ -99,18 +99,28 @@ func (s *State) connectionIndicator(cx *core.Scope, target func() string) core.N
 			s.connectionDetailTarget = id
 			s.dialog.Set("connection-status")
 		}).(core.View)
+		if s.connection(id).reconnecting {
+			node.Children = []core.Node{reconnectingGlyph(cx)}
+		}
 		node.Label = value[1]
 		node.Style.Padding = core.All(8)
 		baseStyle := node.StyleFunc
 		node.StyleFunc = func() core.Style {
 			st := baseStyle()
-			if s.connectionProblem(id) {
+			if s.connectionProblem(id) && !s.connection(id).reconnecting {
 				st.Color = core.RGB(0xd97706)
 			}
 			return st
 		}
 		return node
 	})
+}
+func reconnectingGlyph(cx *core.Scope) core.Node {
+	turn := core.NewAnimatedValue(cx, 0)
+	cx.StartAnimation(core.ValueKeyframes(turn, core.KeyframeTiming{Duration: time.Second, Iterations: core.Forever}, core.Stops(0, 360)...), nil)
+	return core.View{TestID: "connection-retrying", Style: core.Style{Width: core.Pt(16), Height: core.Pt(16)}, StyleFunc: func() core.Style {
+		return core.Style{Animated: &core.AnimatedStyle{Rotate: turn}}
+	}, Children: []core.Node{glyph(cx, lucide.RefreshCw, 16)}}
 }
 func (s *State) connectionDetails(id string) string {
 	h := s.connection(id)
@@ -244,6 +254,8 @@ func (s *State) setBackground(background bool) {
 			s.pollCancel()
 			s.pollCancel = nil
 		}
+		s.presenceGeneration++
+		s.presencePolling = false
 		s.pollGeneration++
 		s.polling = false
 		if s.watchCancel != nil {
@@ -257,7 +269,15 @@ func (s *State) setBackground(background bool) {
 	for id := range s.retrying {
 		delete(s.retrying, id)
 	}
+	s.refreshTimezone()
+	// A socket can look open after the OS suspended its network. Probe each
+	// previously connected device immediately instead of waiting for a heartbeat.
+	for _, d := range s.devices {
+		id := str(d, "id")
+		if s.connection(id).established && flag(d, "autoReconnect") {
+			s.reconnect(id, true)
+		}
+	}
 	s.startSessionWatch()
-	s.autoReconnect()
 	s.poll()
 }

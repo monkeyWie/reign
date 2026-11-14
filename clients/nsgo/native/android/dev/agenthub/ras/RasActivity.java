@@ -17,6 +17,13 @@ public final class RasActivity extends NsgoActivity {
         super.onCreate(state);
         NsgoView view = (NsgoView)((ViewGroup)findViewById(android.R.id.content)).getChildAt(0);
         view.registerComponent("ras.qr-camera", (context, events) -> new QrCamera(this, events));
+        view.handle("ras.timezone", (data, reply) -> {
+            java.util.TimeZone zone = java.util.TimeZone.getDefault();
+            HashMap<String,Object> result = new HashMap<>();
+            result.put("name", zone.getID());
+            result.put("offsetSeconds", zone.getOffset(System.currentTimeMillis()) / 1000);
+            reply.resolve(result);
+        });
         view.handle("ras.device", (data, reply) -> {
             String name = null;
             try { name = Settings.Global.getString(getContentResolver(), "device_name"); }

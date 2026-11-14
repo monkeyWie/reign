@@ -241,7 +241,7 @@ func normalizeTurn(raw json.RawMessage) provider.Turn {
 			for _, c := range content {
 				if c.Text != "" {
 					item.Text += c.Text + "\n"
-				} else {
+				} else if c.Type != "localImage" && c.Type != "image" {
 					item.Text += "[" + c.Type + "]\n"
 				}
 			}
@@ -289,7 +289,7 @@ func normalizeTurn(raw json.RawMessage) provider.Turn {
 			ms := *t.StartedAt * 1000
 			item.TimestampMS, item.TimestampSource = &ms, "turnStarted"
 		}
-		if strings.TrimSpace(item.Text) != "" || len(item.Activities) > 0 || item.Role == "reasoning" || item.Role == "assistant" {
+		if strings.TrimSpace(item.Text) != "" || len(item.Activities) > 0 || item.Role == "reasoning" || item.Role == "assistant" || (item.Role == "user" && len(i.Content) > 0) {
 			out.Items = append(out.Items, item)
 		}
 	}

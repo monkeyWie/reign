@@ -98,3 +98,10 @@ func TestActivitySnapshotsPreserveToolLifecycleAndStructuredActions(t *testing.T
 		}
 	}
 }
+
+func TestUserImageInputHasNoSyntheticTextMarker(t *testing.T) {
+	turn := normalizeTurn(json.RawMessage(`{"id":"turn","status":"inProgress","items":[{"id":"u","type":"userMessage","content":[{"type":"text","text":"看看图片"},{"type":"localImage","path":"/tmp/picture.png"},{"type":"image","url":"data:image/png;base64,AAAA"}]}]}`))
+	if len(turn.Items) != 1 || turn.Items[0].Text != "看看图片\n" {
+		t.Fatalf("image marker leaked: %+v", turn.Items)
+	}
+}

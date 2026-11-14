@@ -92,9 +92,13 @@ func newPeer(c *Client, urls []string) (result peer, err error) {
 		if state == "connecting" {
 			c.note("ice-check", "udp", "正在验证 WebRTC 直连路径", "", "running")
 		}
+		if state == "connected" && p.dc.Get("readyState").String() == "open" {
+			p.direct.Store(true)
+			c.note("path:webrtc", "direct", "WebRTC 直连已恢复", "复用已有加密数据通道", "success")
+		}
 		if state == "failed" || state == "disconnected" || state == "closed" {
 			p.direct.Store(false)
-			c.note("ice-check", "udp", "WebRTC 直连暂不可用", "尝试可用中继", "warning")
+			c.note("ice-check", "udp", "WebRTC 直连暂不可用", "connectionState="+state+" · iceConnectionState="+p.pc.Get("iceConnectionState").String(), "warning")
 		}
 	})
 	p.bind(p.dc, "onopen", func(js.Value) {
@@ -170,6 +174,9 @@ func (p *jsPeer) Signal(v Object) error {
 		}
 	}
 	return nil
+}
+func (p *jsPeer) Recovering() bool {
+	return !p.closed.Load() && p.dc.Get("readyState").String() == "open" && p.pc.Get("connectionState").String() == "disconnected"
 }
 func (p *jsPeer) Direct() bool { return p.direct.Load() && !p.closed.Load() }
 func (p *jsPeer) Send(b []byte) (err error) {

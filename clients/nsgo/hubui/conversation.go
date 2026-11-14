@@ -264,7 +264,7 @@ func (s *State) message(cx *core.Scope, get func() Message) core.Node {
 			if ts == 0 {
 				return "时间未知"
 			}
-			return time.UnixMilli(ts).Local().Format("15:04")
+			return s.localTime(time.UnixMilli(ts)).Format("15:04")
 		}, 11, true)}}
 	}})
 	return core.View{TestID: "message-" + m.ID, OnMouseEnter: func(core.MouseEvent) { hover.Set(true) }, OnMouseLeave: func(core.MouseEvent) { hover.Set(false) }, Style: core.Style{AlignItems: choose(user, core.AlignEnd, core.AlignStretch), Padding: core.Edges{Top: 10, Bottom: 10}, Width: core.Pct(100), MinWidth: core.Pt(0)}, Children: content}
