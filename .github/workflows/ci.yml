@@ -288,10 +288,29 @@ jobs:
             cat /tmp/reignhub-browser-fixture.log
             exit 1
           fi
-          go tool nsgo test -target web -env "AGENTHUB_NSGO_TEST_FIXTURE=$fixture_url" \
+          run_browser_test() {
+            for attempt in 1 2 3; do
+              if go tool nsgo test -target web "$@" > "$RUNNER_TEMP/nsgo-browser-check.log" 2>&1; then
+                cat "$RUNNER_TEMP/nsgo-browser-check.log"
+                return 0
+              fi
+              cat "$RUNNER_TEMP/nsgo-browser-check.log"
+              # Retry only Chromium failing before the test suite starts.
+              # Assertion failures and browser/runtime regressions still fail.
+              if ! python3 - "$RUNNER_TEMP/nsgo-browser-check.log" <<'PY'
+          import pathlib, sys
+          output = pathlib.Path(sys.argv[1]).read_text()
+          sys.exit(0 if "the browser did not open its DevTools port" in output and "built the tests" not in output else 1)
+          PY
+              then return 1; fi
+              sleep 2
+            done
+            return 1
+          }
+          run_browser_test -env "AGENTHUB_NSGO_TEST_FIXTURE=$fixture_url" \
             -run 'TestBrowserP2PAndRelayWithExistingHost|TestBrowserDirectWithoutRelay' ./browserclient
-          go tool nsgo test -target web \
-            -run 'TestDesktopNavigationAndDrafts|TestPhoneNavigation|TestComposerSubmit|TestWebNativePresentationParity|TestReconnectStatusShowsAnimatedIndicator|TestImageMarkersAreNotUserMessageText|TestMessageTimesUseControllerTimezone' ./hubui
+          run_browser_test \
+            -run 'TestDesktopNavigationAndDrafts|TestPhoneNavigation|TestComposerSubmit|TestWebNativePresentationParity|TestReconnectStatusShowsAnimatedIndicator|TestImageMarkersAreNotUserMessageText|TestMessageTimesUseControllerTimezone|TestResponsiveLayoutUsesWidthAcrossPlatforms|TestMobileHeaderOverlaysMessages' ./hubui
       - name: Browser diagnostics
         if: failure()
         run: |

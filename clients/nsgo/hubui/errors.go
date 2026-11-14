@@ -69,7 +69,7 @@ func sessionAccessHelp(raw string, failure *sessionOperationError) accessHelp {
 func (s *State) errorAtComposer() bool {
 	s.read()
 	f := s.failure
-	return s.error != "" && f != nil && f.Error() == s.error && s.selected != nil && f.target == s.target && f.provider == str(s.selected, "providerId") && f.session == str(s.selected, "id") && (s.width.Get() >= 1000 || s.narrowChat)
+	return s.error != "" && f != nil && f.Error() == s.error && s.selected != nil && f.target == s.target && f.provider == str(s.selected, "providerId") && f.session == str(s.selected, "id") && (s.width.Get() >= wideBreakpoint || s.narrowChat)
 }
 
 func (s *State) errorOverlay(cx *core.Scope, composer bool) core.Node {

@@ -154,9 +154,9 @@ func RootWithAPI(cx *core.Scope, api API, start bool) core.Node {
 		s.read()
 		width := s.width.Get()
 		mode := "wide"
-		if width < 650 {
+		if width < compactBreakpoint {
 			mode = "phone"
-		} else if width < 1000 {
+		} else if width < wideBreakpoint {
 			mode = "tablet"
 		}
 		if mode == "phone" {
@@ -170,11 +170,11 @@ func RootWithAPI(cx *core.Scope, api API, start bool) core.Node {
 		core.Dynamic(func(cx *core.Scope) core.Node {
 			_ = page.Get()
 			width := s.width.GetUntracked()
-			if width < 650 {
+			if width < compactBreakpoint {
 				return s.phonePages(cx)
 			}
 			nodes := []core.Node{s.navigation(cx, false)}
-			if width >= 650 {
+			if width >= compactBreakpoint {
 				nodes = append(nodes, s.resize(cx, true))
 			}
 			var body core.Node
@@ -184,7 +184,7 @@ func RootWithAPI(cx *core.Scope, api API, start bool) core.Node {
 				} else {
 					body = s.welcome(cx)
 				}
-			} else if width >= 1000 {
+			} else if width >= wideBreakpoint {
 				body = core.View{Style: fill.Merge(core.Style{Direction: core.Row}), Children: []core.Node{core.View{StyleFunc: func() core.Style {
 					return core.Style{Width: core.Pt(s.sessionWidth.Get()), MinHeight: core.Pt(0), MinWidth: core.Pt(0)}
 				}, Children: []core.Node{s.directory(cx)}}, s.resize(cx, false), s.conversation(cx, false)}}
@@ -364,7 +364,7 @@ func (s *State) directory(cx *core.Scope) core.Node {
 		c := palette(cx)
 		return core.Style{Background: c.muted.Faded(.25), Color: c.foreground}
 	}, Class: "dark:bg-zinc-950", Children: []core.Node{
-		core.View{Style: core.Style{Padding: core.Edges{Top: 20, Left: 18, Right: 12, Bottom: 6}}, Children: []core.Node{row(core.Show{When: func() bool { return s.width.Get() < 650 }, Then: func(cx *core.Scope) core.Node {
+		core.View{Style: core.Style{Padding: core.Edges{Top: 20, Left: 18, Right: 12, Bottom: 6}}, Children: []core.Node{row(core.Show{When: func() bool { return s.width.Get() < compactBreakpoint }, Then: func(cx *core.Scope) core.Node {
 			return button(cx, "back-devices", "设备", lucide.ArrowLeft, "ghost", s.backDevices)
 		}}, core.View{Style: fill, Children: []core.Node{singleLine(cx, func() string { s.read(); return deviceName(s.device()) }, 14, false), singleLine(cx, func() string { s.read(); return deviceStatus(s.device()) }, 11, true)}}, s.connectionIndicator(cx, func() string { return s.target }), button(cx, "refresh-sessions", "", lucide.RefreshCw, "ghost", s.poll))}},
 		core.View{Style: core.Style{Padding: core.Symmetric(6, 12)}, Children: []core.Node{leftButton(button(cx, "new-session", "新聊天", lucide.SquarePen, "ghost", func() { s.createDirectory = ""; s.dialog.Set("create") }))}},

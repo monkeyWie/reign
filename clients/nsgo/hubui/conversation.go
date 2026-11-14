@@ -19,7 +19,7 @@ func (s *State) conversation(cx *core.Scope, narrow bool) core.Node {
 		return core.View{Style: fill.Merge(core.Style{AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter}), Children: []core.Node{label(cx, "选择一个会话，或创建新会话", 14, true)}}
 	}
 	children := []core.Node{}
-	floatingHeader := isMobile(cx)
+	floatingHeader := s.width.GetUntracked() < wideBreakpoint
 	header := []core.Node{}
 	if narrow {
 		header = append(header, button(cx, "back-sessions", "", lucide.ArrowLeft, "ghost", s.backSessions))
@@ -107,11 +107,11 @@ func (s *State) conversation(cx *core.Scope, narrow bool) core.Node {
 			return button(cx, "load-older", "加载更早消息", nil, "ghost", s.older)
 		}}}},
 	}
-	timelineChildren := []core.Node{list, s.messageNavigation(cx, rows, listRef, viewport, tailCount), core.Show{When: func() bool { return !atBottom.Get() }, Then: func(cx *core.Scope) core.Node {
+	timelineChildren := []core.Node{list, core.Show{When: func() bool { return !s.narrowLayout() }, Then: func(cx *core.Scope) core.Node { return s.messageNavigation(cx, rows, listRef, viewport, tailCount) }}, core.Show{When: func() bool { return !atBottom.Get() }, Then: func(cx *core.Scope) core.Node {
 		return core.View{Style: core.Style{Position: core.Absolute, Bottom: core.Pt(12), Right: core.Pt(40)}, Children: []core.Node{button(cx, "jump-to-latest", "回到最新", lucide.ArrowDown, "outline", func() { listRef.ScrollToIndexAt(0, 1, 0, true) })}}
 	}}}
 	if floatingHeader {
-		timelineChildren = append(timelineChildren, s.mobileConversationHeader(cx, narrow))
+		timelineChildren = append(timelineChildren, s.compactConversationHeader(cx, narrow))
 	}
 	children = append(children, core.View{TestID: "timeline", Style: fill, Children: timelineChildren})
 	children = append(children, core.Show{When: func() bool { return !s.connected() }, Then: func(cx *core.Scope) core.Node {
@@ -120,9 +120,9 @@ func (s *State) conversation(cx *core.Scope, narrow bool) core.Node {
 	return core.View{TestID: "conversation", Style: fill, Children: children}
 }
 
-// The mobile toolbar floats over the recycled list. Only the beginning of the
+// The narrow-layout toolbar floats over the recycled list. Only the beginning of the
 // history has an inset, so scrolled messages pass beneath the fading backdrop.
-func (s *State) mobileConversationHeader(cx *core.Scope, back bool) core.Node {
+func (s *State) compactConversationHeader(cx *core.Scope, back bool) core.Node {
 	pill := func(children ...core.Node) core.Node {
 		return core.View{Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter, Height: core.Pt(52), CornerRadius: 26, FlexShrink: 0, Padding: core.Symmetric(0, 4)}, StyleFunc: func() core.Style { return core.Style{Background: palette(cx).background} }, Children: children}
 	}
@@ -154,14 +154,14 @@ func (s *State) messageInset(cx *core.Scope, content core.Node) core.Node {
 	return core.View{Style: core.Style{Width: core.Pct(100), MinWidth: core.Pt(0), AlignItems: core.AlignCenter}, Children: []core.Node{core.View{Style: core.Style{Width: core.Pct(100), MaxWidth: core.Pt(988)}, StyleFunc: func() core.Style {
 		inset := core.Points(40)
 		width := s.width.Get()
-		if width >= 1000 {
+		if width >= wideBreakpoint {
 			width -= s.deviceWidth.Get() + s.sessionWidth.Get() + 10
-		} else if width >= 650 {
+		} else if width >= compactBreakpoint {
 			width -= s.deviceWidth.Get() + 5
 		} else {
 			inset = 20
 		}
-		if width >= 1000 {
+		if width >= wideBreakpoint {
 			inset = 64
 		}
 		return core.Style{Padding: core.Symmetric(0, inset), MaxWidth: core.Pt(860 + inset*2)}
@@ -257,7 +257,7 @@ func (s *State) message(cx *core.Scope, get func() Message) core.Node {
 	}, Then: func(*core.Scope) core.Node { return bubble }}}
 	content = append(content, core.Show{When: func() bool { return !get().Live }, Then: func(cx *core.Scope) core.Node {
 		return core.View{TestID: "message-actions-" + m.ID, Style: core.Style{Height: core.Pt(32), Direction: core.Row, AlignItems: core.AlignCenter, Gap: 8}, StyleFunc: func() core.Style {
-			visible := hover.Get() || isMobile(cx)
+			visible := hover.Get() || s.narrowLayout()
 			return core.Style{Opacity: core.Alpha(choose(visible, float32(1), float32(0))), PointerEvents: choose(visible, core.PointerEventsAuto, core.PointerEventsNone)}
 		}, Children: []core.Node{s.copyButton(cx, "copy-message-"+m.ID, "", "ghost", func() string { return messageCopyText(get()) }), dynamicText(cx, func() string {
 			ts := get().Timestamp

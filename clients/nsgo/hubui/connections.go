@@ -10,6 +10,7 @@ import (
 	"github.com/monkeyWie/reignhub/internal/connectivity"
 	"github.com/nsgo-dev/nsgo/core"
 	"github.com/nsgo-dev/nsgo/icons/lucide"
+	"github.com/nsgo-dev/nsgo/ui"
 )
 
 // Connection health belongs to a device, not to the last user operation. Keep
@@ -91,9 +92,6 @@ func (s *State) connectionIndicator(cx *core.Scope, target func() string) core.N
 		if s.connectionProblem(id) {
 			icon = lucide.WifiOff
 		}
-		if s.connection(id).reconnecting {
-			icon = lucide.RefreshCw
-		}
 		node := button(cx, "connection-status-"+id, "", icon, "ghost", func() {
 			cx.DismissKeyboard()
 			s.connectionDetailTarget = id
@@ -115,12 +113,26 @@ func (s *State) connectionIndicator(cx *core.Scope, target func() string) core.N
 		return node
 	})
 }
+
+// Connection waves travel outwards; the icon never rotates like Refresh.
+var connectionWaves = []*core.SVG{
+	core.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8.5 16.429a5 5 0 0 1 7 0"/></svg>`)),
+	core.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12.859a10 10 0 0 1 14 0"/></svg>`)),
+	core.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 8.82a15 15 0 0 1 20 0"/></svg>`)),
+}
+
 func reconnectingGlyph(cx *core.Scope) core.Node {
-	turn := core.NewAnimatedValue(cx, 0)
-	cx.StartAnimation(core.ValueKeyframes(turn, core.KeyframeTiming{Duration: time.Second, Iterations: core.Forever}, core.Stops(0, 360)...), nil)
-	return core.View{TestID: "connection-retrying", Style: core.Style{Width: core.Pt(16), Height: core.Pt(16)}, StyleFunc: func() core.Style {
-		return core.Style{Animated: &core.AnimatedStyle{Rotate: turn}}
-	}, Children: []core.Node{glyph(cx, lucide.RefreshCw, 16)}}
+	layers := []core.Node{core.Icon{SVG: core.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 20h.01"/></svg>`)), Style: core.Style{Position: core.Absolute, Width: core.Pt(18), Height: core.Pt(18)}}}
+	for i, svg := range connectionWaves {
+		opacity := core.NewAnimatedValue(cx, 1)
+		if !ui.ReduceMotion(cx) {
+			cx.StartAnimation(core.ValueKeyframes(opacity, core.KeyframeTiming{Duration: 1400 * time.Millisecond, Delay: time.Duration(i) * 180 * time.Millisecond, Iterations: core.Forever}, core.StopAt(0, .25), core.StopAt(.3, 1), core.StopAt(.65, .25), core.StopAt(1, .25)), nil)
+		}
+		layers = append(layers, core.Icon{SVG: svg, Style: core.Style{Position: core.Absolute, Width: core.Pt(18), Height: core.Pt(18)}, StyleFunc: func() core.Style {
+			return core.Style{Color: palette(cx).foreground, Animated: &core.AnimatedStyle{Opacity: opacity}}
+		}})
+	}
+	return core.View{TestID: "connection-retrying", Style: core.Style{Width: core.Pt(18), Height: core.Pt(18)}, Children: layers}
 }
 func (s *State) connectionDetails(id string) string {
 	h := s.connection(id)
@@ -236,7 +248,7 @@ func (s *State) observeLifecycle() {
 	cx := s.cx
 	observed := s.suspended
 	cx.Effect(func() {
-		background := isMobile(cx) && cx.Env().Lifecycle() == core.LifecycleBackground
+		background := cx.Env().Lifecycle() == core.LifecycleBackground
 		if background != observed {
 			observed = background
 			// Do not subscribe the lifecycle effect to page revisions.
