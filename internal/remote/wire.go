@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -21,6 +22,9 @@ import (
 )
 
 type Options struct {
+	Progress       func(connectivity.Progress) `json:"-"`
+	PublicSTUN     []string
+	SelfSTUN       []string
 	GrantRequired  bool
 	GrantPublicKey string
 	ServiceID      string
@@ -34,6 +38,8 @@ type Options struct {
 	RelayOnly      bool
 }
 type wire struct {
+	progressMu        sync.Mutex
+	progressLast      map[string]connectivity.Progress
 	ws                *websocket.Conn
 	dataWS            *websocket.Conn
 	grantMu           sync.RWMutex
@@ -117,8 +123,10 @@ func dial(ctx context.Context, p Pairing, role string) (*websocket.Conn, *websoc
 		ws.CloseNow()
 		return nil, nil, "", errors.New("unsupported service protocol")
 	}
+	connectivity.Note(ctx, "signal", "signal", "信令连接已建立", u.Scheme+"://"+u.Host+"/p2p/signal", "success")
 	var data *websocket.Conn
 	if f.AllowRelay {
+		connectivity.Note(ctx, "relay-ready", "relay", "准备备用中继通道", u.Scheme+"://"+u.Host+"/p2p/relay", "running")
 		u.Path = "/p2p/relay"
 		q.Set("peer", f.Peer)
 		u.RawQuery = q.Encode()
@@ -138,6 +146,11 @@ func dial(ctx context.Context, p Pairing, role string) (*websocket.Conn, *websoc
 			ws.CloseNow()
 			return nil, nil, "", errors.New("invalid relay handshake")
 		}
+	}
+	if data != nil {
+		connectivity.Note(ctx, "relay-ready", "relay", "备用中继通道已就绪", u.Host+"/p2p/relay · 优先直连", "success")
+	} else {
+		connectivity.Note(ctx, "relay-ready", "relay", "此服务未授予中继权限", u.Host, "warning")
 	}
 	return ws, data, f.Peer, nil
 }
@@ -304,6 +317,7 @@ func (w *wire) sendContext(ctx context.Context, data []byte) error {
 			if w.dataWS == nil {
 				return errors.New("直连不可用；当前权益不包含中继，请检查网络或升级套餐")
 			}
+			w.progress("path:relay", "relay", "正在使用加密中继", "直连尚未建立，先通过服务中继；后台继续尝试直连", "success")
 			frame, _ := json.Marshal(relay.Frame{Peer: w.peer, Kind: "chunk", Body: sealed})
 			sendCtx, cancel := context.WithTimeout(w.ctx, 10*time.Second)
 			err := w.dataWS.Write(sendCtx, websocket.MessageText, frame)
@@ -395,16 +409,32 @@ func (w *wire) setup() (*webrtc.PeerConnection, error) {
 		return nil, err
 	}
 	w.pc = pc
+	for _, url := range w.opts.PublicSTUN {
+		w.progress("stun:"+url, "udp", "公共 STUN 节点", url+" · 并行探测", "info")
+	}
+	for _, url := range w.opts.SelfSTUN {
+		w.progress("stun:"+url, "udp", "自建 STUN 节点", url+" · 并行探测", "info")
+	}
+	w.progress("ice", "udp", "收集 UDP / IPv6 直连候选地址", "公共与自建节点同时参与探测", "running")
 	pc.OnICECandidate(func(candidate *webrtc.ICECandidate) {
 		if candidate == nil {
+			w.progress("ice", "udp", "UDP 候选地址收集结束", "正在检查可用直连路径", "success")
+			go w.reportSTUNStats(pc)
 			return
 		}
+		w.progress("candidate:"+candidate.Address+fmt.Sprint(candidate.Port), "udp", "发现 UDP 直连候选", fmt.Sprintf("%s · %s:%d · %s", candidate.Typ.String(), candidate.Address, candidate.Port, candidate.Protocol.String()), "info")
 		raw, err := json.Marshal(map[string]any{"type": "candidate", "candidate": candidate.ToJSON()})
 		if err == nil {
 			_ = w.relaySend("signal", raw)
 		}
 	})
 	pc.OnConnectionStateChange(func(s webrtc.PeerConnectionState) {
+		if s == webrtc.PeerConnectionStateConnecting {
+			w.progress("ice-check", "udp", "正在验证 UDP 直连路径", "交换候选地址并进行连通性检查", "running")
+		}
+		if s == webrtc.PeerConnectionStateFailed {
+			w.progress("ice-check", "udp", "UDP 直连暂未建立", "继续使用可用的 TCP 直连或中继通道", "warning")
+		}
 		if s == webrtc.PeerConnectionStateFailed || s == webrtc.PeerConnectionStateClosed || s == webrtc.PeerConnectionStateDisconnected {
 			w.mu.Lock()
 			w.direct = false
@@ -422,7 +452,19 @@ func (w *wire) attach(dc *webrtc.DataChannel) {
 	w.mu.Lock()
 	w.dc = dc
 	w.mu.Unlock()
-	dc.OnOpen(func() { w.mu.Lock(); w.direct = true; w.mu.Unlock() })
+	dc.OnOpen(func() {
+		w.mu.Lock()
+		w.direct = true
+		pc := w.pc
+		w.mu.Unlock()
+		detail := "端到端加密数据通道已建立"
+		if pc != nil && pc.SCTP() != nil && pc.SCTP().Transport() != nil {
+			if pair, err := pc.SCTP().Transport().ICETransport().GetSelectedCandidatePair(); err == nil && pair != nil {
+				detail = pair.String()
+			}
+		}
+		w.progress("path:webrtc", "direct", "已切换为 WebRTC 直连", detail, "success")
+	})
 	dc.OnClose(func() { w.mu.Lock(); w.direct = false; w.mu.Unlock() })
 	dc.OnMessage(func(msg webrtc.DataChannelMessage) { w.onChunk(msg.Data) })
 }
@@ -646,6 +688,37 @@ func drainRelay(ctx context.Context, ws *websocket.Conn) {
 	for {
 		if _, _, err := ws.Read(ctx); err != nil {
 			return
+		}
+	}
+}
+
+func (w *wire) progress(id, stage, message, detail, state string) {
+	if w.opts.Progress == nil || w.ctx.Err() != nil {
+		return
+	}
+	event := connectivity.Progress{ID: id, Stage: stage, Message: message, Detail: detail, State: state}
+	w.progressMu.Lock()
+	if w.progressLast == nil {
+		w.progressLast = map[string]connectivity.Progress{}
+	}
+	if prior, ok := w.progressLast[id]; ok && prior == event {
+		w.progressMu.Unlock()
+		return
+	}
+	if len(w.progressLast) < 128 || strings.HasPrefix(id, "path:") {
+		w.progressLast[id] = event
+	}
+	w.progressMu.Unlock()
+	w.opts.Progress(event)
+}
+
+func (w *wire) reportSTUNStats(pc *webrtc.PeerConnection) {
+	if w.opts.Progress == nil || w.ctx.Err() != nil {
+		return
+	}
+	for _, stat := range pc.GetStats() {
+		if c, ok := stat.(webrtc.ICECandidateStats); ok && c.Type == webrtc.StatsTypeLocalCandidate && c.URL != "" {
+			w.progress("stun:"+c.URL, "udp", "STUN 节点已返回公网映射", fmt.Sprintf("%s → %s:%d", c.URL, c.IP, c.Port), "success")
 		}
 	}
 }

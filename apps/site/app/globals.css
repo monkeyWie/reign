@@ -1501,3 +1501,113 @@ html.dark .remote-app {
   text-decoration: underline;
   text-underline-offset: 4px;
 }
+
+/* One panel for initial connection, status and retries on every viewport. */
+.connection-panel {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+.connection-target {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.connection-target strong {
+  font-size: 14px;
+  font-weight: 600;
+}
+.connection-target small {
+  color: var(--muted);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.connection-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+.connection-summary small {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 11px;
+}
+.connection-timeline {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  max-height: min(300px, 45dvh);
+  overflow: auto;
+  scrollbar-width: thin;
+}
+.connection-timeline li {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 7px 0;
+  font-size: 12px;
+}
+.connection-timeline li > svg {
+  margin-top: 3px;
+  flex-shrink: 0;
+  color: var(--muted);
+}
+.connection-timeline li[data-state="success"] > svg {
+  color: #16a34a;
+}
+.connection-timeline li[data-state="warning"] > svg {
+  color: #d97706;
+}
+.connection-timeline li > div {
+  flex: 1;
+  min-width: 0;
+}
+.connection-timeline small {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  margin-top: 3px;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+.connection-timeline time {
+  color: var(--muted);
+  font-size: 10px;
+  flex-shrink: 0;
+}
+.connection-failure {
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+  margin: 0;
+  user-select: text;
+}
+.connection-panel-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.device-row .device-connection-status {
+  opacity: 1;
+  flex-shrink: 0;
+  width: 26px;
+}
+.dialog-content:has(.connection-panel) {
+  width: 448px;
+  padding: 20px;
+}
+.dialog-content:has(.connection-panel) h2 {
+  font-size: 16px;
+  margin-bottom: 16px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not(.light) .dialog-content:has(.connection-panel) {
+    --bg: #09090b;
+    --fg: #fafafa;
+    --border: #27272a;
+    background: var(--bg);
+    color: var(--fg);
+  }
+}

@@ -57,6 +57,7 @@ func (w *wire) startTCP() {
 	}
 	w.tcpStarted = true
 	a, err := connectivity.NewTCPAgent(w.ctx, func(c connectivity.TCPCandidate) {
+		w.progress("tcp-candidate:"+c.Address, "tcp", "发现 TCP 直连候选", c.Kind+" · "+c.Address, "info")
 		raw, _ := json.Marshal(struct {
 			Type      string                    `json:"type"`
 			Candidate connectivity.TCPCandidate `json:"tcpCandidate"`
@@ -69,8 +70,13 @@ func (w *wire) startTCP() {
 	}
 	w.tcpAgent = a
 	a.Trace = w.opts.TCPTrace
+	a.Progress = w.opts.Progress
 	w.tcpMu.Unlock()
 	_ = w.relaySend("signal", []byte(`{"type":"tcp-init"}`))
+	w.progress("tcp", "tcp", "正在尝试 TCP 直连", "与 UDP 探测并行", "running")
+	if len(w.opts.TCPSTUN) == 0 {
+		w.progress("tcp-config", "tcp", "未配置 TCP 公网探测节点", "仍尝试局域网与 IPv6 TCP 直连", "info")
+	}
 	a.Start(w.opts.TCPSTUN)
 }
 func (w *wire) tcpSignal(raw []byte) {
@@ -203,6 +209,7 @@ func (w *wire) onTCPConn(c net.Conn) {
 	if w.opts.TCPTrace != nil {
 		w.opts.TCPTrace("TCP selected host=%t remote=%s", w.host, c.RemoteAddr())
 	}
+	w.progress("path:tcp", "direct", "TCP 直连通道已建立", c.LocalAddr().String()+" → "+c.RemoteAddr().String(), "success")
 	retained = true
 	if a != nil {
 		a.Close()

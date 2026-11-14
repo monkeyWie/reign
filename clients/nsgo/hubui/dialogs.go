@@ -20,6 +20,20 @@ import (
 )
 
 func (s *State) dialogView(cx *core.Scope, kind string) core.Node {
+	if kind == "connection-status" {
+		mode := core.NewMemo(cx, func() string {
+			s.read()
+			id := s.connectionDetailTarget
+			a := s.connection(id).attempt
+			active := a != nil && a.active
+			return fmt.Sprintf("%s|%p|%t|%s", id, a, active, s.connectionDetails(id))
+		})
+		return core.Dynamic(func(cx *core.Scope) core.Node {
+			_ = mode.Get()
+			id := s.connectionDetailTarget
+			return s.connectionPanel(cx, id, s.connection(id).attempt, false)
+		})
+	}
 	if kind == "connecting" {
 		mode := core.NewMemo(cx, func() string {
 			s.read()
@@ -46,36 +60,6 @@ func (s *State) dialogView(cx *core.Scope, kind string) core.Node {
 		}
 	}, Style: core.Style{Width: core.Pt(448), MaxWidth: core.Pct(96)}}
 	switch {
-	case kind == "connection-status":
-		id := s.connectionDetailTarget
-		title = "连接状态"
-		children = append(children, dynamicText(cx, func() string {
-			s.read()
-			for _, d := range s.devices {
-				if str(d, "id") == id {
-					return deviceName(d) + " · " + deviceStatus(d)
-				}
-			}
-			return "服务连接"
-		}, 13, false), dynamicText(cx, func() string {
-			s.read()
-			if s.connection(id).reconnecting {
-				return "正在自动恢复连接，草稿和已缓存的消息会保留。"
-			}
-			if s.connectionProblem(id) {
-				return "连接暂时不可用或同步异常。恢复后会自动同步最新消息。"
-			}
-			return "连接正常，消息会持续同步。"
-		}, 12, true), core.Show{When: func() bool { s.read(); return s.connectionDetails(id) != "" }, Then: func(cx *core.Scope) core.Node {
-			raw := dynamicText(cx, func() string { s.read(); return s.connectionDetails(id) }, 11, true)
-			raw.TestID = "connection-error-raw"
-			raw.Selectable = core.SelectableOn
-			return core.Scroll{Style: core.Style{MaxHeight: core.Pt(180)}, Children: []core.Node{raw}}
-		}})
-		footer = []core.Node{button(cx, "connection-done", "关闭", nil, "outline", close)}
-		if id != "" {
-			footer = append(footer, button(cx, "connection-retry", "重新连接", lucide.RefreshCw, "primary", func() { s.reconnectDevice(id) }))
-		}
 	case kind == "account":
 		title = "账号与设备同步"
 		prefix := "client.account."

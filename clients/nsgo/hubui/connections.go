@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/monkeyWie/reignhub/internal/connectivity"
 	"github.com/nsgo-dev/nsgo/core"
 	"github.com/nsgo-dev/nsgo/icons/lucide"
 )
@@ -15,6 +16,7 @@ import (
 // independent read failures until that read succeeds; a heartbeat must not
 // hide a failed catalogue or transcript refresh.
 type connectionHealth struct {
+	attempt                      *connectAttempt
 	issues                       map[string]string
 	reconnecting, needsReconnect bool
 }
@@ -147,13 +149,54 @@ func (s *State) reconnectDevice(id string) {
 		return
 	}
 	h.reconnecting = true
+	ctx, cancel := context.WithTimeout(s.ctx, 45*time.Second)
+	params := Object{}
+	for _, device := range s.devices {
+		if str(device, "id") == id {
+			params = Object{"code": str(device, "connectionId"), "service": str(device, "service")}
+		}
+	}
+	a := &connectAttempt{params: params, target: id, cancel: cancel, active: true, started: time.Now(), stepStarted: time.Now()}
+	a.record(connectivity.Progress{ID: "service", Stage: "service", Message: "正在重新连接服务", State: "running"})
+	h.attempt = a
+	ctx = connectivity.WithProgress(ctx, func(p connectivity.Progress) {
+		s.cx.Post(func() {
+			if s.ctx.Err() == nil && h.attempt == a && (a.active || a.complete) {
+				a.record(p)
+				s.changed()
+			}
+		})
+	})
+	go func() {
+		tick := time.NewTicker(time.Second)
+		defer tick.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-tick.C:
+				s.cx.Post(func() {
+					if h.attempt == a && a.active {
+						s.changed()
+					}
+				})
+			}
+		}
+	}()
 	s.retrying[id] = time.Now().Add(15 * time.Second)
 	s.changed()
 	go func() {
-		v, err := s.api.Call(s.ctx, "client.reconnect", Object{"id": id}, "", nil)
+		v, err := s.api.Call(ctx, "client.reconnect", Object{"id": id}, "", nil)
+		cancel()
 		s.cx.Post(func() {
-			if s.ctx.Err() != nil {
+			if s.ctx.Err() != nil || h.attempt != a {
 				return
+			}
+			a.active = false
+			a.finished = time.Now()
+			a.complete = err == nil
+			if err != nil && !errors.Is(err, context.Canceled) {
+				a.err = err.Error()
 			}
 			h.reconnecting = false
 			s.setConnectionIssue(id, "reconnect", err)

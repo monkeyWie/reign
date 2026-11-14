@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/monkeyWie/reignhub/internal/connectivity"
 	"github.com/monkeyWie/reignhub/internal/control"
 	"github.com/monkeyWie/reignhub/internal/provider"
 	"github.com/monkeyWie/reignhub/internal/relay"
@@ -93,10 +94,15 @@ func TestRelayAndP2P(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			hostDone := make(chan error, 1)
-			go func() { hostDone <- serveHostObserved(ctx, p, opts, dispatcher, monitor) }()
+			hostOpts := opts
+			go func() { hostDone <- serveHostObserved(ctx, p, hostOpts, dispatcher, monitor) }()
+			waitFor(t, func() bool { return monitor.Snapshot().State == "connected" })
+			var traceMu sync.Mutex
+			trace := []connectivity.Progress{}
+			opts.Progress = func(p connectivity.Progress) { traceMu.Lock(); trace = append(trace, p); traceMu.Unlock() }
 			var client *Client
 			waitFor(t, func() bool {
-				attempt, stop := context.WithTimeout(ctx, 500*time.Millisecond)
+				attempt, stop := context.WithTimeout(ctx, 4*time.Second)
 				defer stop()
 				var err error
 				client, err = Connect(attempt, p, opts)
@@ -121,6 +127,16 @@ func TestRelayAndP2P(t *testing.T) {
 			if !relayOnly {
 				waitFor(t, func() bool { return client.Path() == tc.path })
 			}
+			waitFor(t, func() bool {
+				traceMu.Lock()
+				defer traceMu.Unlock()
+				for _, step := range trace {
+					if strings.HasPrefix(step.ID, "path:") && step.State == "success" {
+						return true
+					}
+				}
+				return false
+			})
 			if strings.HasPrefix(name, "TCP") {
 				if err := client.wire.tcpSnapshot().control(tcpPing); err != nil {
 					t.Fatal("encrypted TCP heartbeat failed", err)

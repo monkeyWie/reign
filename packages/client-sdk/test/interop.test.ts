@@ -74,7 +74,28 @@ test("browser SDK and Go host share handshake, AEAD, fragmentation, conditional 
       grantPublicKey: "",
       serviceId: "",
     } satisfies ServiceConfig;
-    const client = await new Connection(saved, identity, config).connect();
+    const steps: { id: string; message: string; detail?: string }[] = [];
+    const client = await new Connection(saved, identity, config, (step) =>
+      steps.push(step),
+    ).connect();
+    assert.ok(
+      steps.some(
+        (step) =>
+          step.id === "relay-ready" && step.detail?.includes("/p2p/relay"),
+      ),
+    );
+    assert.ok(
+      steps.some(
+        (step) => step.id === "handshake" && step.message.includes("完成"),
+      ),
+    );
+    assert.ok(
+      steps.some(
+        (step) => step.id === "path:relay" && step.message.includes("中继"),
+      ),
+    );
+    assert.ok(!JSON.stringify(steps).includes(f.Token));
+    assert.ok(!JSON.stringify(steps).includes(f.Key));
     try {
       assert.match(client.path, /Relay/);
       for (let n = 0; n < 2; n++) {
@@ -116,7 +137,13 @@ test("X25519 pairing envelopes bind identities and context", async () => {
     { remember: true },
   );
   await assert.rejects(
-    envelope(b.private, a.public, "reignhub/pair/reply/test", undefined, sealed),
+    envelope(
+      b.private,
+      a.public,
+      "reignhub/pair/reply/test",
+      undefined,
+      sealed,
+    ),
   );
 });
 test("AEAD rejects duplicate data and authenticated-context substitution", async () => {

@@ -17,6 +17,12 @@ import {
   url64,
   utf8,
 } from "./crypto";
+import {
+  progressStep,
+  recordProgress,
+  type ConnectionProgress,
+  type ProgressObserver,
+} from "./progress";
 import type { SavedDevice } from "./cache";
 interface Reply {
   id: string;
@@ -34,6 +40,7 @@ interface Pending {
 }
 export class Connection extends EventTarget {
   private signal!: WebSocket;
+  private opening = new Set<WebSocket>();
   private relay?: WebSocket;
   private pc?: RTCPeerConnection;
   private dc?: RTCDataChannel;
@@ -57,14 +64,30 @@ export class Connection extends EventTarget {
   private heartbeat = Date.now();
   private pulses = 0;
   private preferDirectUntil = 0;
+  progress: ConnectionProgress[] = [];
   path = "Connecting";
   allowRelay = false;
   constructor(
     public saved: SavedDevice,
     private identity: Identity,
     private config: ServiceConfig,
+    private observe?: ProgressObserver,
   ) {
     super();
+  }
+  private report(
+    id: string,
+    stage: string,
+    message: string,
+    detail = "",
+    state: ConnectionProgress["state"] = "running",
+  ) {
+    const step = progressStep(id, stage, message, detail, state);
+    const next = recordProgress(this.progress, step);
+    if (next === this.progress) return;
+    this.progress = next;
+    this.observe?.(step);
+    this.dispatchEvent(new Event("progress"));
   }
   private update(path: string) {
     if (this.path !== path) {
@@ -72,7 +95,13 @@ export class Connection extends EventTarget {
       this.dispatchEvent(new Event("change"));
     }
   }
+  private endpoint(path: string) {
+    const u = new URL(path, this.saved.service);
+    u.protocol = u.protocol === "https:" ? "wss:" : "ws:";
+    return u.origin + u.pathname;
+  }
   private async socket(path: string, peer?: string) {
+    if (this.closed) throw Error("连接已取消");
     const u = new URL(this.saved.service);
     u.protocol = u.protocol === "https:" ? "wss:" : "ws:";
     u.pathname = path;
@@ -83,6 +112,7 @@ export class Connection extends EventTarget {
       SOCKET_PROTOCOL,
       "auth." + url64(utf8(this.identity.token)),
     ]);
+    this.opening.add(ws);
     const welcome = await new Promise<Frame>((resolve, reject) => {
       const timeout = setTimeout(() => {
         ws.close();
@@ -90,6 +120,7 @@ export class Connection extends EventTarget {
       }, 15000);
       ws.onerror = () => {
         clearTimeout(timeout);
+        ws.close();
         reject(Error("连接服务失败，请检查服务地址和网络"));
       };
       ws.onmessage = (e) => {
@@ -107,12 +138,29 @@ export class Connection extends EventTarget {
         clearTimeout(timeout);
         reject(Error("服务拒绝连接，请检查配对和账号权益"));
       };
-    });
+    }).finally(() => this.opening.delete(ws));
+    if (this.closed) {
+      ws.close();
+      throw Error("连接已取消");
+    }
     return { ws, welcome };
   }
   async connect() {
     try {
+      this.report(
+        "signal",
+        "signal",
+        "建立信令连接",
+        this.endpoint(routes.signal),
+      );
       const { ws, welcome } = await this.socket(routes.signal);
+      this.report(
+        "signal",
+        "signal",
+        "信令连接已建立",
+        this.endpoint(routes.signal),
+        "success",
+      );
       this.signal = ws;
       this.peer = welcome.peer!;
       this.allowRelay = !!welcome.allowRelay;
@@ -131,8 +179,21 @@ export class Connection extends EventTarget {
       ws.onclose = () => this.close("信令连接已断开");
       ws.onerror = () => this.close("信令连接异常");
       if (this.allowRelay) {
+        this.report(
+          "relay-ready",
+          "relay",
+          "准备备用中继通道",
+          this.endpoint(routes.relay),
+        );
         const data = await this.socket(routes.relay, this.peer);
         this.relay = data.ws;
+        this.report(
+          "relay-ready",
+          "relay",
+          "备用中继通道已就绪",
+          this.endpoint(routes.relay) + " · 优先直连",
+          "success",
+        );
         this.relay.onclose = () => {
           this.relay = undefined;
           if (!this.dc || this.dc.readyState !== "open")
@@ -158,16 +219,43 @@ export class Connection extends EventTarget {
         () => this.failHandshake(Error("配对握手超时")),
         15000,
       );
+      this.report("handshake", "handshake", "与被控设备建立加密握手");
       await this.sendFrame("hello", { clientNonce: this.nonce });
       try {
         await ready;
+        this.report(
+          "handshake",
+          "handshake",
+          "端到端加密握手完成",
+          "已验证设备配对密钥",
+          "success",
+        );
       } finally {
         clearTimeout(timeout);
       }
-      this.update(
-        this.allowRelay ? "Relay · encrypted" : "Connecting · direct only",
-      );
-      if (typeof RTCPeerConnection !== "undefined") await this.offer();
+      this.update("Connecting · direct first");
+      if (typeof RTCPeerConnection !== "undefined") {
+        try {
+          await this.offer();
+        } catch (e) {
+          this.report(
+            "ice",
+            "udp",
+            "WebRTC 探测未能启动",
+            e instanceof Error ? e.message : String(e),
+            "warning",
+          );
+          if (!this.relay) throw e;
+        }
+      } else {
+        this.report(
+          "ice",
+          "udp",
+          "当前浏览器不提供 WebRTC",
+          "使用可用的服务中继",
+          "warning",
+        );
+      }
       this.tick = setInterval(() => {
         if (Date.now() - this.heartbeat > 85000) {
           this.close("连接心跳超时");
@@ -182,6 +270,13 @@ export class Connection extends EventTarget {
           this.relay.send("reign:ping");
       }, 25000);
       await this.call({ method: "providers" });
+      this.report(
+        "connected",
+        "connected",
+        "设备连接成功",
+        this.path,
+        "success",
+      );
       return this;
     } catch (e) {
       this.close();
@@ -254,6 +349,30 @@ export class Connection extends EventTarget {
   }
   private async offer() {
     this.preferDirectUntil = Date.now() + 1500;
+    for (const url of this.config.publicStun)
+      this.report(
+        "stun:" + url,
+        "udp",
+        "公共 STUN 节点",
+        url + " · 并行探测",
+        "info",
+      );
+    for (const url of this.config.selfStun)
+      this.report(
+        "stun:" + url,
+        "udp",
+        "自建 STUN 节点",
+        url + " · 并行探测",
+        "info",
+      );
+    this.report(
+      "tcp",
+      "tcp",
+      "浏览器使用 WebRTC 直连",
+      "原生 TCP 打洞由桌面端和移动端支持",
+      "info",
+    );
+    this.report("ice", "udp", "收集 UDP / IPv6 直连候选地址");
     this.pc = new RTCPeerConnection({
       iceServers: [
         ...new Set([...this.config.publicStun, ...this.config.selfStun]),
@@ -263,19 +382,109 @@ export class Connection extends EventTarget {
     });
     const pc = this.pc;
     pc.onicecandidate = (e) => {
+      if (!e.candidate) {
+        this.report(
+          "ice",
+          "udp",
+          "UDP 候选地址收集结束",
+          "正在检查可用直连路径",
+          "success",
+        );
+        return;
+      }
+      this.report(
+        "candidate:" +
+          e.candidate.foundation +
+          e.candidate.address +
+          e.candidate.port,
+        "udp",
+        "发现 UDP 直连候选",
+        `${e.candidate.type} · ${e.candidate.address || "本地地址"}:${e.candidate.port} · ${e.candidate.protocol}`,
+        "info",
+      );
       if (e.candidate)
         void this.sendFrame("signal", {
           type: "candidate",
           candidate: e.candidate.toJSON(),
         }).catch(() => {});
     };
+    pc.onicegatheringstatechange = () => {
+      if (pc.iceGatheringState === "complete")
+        void pc
+          .getStats()
+          .then((stats) =>
+            stats.forEach((stat) => {
+              if (stat.type === "local-candidate" && stat.url && !this.closed)
+                this.report(
+                  "stun:" + stat.url,
+                  "udp",
+                  "STUN 节点已返回公网映射",
+                  `${stat.url} → ${stat.address || stat.ip || "公网地址"}:${stat.port}`,
+                  "success",
+                );
+            }),
+          )
+          .catch(() => {});
+    };
+    pc.onicecandidateerror = (e) =>
+      this.report(
+        "stun-error:" + e.url,
+        "udp",
+        "STUN 节点探测未成功",
+        `${e.url} · ${e.errorCode} ${e.errorText}`,
+        "warning",
+      );
     pc.onconnectionstatechange = () => {
+      if (pc.connectionState === "connecting")
+        this.report("ice-check", "udp", "正在验证 WebRTC 直连路径");
+      if (pc.connectionState === "failed")
+        this.report(
+          "ice-check",
+          "udp",
+          "WebRTC 直连暂未建立",
+          "使用可用的服务中继",
+          "warning",
+        );
       if (["failed", "disconnected", "closed"].includes(pc.connectionState))
         this.update(this.relay ? "Relay · encrypted" : "Disconnected");
     };
     this.dc = pc.createDataChannel("reign.p2p", { ordered: true });
     this.dc.binaryType = "arraybuffer";
-    this.dc.onopen = () => this.update("P2P · WebRTC");
+    this.dc.onopen = () => {
+      this.update("P2P · WebRTC");
+      this.report(
+        "path:webrtc",
+        "direct",
+        "已切换为 WebRTC 直连",
+        "端到端加密数据通道已建立",
+        "success",
+      );
+      void pc
+        .getStats()
+        .then((stats) => {
+          stats.forEach((stat) => {
+            if (stat.type === "transport" && stat.selectedCandidatePairId) {
+              const pair = stats.get(stat.selectedCandidatePairId),
+                local = stats.get(pair?.localCandidateId),
+                remote = stats.get(pair?.remoteCandidateId);
+              if (
+                local &&
+                remote &&
+                !this.closed &&
+                this.dc?.readyState === "open"
+              )
+                this.report(
+                  "path:webrtc",
+                  "direct",
+                  "已切换为 WebRTC 直连",
+                  `${local.protocol} · ${local.address || local.ip || local.candidateType}:${local.port} → ${remote.address || remote.ip || remote.candidateType}:${remote.port}`,
+                  "success",
+                );
+            }
+          });
+        })
+        .catch(() => {});
+    };
     this.dc.onclose = () =>
       this.update(this.relay ? "Relay · encrypted" : "Disconnected");
     this.dc.onmessage = (e) => {
@@ -394,6 +603,14 @@ export class Connection extends EventTarget {
         }
         this.dc.send(sealed as unknown as ArrayBuffer);
       } else if (this.relay?.readyState === WebSocket.OPEN) {
+        this.update("Relay · encrypted");
+        this.report(
+          "path:relay",
+          "relay",
+          "正在使用加密中继",
+          "直连尚未建立，先通过服务中继；后台继续尝试直连",
+          "success",
+        );
         this.relay.send(
           JSON.stringify({ peer: this.peer, kind: "chunk", body: b64(sealed) }),
         );
@@ -449,8 +666,18 @@ export class Connection extends EventTarget {
   close(reason = "Disconnected") {
     if (this.closed) return;
     this.closed = true;
+    if (reason !== "Disconnected")
+      this.report(
+        "disconnected",
+        "connection",
+        "连接已断开",
+        reason,
+        "warning",
+      );
     clearInterval(this.tick);
     this.failHandshake?.(Error(reason));
+    for (const socket of this.opening) socket.close();
+    this.opening.clear();
     this.signal?.close();
     this.relay?.close();
     this.pc?.close();

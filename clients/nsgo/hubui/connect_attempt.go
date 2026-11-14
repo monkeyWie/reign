@@ -13,13 +13,21 @@ import (
 	"github.com/nsgo-dev/nsgo/ui"
 )
 
+type connectionStep struct {
+	connectivity.Progress
+	at time.Time
+}
+
 type connectAttempt struct {
-	params               Object
-	cancel               context.CancelFunc
-	step                 connectivity.Progress
-	started, stepStarted time.Time
-	active               bool
-	err                  string
+	steps                          []connectionStep
+	target                         string
+	complete                       bool
+	params                         Object
+	cancel                         context.CancelFunc
+	step                           connectivity.Progress
+	started, stepStarted, finished time.Time
+	active                         bool
+	err                            string
 }
 
 func (s *State) connect(p Object) {
@@ -29,16 +37,17 @@ func (s *State) connect(p Object) {
 	}
 	ctx, cancel := context.WithTimeout(s.ctx, 190*time.Second)
 	a := &connectAttempt{params: copyObject(p), cancel: cancel, active: true, started: time.Now(), stepStarted: time.Now(), step: connectivity.Progress{Stage: "service", Message: "正在连接服务并验证本机身份", Timeout: 15 * time.Second}}
+	a.record(a.step)
 	s.connectAttempt = a
 	s.error, s.notice = "", ""
 	s.dialog.Set("connecting")
 	s.changed()
 	ctx = connectivity.WithProgress(ctx, func(p connectivity.Progress) {
 		s.cx.Post(func() {
-			if s.connectAttempt != a || !a.active {
+			if s.ctx.Err() != nil || (s.connectAttempt != a && (a.target == "" || s.connection(a.target).attempt != a)) || !a.active && !a.complete {
 				return
 			}
-			a.step, a.stepStarted = p, time.Now()
+			a.record(p)
 			s.changed()
 		})
 	})
@@ -66,17 +75,20 @@ func (s *State) connect(p Object) {
 				return
 			}
 			a.active = false
+			a.finished = time.Now()
 			if err != nil {
 				a.err = err.Error()
 				s.changed()
 				return
 			}
-			s.connectAttempt = nil
+			a.complete = true
 			s.dialog.Set("")
 			s.devices = objects(v)
 			for _, d := range s.devices {
 				if str(d, "connectionId") == strings.NewReplacer(" ", "", "-", "").Replace(str(p, "code")) && str(d, "service") == str(p, "service") {
-					s.selectDevice(str(d, "id"))
+					a.target = str(d, "id")
+					s.connection(a.target).attempt = a
+					s.selectDevice(a.target)
 					break
 				}
 			}
@@ -120,44 +132,163 @@ func connectionFailure(a *connectAttempt) (string, string) {
 	}
 }
 
-func (s *State) connectAttemptView(cx *core.Scope) core.Node {
-	a := s.connectAttempt
-	if a == nil {
-		return nil
+func (a *connectAttempt) record(p connectivity.Progress) {
+	if p.ID == "" {
+		p.ID = p.Stage
 	}
-	title := "正在连接设备"
-	if !a.active {
-		title = "连接失败"
+	if p.State == "" {
+		p.State = "running"
 	}
-	d := ui.Dialog{TestID: "dialog-connecting", Title: title, Open: func() bool { return true }, NoCloseOnBackdropPress: true, OnOpenChange: func(v bool, _ base.Reason) {
-		if !v {
-			s.closeConnectAttempt()
+	if p.Timeout > 0 || p.Stage == "connected" {
+		for i := range a.steps {
+			if a.steps[i].State == "running" && a.steps[i].Timeout > 0 {
+				a.steps[i].State = "success"
+			}
 		}
-	}, Style: core.Style{Width: core.Pt(448), MaxWidth: core.Pct(96)}}
-	d.Children = []core.Node{label(cx, "设备 "+str(a.params, "code"), 14, false), label(cx, str(a.params, "service"), 12, true)}
-	if a.active {
-		message := dynamicText(cx, func() string { s.read(); return a.step.Message }, 13, false)
-		message.TestID = "connect-stage"
-		message.Style.FlexShrink = 1
-		message.Style.MinWidth = core.Pt(0)
-		elapsedText := dynamicText(cx, func() string {
+		if p.Timeout > 0 {
+			a.step, a.stepStarted = p, time.Now()
+		}
+	}
+	for i := range a.steps {
+		if a.steps[i].ID == p.ID {
+			a.steps[i].Progress = p
+			return
+		}
+	}
+	a.steps = append(a.steps, connectionStep{Progress: p, at: time.Now()})
+	if len(a.steps) > 80 {
+		a.steps = a.steps[len(a.steps)-80:]
+	}
+}
+
+func (s *State) connectAttemptView(cx *core.Scope) core.Node {
+	return s.connectionPanel(cx, "", s.connectAttempt, true)
+}
+
+// Pairing, connection status and every retry share this one compact panel.
+func (s *State) connectionPanel(cx *core.Scope, id string, a *connectAttempt, initial bool) core.Node {
+	close := func() { s.dialog.Set("") }
+	if initial {
+		close = s.closeConnectAttempt
+	}
+	d := ui.Dialog{TestID: choose(initial, "dialog-connecting", "dialog-connection-status"), Title: "连接", Open: func() bool { return true }, NoCloseOnBackdropPress: true,
+		OnOpenChange: func(v bool, _ base.Reason) {
+			if !v {
+				close()
+			}
+		}, Style: core.Style{Width: core.Pt(448), MaxWidth: core.Pct(96)}}
+	target := dynamicText(cx, func() string {
+		s.read()
+		for _, device := range s.devices {
+			if str(device, "id") == id {
+				return deviceName(device)
+			}
+		}
+		if a != nil {
+			return "设备 " + str(a.params, "code")
+		}
+		return "服务连接"
+	}, 14, false)
+	target.Style.FontWeight = core.FontWeightSemibold
+	d.Children = []core.Node{target}
+	if id != "" {
+		d.Children = append(d.Children, dynamicText(cx, func() string {
 			s.read()
-			elapsed := int(time.Since(a.started).Seconds())
-			remaining := max(0, int((a.step.Timeout - time.Since(a.stepStarted)).Seconds()))
-			return fmt.Sprintf("已用 %d 秒 · 此步骤最多再等待 %d 秒", elapsed, remaining)
-		}, 12, true)
-		elapsedText.TestID = "connect-elapsed"
-		d.Children = append(d.Children, row(ui.Spinner{TestID: "connection-loading", Label: "正在连接", Variant: ui.SpinnerSpokes, Size: 20}, message), elapsedText)
-		d.Footer = []core.Node{button(cx, "connect-cancel", "取消连接", nil, "outline", s.closeConnectAttempt)}
+			for _, device := range s.devices {
+				if str(device, "id") == id {
+					return deviceStatus(device)
+				}
+			}
+			return ""
+		}, 11, true))
+	}
+	if a != nil {
+		d.Children = append(d.Children, singleLine(cx, func() string { return str(a.params, "service") }, 11, true))
+	}
+
+	header := []core.Node{}
+	if a != nil && a.active {
+		header = append(header, ui.Spinner{TestID: "connection-loading", Label: "正在连接", Variant: ui.SpinnerSpokes, Size: 16})
+	}
+	header = append(header, dynamicText(cx, func() string {
+		s.read()
+		if a != nil && a.active {
+			return "正在连接"
+		}
+		if a != nil && a.err != "" {
+			summary, _ := connectionFailure(a)
+			return summary
+		}
+		if s.connectionProblem(id) {
+			return "连接暂时不可用"
+		}
+		return "连接正常，消息会持续同步。"
+	}, 13, false), spacer())
+	if a != nil {
+		elapsed := dynamicText(cx, func() string { s.read(); return fmt.Sprintf("已用 %d 秒", int(a.elapsed().Seconds())) }, 11, true)
+		elapsed.TestID = "connect-elapsed"
+		header = append(header, elapsed)
+	}
+	d.Children = append(d.Children, row(header...))
+	if a != nil {
+		ref := &core.Ref{}
+		follow := core.NewSignal(cx, true)
+		d.Children = append(d.Children, core.Scroll{Ref: ref, OnScroll: func(e core.ScrollEvent) { follow.Set(e.ContentSize.Height-e.Offset.Y-e.Size.Height < 36) }, TestID: "connection-timeline", Style: core.Style{MaxHeight: core.Pt(260)}, Children: []core.Node{core.View{OnLayout: func(core.Bounds) {
+			if follow.Get() {
+				ref.ScrollToEnd(false)
+			}
+		}, Children: []core.Node{core.Each(func() []connectionStep { s.read(); return append([]connectionStep{}, a.steps...) }, func(p connectionStep) string { return p.ID }, func(cx *core.Scope, p func() connectionStep, _ func() int) core.Node {
+			return core.Dynamic(func(cx *core.Scope) core.Node {
+				v := p()
+				icon := lucide.Circle
+				if v.State == "success" {
+					icon = lucide.Check
+				} else if v.State == "warning" {
+					icon = lucide.Minus
+				}
+				title := label(cx, v.Message, 12, false)
+				title.TestID = "connect-stage"
+				children := []core.Node{row(glyph(cx, icon, 12), core.View{Style: fill, Children: []core.Node{title}}, label(cx, fmt.Sprintf("%.1fs", v.at.Sub(a.started).Seconds()), 10, true))}
+				if v.Detail != "" {
+					detail := label(cx, v.Detail, 11, true)
+					detail.Selectable = core.SelectableOn
+					children = append(children, core.View{Style: core.Style{Padding: core.Edges{Left: 20}}, Children: []core.Node{detail}})
+				}
+				return core.View{Style: core.Style{Padding: core.Symmetric(6, 0), Gap: 3}, Children: children}
+			})
+		})}}}})
+	}
+	raw := s.connectionDetails(id)
+	if a != nil && a.err != "" {
+		raw = a.err
+	}
+	if raw != "" {
+		text := label(cx, raw, 11, true)
+		text.TestID = "connection-error-raw"
+		text.Selectable = core.SelectableOn
+		d.Children = append(d.Children, core.Scroll{Style: core.Style{MaxHeight: core.Pt(90)}, Children: []core.Node{text}})
+	}
+	if a != nil && !a.active && a.err != "" {
+		_, hint := connectionFailure(a)
+		d.Children = append(d.Children, label(cx, hint, 12, true))
+	}
+	active := a != nil && a.active
+	if active {
+		d.Footer = []core.Node{button(cx, "connect-cancel", "取消", nil, "outline", func() { a.active = false; a.cancel(); close(); s.changed() })}
 	} else {
-		summary, hint := connectionFailure(a)
-		expanded := core.NewSignal(cx, false)
-		d.Children = append(d.Children, label(cx, summary, 15, false), label(cx, hint, 13, true), ui.Collapsible{TestID: "connect-error-details", Text: "错误详情", Open: expanded.Get, OnOpenChange: expanded.Set, Content: core.Scroll{Style: core.Style{MaxHeight: core.Pt(120)}, Children: []core.Node{core.Text{TestID: "connect-error-raw", Content: a.err, Selectable: core.SelectableOn, Style: core.Style{FontSize: 11}, StyleFunc: func() core.Style { return core.Style{Color: palette(cx).mutedText} }}}}})
-		d.Footer = []core.Node{button(cx, "connect-edit", "修改连接信息", nil, "outline", func() {
-			s.scanned = copyObject(a.params)
-			s.closeConnectAttempt()
-			s.dialog.Set("connect")
-		}), button(cx, "connect-retry", "重试连接", lucide.RefreshCw, "primary", func() { s.connect(a.params) })}
+		d.Footer = []core.Node{button(cx, "connection-done", "关闭", nil, "outline", close)}
+		if initial && a != nil && !a.complete {
+			d.Footer = append(d.Footer, button(cx, "connect-edit", "修改", nil, "outline", func() { s.scanned = copyObject(a.params); s.closeConnectAttempt(); s.dialog.Set("connect") }), button(cx, "connect-retry", "重试", lucide.RefreshCw, "primary", func() { s.connect(a.params) }))
+		} else if id != "" {
+			d.Footer = append(d.Footer, button(cx, "connection-retry", "重试", lucide.RefreshCw, "primary", func() { s.reconnectDevice(id) }))
+		}
 	}
 	return d
+}
+
+func (a *connectAttempt) elapsed() time.Duration {
+	if !a.finished.IsZero() {
+		return a.finished.Sub(a.started)
+	}
+	return time.Since(a.started)
 }

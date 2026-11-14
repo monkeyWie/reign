@@ -28,6 +28,7 @@ type tcpSocket struct {
 // Endpoint-dependent NATs and firewalls can still reject it; relay stays live.
 // Accepted/dialed connections must be authenticated by onConn before use.
 type TCPAgent struct {
+	Progress    func(Progress)
 	Trace       func(string, ...any)
 	ctx         context.Context
 	cancel      context.CancelFunc
@@ -172,11 +173,13 @@ func (a *TCPAgent) dial(ctx context.Context, s *tcpSocket, address string) (net.
 	return d.DialContext(ctx, s.network, address)
 }
 func (a *TCPAgent) probe(s *tcpSocket, server string) {
+	a.progress("tcp-stun:"+s.network+server, "探测 TCP 公网映射", server+" · "+s.network, "running")
 	c, err := a.dial(a.ctx, s, server)
 	if err != nil {
 		if a.Trace != nil {
 			a.Trace("TCP STUN %s %s: %v", s.network, server, err)
 		}
+		a.progress("tcp-stun:"+s.network+server, "TCP 探测节点未响应", server+" · "+s.network+" · "+err.Error(), "warning")
 		return
 	}
 	defer c.Close()
@@ -188,8 +191,10 @@ func (a *TCPAgent) probe(s *tcpSocket, server string) {
 			if a.Trace != nil {
 				a.Trace("TCP binding %s: %v", server, err)
 			}
+			a.progress("tcp-stun:"+s.network+server, "TCP 公网映射探测结束", server+" · "+err.Error(), "warning")
 			return
 		}
+		a.progress("tcp-stun:"+s.network+server, "已获得 TCP 公网映射", server+" → "+mapped.String(), "success")
 		a.publish(TCPCandidate{Address: mapped.String(), Kind: "srflx"})
 		select {
 		case <-a.ctx.Done():
@@ -250,5 +255,11 @@ func (a *TCPAgent) AddRemote(c TCPCandidate) {
 				}
 			}
 		})
+	}
+}
+
+func (a *TCPAgent) progress(id, message, detail, state string) {
+	if a.Progress != nil && a.ctx.Err() == nil {
+		a.Progress(Progress{ID: id, Stage: "tcp", Message: message, Detail: detail, State: state})
 	}
 }

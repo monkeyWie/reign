@@ -227,6 +227,7 @@ func (h *Hub) connect(ctx context.Context, service, code, public, password, name
 	if !relayOnly {
 		connectivity.Report(ctx, "network", "授权已通过，正在获取直连配置", 3*time.Second)
 		policy := device.Network(connectCtx, service)
+		opts.PublicSTUN, opts.SelfSTUN = policy.PublicSTUN, policy.SelfSTUN
 		opts.ICEServers = policy.Servers()
 		opts.TCPSTUN = policy.TCPSTUN
 	}
@@ -257,7 +258,7 @@ func (h *Hub) connect(ctx context.Context, service, code, public, password, name
 	if old != nil {
 		old.Close()
 	}
-	connectivity.Report(ctx, "connected", "连接成功", 0)
+	connectivity.Note(ctx, "connected", "connected", "连接成功", c.Path(), "success")
 	return s, nil
 }
 func (h *Hub) Disconnect(id string) error {

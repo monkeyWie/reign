@@ -7,12 +7,14 @@ import {
   type ServiceConfig,
 } from "@reignhub/protocol";
 import { keypair, envelope, hex, random } from "./crypto";
+import { progressStep, type ProgressObserver } from "./progress";
 import { browserDeviceName } from "./browser-identity";
 import { ReignHubCache, type SavedDevice } from "./cache";
 export class Service {
   constructor(
     public origin: string,
     public cache: ReignHubCache,
+    public observe?: ProgressObserver,
   ) {
     const u = new URL(origin);
     if (
@@ -38,7 +40,9 @@ export class Service {
         ...(token ? { Authorization: "Bearer " + token } : {}),
       },
       body: JSON.stringify(input),
-      signal,
+      signal: signal
+        ? AbortSignal.any([signal, AbortSignal.timeout(15000)])
+        : AbortSignal.timeout(15000),
     });
     const data = (await r.json()) as { code: string; message: string };
     if (!r.ok)
@@ -49,8 +53,21 @@ export class Service {
       );
     return data as T;
   }
-  config() {
-    return this.post<ServiceConfig>(routes.config);
+  async config() {
+    this.observe?.(
+      progressStep("config", "service", "获取连接配置", this.origin),
+    );
+    const config = await this.post<ServiceConfig>(routes.config);
+    this.observe?.(
+      progressStep(
+        "config",
+        "service",
+        "连接配置已获取",
+        this.origin,
+        "success",
+      ),
+    );
+    return config;
   }
   private identityTask?: Promise<Identity>;
   identity(): Promise<Identity> {
@@ -60,6 +77,9 @@ export class Service {
     }));
   }
   private async loadIdentity(): Promise<Identity> {
+    this.observe?.(
+      progressStep("identity", "service", "验证本机身份", this.origin),
+    );
     let i = await this.cache.identities.get(this.origin);
     const name = await browserDeviceName();
     if (!i) {
@@ -81,15 +101,37 @@ export class Service {
         /* A name refresh must not prevent an existing pairing from connecting. */
       }
     }
+    this.observe?.(
+      progressStep(
+        "identity",
+        "service",
+        "本机身份已验证",
+        this.origin,
+        "success",
+      ),
+    );
     return i;
   }
   async resolve(code: string) {
     const i = await this.identity();
-    return this.post<{ device: Device; online: boolean }>(
+    this.observe?.(
+      progressStep("resolve", "service", "查找设备并检查在线状态", code),
+    );
+    const result = await this.post<{ device: Device; online: boolean }>(
       routes.resolve,
       { connectionId: code },
       i.token,
     );
+    this.observe?.(
+      progressStep(
+        "resolve",
+        "service",
+        result.online ? "被控设备在线" : "被控设备离线",
+        result.device.name,
+        result.online ? "success" : "warning",
+      ),
+    );
+    return result;
   }
   async pair(
     code: string,
@@ -107,8 +149,21 @@ export class Service {
     ] as unknown as string);
     if (previous && previous.public !== d.public)
       throw Error("设备身份已改变，请删除旧配对后重试");
-    if (previous && (!previous.expires || previous.expires > Date.now() / 1000))
+    if (
+      previous &&
+      (!previous.expires || previous.expires > Date.now() / 1000)
+    ) {
+      this.observe?.(
+        progressStep(
+          "approval",
+          "approval",
+          "复用已有设备授权",
+          "无需再次确认",
+          "success",
+        ),
+      );
       return { ...previous, name: d.name };
+    }
     const id = hex(random(16));
     const request = "reignhub/pair/request/" + id;
     const packet = await envelope(i.private, d.public, request, {
@@ -120,6 +175,14 @@ export class Service {
       { id, host: d.id, envelope: packet },
       i.token,
       signal,
+    );
+    this.observe?.(
+      progressStep(
+        "approval",
+        "approval",
+        password ? "等待电脑验证密码" : "等待被控电脑确认授权",
+        d.name,
+      ),
     );
     onWaiting?.();
     const deadline = Date.now() + 125000;
@@ -149,6 +212,15 @@ export class Service {
           service: this.origin,
           identityId: i.id,
         };
+        this.observe?.(
+          progressStep(
+            "approval",
+            "approval",
+            "设备授权已通过",
+            d.name,
+            "success",
+          ),
+        );
         await this.cache.devices.put(saved);
         return saved;
       }

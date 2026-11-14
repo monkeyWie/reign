@@ -23,6 +23,11 @@ type Client struct {
 }
 
 func Connect(ctx context.Context, p Pairing, opts Options) (*Client, error) {
+	if opts.Progress == nil {
+		opts.Progress = connectivity.Observer(ctx)
+	} else {
+		ctx = connectivity.WithProgress(ctx, opts.Progress)
+	}
 	connectivity.Report(ctx, "signal", "正在建立信令连接", 12*time.Second)
 	dialCtx, stopDial := context.WithTimeout(ctx, 12*time.Second)
 	ws, dataWS, peer, err := dial(dialCtx, p, "client")
@@ -77,6 +82,7 @@ func Connect(ctx context.Context, p Pairing, opts Options) (*Client, error) {
 		c.Close()
 		return nil, fmt.Errorf("配对握手失败: %w", err)
 	}
+	connectivity.Note(ctx, "handshake", "handshake", "端到端加密握手完成", "已验证设备配对密钥", "success")
 	message := "正在尝试 P2P 直连；此服务未授予中继权限"
 	if dataWS != nil {
 		message = "优先尝试 P2P 直连，必要时自动使用中继"

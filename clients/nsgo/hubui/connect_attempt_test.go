@@ -3,6 +3,7 @@ package hubui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -95,5 +96,90 @@ func TestPairingFailureEditKeepsServiceAndDeviceID(t *testing.T) {
 	app.WaitFor("id:connection-code", time.Second)
 	if app.Find("id:connection-code").Text != "123456" || app.Find("id:connection-service").Text != DefaultService {
 		t.Fatal("editing discarded the target")
+	}
+}
+
+type retryProgressFixture struct {
+	*demoAPI
+	steps  chan connectivity.Progress
+	finish chan error
+	calls  atomic.Int32
+}
+
+func (*retryProgressFixture) CanHost() bool { return false }
+func (f *retryProgressFixture) Call(ctx context.Context, method string, p Object, target string, r Object) (any, error) {
+	if method != "client.reconnect" {
+		return f.demoAPI.Call(ctx, method, p, target, r)
+	}
+	f.calls.Add(1)
+	connectivity.Report(ctx, "signal", "正在建立信令连接", 12*time.Second)
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case step := <-f.steps:
+			if observe := connectivity.Observer(ctx); observe != nil {
+				observe(step)
+			}
+		case err := <-f.finish:
+			if err != nil {
+				return nil, err
+			}
+			return f.demoAPI.Call(ctx, method, p, target, r)
+		}
+	}
+}
+func TestRetryKeepsStatusPanelAndShowsActualTransportSteps(t *testing.T) {
+	f := &retryProgressFixture{demoAPI: newDemoAPI(), steps: make(chan connectivity.Progress, 8), finish: make(chan error, 1)}
+	app := nsgotest.Start(t, func(cx *core.Scope) core.Node { return RootWithAPI(cx, f, true) }, nsgotest.Size(390, 844), nsgotest.Environment(core.Environment{OS: core.OSAndroid, Idiom: core.IdiomPhone}))
+	openDemoChat(t, app)
+	app.Type("id:chat-input", "重试时保留草稿")
+	app.Press("id:connection-status-demo-device")
+	app.Press("id:connection-retry")
+	app.WaitFor("text:正在建立信令连接", time.Second)
+	if app.Exists("id:dialog-connecting") || !app.Exists("id:dialog-connection-status") {
+		t.Fatal("retry opened a separate progress panel")
+	}
+	spinner := app.Find("id:connection-loading").ID
+	f.steps <- connectivity.Progress{ID: "stun:cf", Stage: "udp", Message: "公共 STUN 节点", Detail: "stun:stun.cloudflare.com:3478 · 并行探测", State: "info"}
+	f.steps <- connectivity.Progress{ID: "stun:self", Stage: "udp", Message: "自建 STUN 节点", Detail: "stun:probe.example.com:26330 · 并行探测", State: "info"}
+	f.steps <- connectivity.Progress{ID: "tcp", Stage: "tcp", Message: "探测 TCP 公网映射", Detail: "probe.example.com:26330", State: "running"}
+	f.steps <- connectivity.Progress{ID: "path", Stage: "relay", Message: "正在使用加密中继", Detail: "wss://reignhub.app/p2p/relay", State: "success"}
+	app.WaitFor("text:wss://reignhub.app/p2p/relay", time.Second)
+	app.Find("text:stun:stun.cloudflare.com:3478 · 并行探测")
+	app.Find("text:stun:probe.example.com:26330 · 并行探测")
+	if app.Find("id:connection-loading").ID != spinner {
+		t.Fatal("progress remounted the status panel")
+	}
+	app.Screenshot("phone-retry-connection-details")
+	f.finish <- errors.New("网络验证失败")
+	app.WaitFor("id:connection-retry", time.Second)
+	app.Press("id:connection-retry")
+	app.WaitUntil(time.Second, func() bool { return f.calls.Load() == 2 })
+	f.steps <- connectivity.Progress{ID: "path", Stage: "direct", Message: "已切换为 TCP 直连", Detail: "192.168.1.2:5000 → 192.168.1.3:5000", State: "success"}
+	app.WaitFor("text:已切换为 TCP 直连", time.Second)
+	f.finish <- nil
+	app.WaitFor("text:连接正常，消息会持续同步。", time.Second)
+	if app.Exists("id:connection-error-raw") || app.Exists("id:error-banner") {
+		t.Fatal("successful retry retained stale failure")
+	}
+	app.Press("id:connection-done")
+	if app.Find("id:chat-input").Text != "重试时保留草稿" {
+		t.Fatal("retry discarded draft")
+	}
+}
+func TestConnectionTimelineIsBoundedAndUpdatesNodeResults(t *testing.T) {
+	a := &connectAttempt{started: time.Now()}
+	a.record(connectivity.Progress{ID: "stun:node", Message: "探测节点", State: "running"})
+	at := a.steps[0].at
+	a.record(connectivity.Progress{ID: "stun:node", Message: "已获得公网映射", State: "success"})
+	if len(a.steps) != 1 || a.steps[0].at != at || a.steps[0].State != "success" {
+		t.Fatal("node result was duplicated")
+	}
+	for i := 0; i < 200; i++ {
+		a.record(connectivity.Progress{ID: fmt.Sprint(i), Message: "候选地址", State: "info"})
+	}
+	if len(a.steps) != 80 {
+		t.Fatal("unbounded connection history")
 	}
 }

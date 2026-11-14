@@ -1,12 +1,15 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import { ConnectionPanel, type ConnectionAttempt } from "./connection-panel";
 import { MessageContent } from "./message-content-view";
 import { readableMessage } from "./message-content";
 import {
   ArrowLeft,
   ArrowDown,
   Wrench,
+  Wifi,
+  WifiOff,
   ArrowUp,
   Check,
   ChevronDown,
@@ -32,6 +35,8 @@ import {
   Connection,
   ReignHubCache,
   Service,
+  recordProgress,
+  type ConnectionProgress,
   type SavedDevice,
 } from "@reignhub/client-sdk";
 import type { Item, Provider, Session } from "@reignhub/protocol";
@@ -87,7 +92,21 @@ export function RemoteApp() {
   const [code, setCode] = useState("");
   const [password, setPassword] = useState("");
   const [pairing, setPairing] = useState(false);
-  const [pairStatus, setPairStatus] = useState("");
+  const [attempts, setAttempts] = useState<Record<string, ConnectionAttempt>>(
+    {},
+  );
+  const [connectionPanel, setConnectionPanel] = useState("");
+  const attemptResources = useRef(
+    new Map<
+      string,
+      {
+        cancelled: boolean;
+        active: boolean;
+        controller: AbortController;
+        connection?: Connection;
+      }
+    >(),
+  );
   const [search, setSearch] = useState("");
   const [view, setView] = useState<"devices" | "sessions" | "chat">("devices");
   const pairAbort = useRef<AbortController | undefined>(undefined);
@@ -118,25 +137,136 @@ export function RemoteApp() {
       disposed.current = true;
       window.removeEventListener("popstate", onPop);
       pairAbort.current?.abort();
+      for (const attempt of attemptResources.current.values()) {
+        attempt.cancelled = true;
+        attempt.controller.abort();
+        attempt.connection?.close();
+      }
       for (const t of reconnectTimers.current.values()) clearTimeout(t);
       for (const c of Object.values(connectionRef.current)) c.close();
     };
   }, []);
-  async function connect(d: SavedDevice, automatic = false) {
+
+  function startAttempt(
+    key: string,
+    data: Omit<ConnectionAttempt, "active" | "steps" | "started">,
+    seed?: ConnectionAttempt,
+  ) {
+    const previous = attemptResources.current.get(key);
+    if (previous) {
+      previous.cancelled = true;
+      previous.controller.abort();
+      previous.connection?.close();
+    }
+    const resource = {
+      cancelled: false,
+      active: true,
+      controller: new AbortController(),
+      connection: undefined as Connection | undefined,
+    };
+    attemptResources.current.set(key, resource);
+    const value: ConnectionAttempt = {
+      ...data,
+      active: true,
+      steps: seed?.steps || [],
+      started: seed?.started || Date.now(),
+    };
+    setAttempts((all) => ({ ...all, [key]: value }));
+    const observe = (step: ConnectionProgress) => {
+      if (
+        disposed.current ||
+        resource.cancelled ||
+        attemptResources.current.get(key) !== resource
+      )
+        return;
+      setAttempts((all) => ({
+        ...all,
+        [key]: {
+          ...(all[key] || value),
+          steps: recordProgress(all[key]?.steps || value.steps, step),
+          path: resource.connection?.path || all[key]?.path,
+        },
+      }));
+    };
+    const finish = (error?: unknown) => {
+      if (
+        disposed.current ||
+        resource.cancelled ||
+        attemptResources.current.get(key) !== resource
+      )
+        return;
+      resource.active = false;
+      setAttempts((all) => ({
+        ...all,
+        [key]: {
+          ...(all[key] || value),
+          active: false,
+          finished: Date.now(),
+          error: error ? errorText(error) : undefined,
+          path: resource.connection?.path,
+        },
+      }));
+    };
+    return { resource, observe, finish };
+  }
+  function cancelAttempt(key: string) {
+    const resource = attemptResources.current.get(key);
+    if (resource) {
+      resource.cancelled = true;
+      resource.active = false;
+      resource.controller.abort();
+      resource.connection?.close();
+    }
+    const timer = reconnectTimers.current.get(key);
+    if (timer) clearTimeout(timer);
+    reconnectTimers.current.delete(key);
+    forgotten.current.add(key);
+    if (key === "pair") setPairing(false);
+    setReconnecting((all) => ({ ...all, [key]: false }));
+    setAttempts((all) => ({
+      ...all,
+      [key]: {
+        ...all[key],
+        active: false,
+        path: "已取消",
+        finished: Date.now(),
+      },
+    }));
+  }
+  async function connect(
+    d: SavedDevice,
+    automatic = false,
+    force = false,
+    seed?: ConnectionAttempt,
+  ) {
     const key = deviceKey(d);
     if (disposed.current || (automatic && forgotten.current.has(key))) return;
-    if (!automatic) forgotten.current.delete(key);
+    if (!automatic) {
+      forgotten.current.delete(key);
+      setConnectionPanel(key);
+    }
+    if (attemptResources.current.get(key)?.active) return;
     if (
       connectionRef.current[key] &&
-      connectionRef.current[key].path !== "Disconnected"
+      connectionRef.current[key].path !== "Disconnected" &&
+      !force
     )
       return;
+    const timer = reconnectTimers.current.get(key);
+    if (timer) clearTimeout(timer);
+    reconnectTimers.current.delete(key);
+    const { resource, observe, finish } = startAttempt(
+      key,
+      { name: d.name, service: d.service, code: d.connectionId },
+      seed,
+    );
     setReconnecting((x) => ({ ...x, [key]: true }));
     try {
-      const api = new Service(d.service, cache);
+      const api = new Service(d.service, cache, observe);
       const identity = await api.identity();
       const config = await api.config();
       const resolved = await api.resolve(d.connectionId);
+      if (resource.cancelled) return;
       if (!resolved.online)
         throw Error(
           "被控设备离线，请确认电脑上的 ReignHub 正在运行并已连接服务",
@@ -145,10 +275,29 @@ export function RemoteApp() {
         throw Error("设备身份已改变，请重新配对");
       const latest = { ...d, name: resolved.device.name };
       await cache.devices.put(latest);
-      const c = await new Connection(latest, identity, config).connect();
-      c.addEventListener("change", () => setConnections((x) => ({ ...x })));
+      const c = new Connection(latest, identity, config, observe);
+      resource.connection = c;
+      c.addEventListener("change", () => {
+        if (
+          resource.cancelled ||
+          attemptResources.current.get(key) !== resource
+        )
+          return;
+        setConnections((x) => ({ ...x }));
+        setAttempts((all) =>
+          all[key] ? { ...all, [key]: { ...all[key], path: c.path } } : all,
+        );
+      });
+      let established = false;
       c.addEventListener("disconnect", () => {
-        if (disposed.current || forgotten.current.has(key)) return;
+        if (
+          !established ||
+          disposed.current ||
+          resource.cancelled ||
+          attemptResources.current.get(key) !== resource ||
+          forgotten.current.has(key)
+        )
+          return;
         setConnections((x) => ({ ...x }));
         if (!reconnectTimers.current.has(key)) {
           const timer = setTimeout(() => {
@@ -158,6 +307,13 @@ export function RemoteApp() {
           reconnectTimers.current.set(key, timer);
         }
       });
+      await c.connect();
+      established = true;
+      if (resource.cancelled) {
+        c.close();
+        return;
+      }
+      finish();
       setConnections((x) => ({ ...x, [key]: c }));
       setDevices(await cache.devices.toArray());
       if (!automatic) {
@@ -165,8 +321,8 @@ export function RemoteApp() {
         setView("sessions");
       }
     } catch (e) {
-      if (!automatic) onError(e);
-      else if (!reconnectTimers.current.has(key))
+      finish(e);
+      if (automatic && !resource.cancelled && !reconnectTimers.current.has(key))
         reconnectTimers.current.set(
           key,
           setTimeout(() => {
@@ -175,12 +331,14 @@ export function RemoteApp() {
           }, 10000),
         );
     } finally {
-      setReconnecting((x) => ({ ...x, [key]: false }));
+      if (attemptResources.current.get(key) === resource)
+        setReconnecting((x) => ({ ...x, [key]: false }));
     }
   }
   async function remove(d: SavedDevice) {
     const key = deviceKey(d);
     forgotten.current.add(key);
+    cancelAttempt(key);
     const timer = reconnectTimers.current.get(key);
     if (timer) clearTimeout(timer);
     reconnectTimers.current.delete(key);
@@ -202,24 +360,40 @@ export function RemoteApp() {
     }
   }
   async function pair() {
+    if (pairing) return;
     setPairing(true);
-    setPairStatus("正在连接设备…");
-    pairAbort.current = new AbortController();
+    setPairDialog(false);
+    setConnectionPanel("pair");
+    const started = Date.now();
+    let steps: ConnectionProgress[] = [];
+    const { resource, observe, finish } = startAttempt("pair", {
+      name: "设备 " + code,
+      service,
+      code,
+    });
+    pairAbort.current = resource.controller;
     try {
-      const api = new Service(service, cache);
-      const d = await api.pair(code, password, pairAbort.current.signal, () =>
-        setPairStatus("请在被控设备确认授权，或等待密码验证…"),
-      );
+      const api = new Service(service, cache, (step) => {
+        steps = recordProgress(steps, step);
+        observe(step);
+      });
+      const d = await api.pair(code, password, resource.controller.signal);
+      if (resource.cancelled) return;
       setDevices(await cache.devices.toArray());
-      await connect(d);
-      setPairDialog(false);
+      finish();
+      await connect(d, false, false, {
+        name: d.name,
+        service,
+        code,
+        started,
+        steps,
+        active: true,
+      });
       setPassword("");
-      setCode("");
     } catch (e) {
-      if (!pairAbort.current.signal.aborted) onError(e);
+      if (!resource.cancelled) finish(e);
     } finally {
-      setPairing(false);
-      setPairStatus("");
+      if (attemptResources.current.get("pair") === resource) setPairing(false);
     }
   }
   useEffect(() => {
@@ -467,6 +641,21 @@ export function RemoteApp() {
                 <Button
                   size="icon"
                   variant="ghost"
+                  className="device-connection-status"
+                  aria-label="连接详情"
+                  onClick={() => setConnectionPanel(k)}
+                >
+                  {reconnecting[k] ? (
+                    <LoaderCircle size={14} className="spin" />
+                  ) : c?.path === "Disconnected" || !c ? (
+                    <WifiOff size={14} />
+                  ) : (
+                    <Wifi size={14} />
+                  )}
+                </Button>
+                <Button
+                  size="icon"
+                  variant="ghost"
                   aria-label="移除设备"
                   onClick={() => void remove(d)}
                 >
@@ -622,6 +811,7 @@ export function RemoteApp() {
               await cache.putSnapshot(key, value);
             }}
             onError={onError}
+            onConnectionStatus={() => setConnectionPanel(selectedDevice)}
             onBack={() => {
               setView("sessions");
               if (history.state?.reignChat) history.back();
@@ -688,7 +878,7 @@ export function RemoteApp() {
           />
         </label>
         <small className="muted">服务：{service}</small>
-        <p aria-live="polite">{pairStatus}</p>
+
         <Button
           variant="primary"
           disabled={code.length !== 6 || pairing}
@@ -702,6 +892,35 @@ export function RemoteApp() {
           连接
         </Button>
       </Dialog>
+      <ConnectionPanel
+        open={!!connectionPanel}
+        attempt={
+          attempts[connectionPanel] ||
+          (() => {
+            const d = devices.find((d) => deviceKey(d) === connectionPanel);
+            return d
+              ? {
+                  name: d.name,
+                  service: d.service,
+                  code: d.connectionId,
+                  started: Date.now(),
+                  active: false,
+                  steps: [],
+                  path: connections[connectionPanel]?.path || "尚未连接",
+                }
+              : undefined;
+          })()
+        }
+        onClose={() => setConnectionPanel("")}
+        onCancel={() => cancelAttempt(connectionPanel)}
+        onRetry={() => {
+          if (connectionPanel === "pair") void pair();
+          else {
+            const d = devices.find((d) => deviceKey(d) === connectionPanel);
+            if (d) void connect(d, false, true);
+          }
+        }}
+      />
       <Dialog title="设置" open={settings} onOpenChange={setSettings}>
         <p className="muted">当前服务：{service}</p>
         <p className="muted">
@@ -735,6 +954,7 @@ export function Chat({
   transcript: t,
   onOlder,
   onError,
+  onConnectionStatus,
   onBack,
 }: {
   c: Connection;
@@ -742,6 +962,7 @@ export function Chat({
   selected: Selected;
   transcript?: Transcript;
   onOlder: () => Promise<void>;
+  onConnectionStatus: () => void;
   onError: (e: unknown) => void;
   onBack: () => void;
 }) {
@@ -920,11 +1141,14 @@ export function Chat({
           <strong>{t?.session.title || "会话"}</strong>
           <small>{t?.session.cwd}</small>
         </div>
-        <span
+        <button
+          type="button"
+          onClick={onConnectionStatus}
+          aria-label="连接详情"
           className={"path-badge " + (c.path.startsWith("P2P") ? "direct" : "")}
         >
           {c.path}
-        </span>
+        </button>
       </header>
       <div className="messages-area">
         <div
