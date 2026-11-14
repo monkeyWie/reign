@@ -4,7 +4,7 @@ export default function robots(): MetadataRoute.Robots {
   return {
     rules: {
       userAgent: "*",
-      allow: ["/en", "/zh-CN"],
+      allow: "/",
       disallow: ["/chat", "/account", "/admin", "/api/", "/p2p/"],
     },
     sitemap: siteOrigin ? `${siteOrigin}/sitemap.xml` : undefined,

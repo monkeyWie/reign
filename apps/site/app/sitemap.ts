@@ -11,7 +11,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
       alternates: { languages: languageAlternates(path) },
     })),
     ...source.getPages(locale).map((page) => {
-      const path = page.url.replace(/^\/(en|zh-CN)/, "");
+      const path = page.url.replace(/^\/zh-CN(?=\/|$)/, "");
       return {
         url: siteOrigin + page.url,
         alternates: { languages: languageAlternates(path) },

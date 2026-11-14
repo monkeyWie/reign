@@ -5,7 +5,9 @@ import type { Locale } from "./i18n";
 export function legalLinks(locale: Locale) {
   const resolve = (value: string | undefined) => {
     if (!value) return undefined;
-    const href = value.replaceAll("{lang}", locale);
+    const href = value
+      .replaceAll("{localePrefix}", locale === "en" ? "" : "/zh-CN")
+      .replaceAll("{lang}", locale);
     if (href.startsWith("/") && !href.startsWith("//")) return href;
     try {
       return ["https:", "http:"].includes(new URL(href).protocol)

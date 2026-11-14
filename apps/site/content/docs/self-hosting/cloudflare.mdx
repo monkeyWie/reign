@@ -48,7 +48,7 @@ To allow additional Web origins, set `ALLOWED_ORIGINS` to exact comma-separated 
 
 ## Site languages and SEO
 
-The website and docs are available at `/en` and `/zh-CN`; `/chat` keeps its stable console route. Before building for a stable public domain, set `SITE_URL`:
+English uses unprefixed URLs such as `/docs`; Chinese uses `/zh-CN/docs`. First visits follow the browser language, and manual language choices are remembered. The console uses `/chat`. Before building for a stable public domain, set `SITE_URL`:
 
 ```sh
 SITE_URL=https://reign.example.com pnpm build:web
@@ -62,12 +62,12 @@ This generates canonical URLs, language alternates, social cards and a sitemap f
 If your service has its own terms and privacy policy, configure their URLs at build time:
 
 ```sh
-NEXT_PUBLIC_TERMS_URL='https://example.com/{lang}/terms' \
-NEXT_PUBLIC_PRIVACY_URL='https://example.com/{lang}/privacy' \
+NEXT_PUBLIC_TERMS_URL='https://example.com{localePrefix}/terms' \
+NEXT_PUBLIC_PRIVACY_URL='https://example.com{localePrefix}/privacy' \
 pnpm build:web
 ```
 
-`{lang}` is replaced with `en` or `zh-CN`; fixed URLs also work. Once both URLs are configured, the website footer and account page show the links. Host the content on your own site; the open-source build does not include another operator's policies.
+`{localePrefix}` is empty for English and `/zh-CN` for Chinese; fixed URLs also work. Once both URLs are configured, the website footer and account page show the links. Host the content on your own site; the open-source build does not include another operator's policies.
 
 ## Local verification
 

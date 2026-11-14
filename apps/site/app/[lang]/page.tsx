@@ -1,5 +1,5 @@
 import { pageMetadata, marketingMeta, siteOrigin } from "../../lib/seo";
-import { translate, isLocale } from "../../lib/i18n";
+import { translate, isLocale, localizeHref } from "../../lib/i18n";
 import { notFound } from "next/navigation";
 import { LocalizedLink as Link } from "../../components/locale";
 import {
@@ -41,7 +41,7 @@ export default async function Home({
                 "@context": "https://schema.org",
                 "@type": "WebSite",
                 name: "Reign",
-                url: `${siteOrigin}/${lang}`,
+                url: siteOrigin + localizeHref("/", lang),
                 description: marketingMeta["/"][lang][1],
                 inLanguage: lang,
               }).replace(/</g, "\\u003c"),

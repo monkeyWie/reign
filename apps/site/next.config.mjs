@@ -23,19 +23,5 @@ const config = {
   ],
   images: { unoptimized: true },
   poweredByHeader: false,
-  async redirects() {
-    return [
-      ...["features", "technology", "pricing", "download"].map((path) => ({
-        source: `/${path}`,
-        destination: `/zh-CN/${path}`,
-        permanent: true,
-      })),
-      {
-        source: "/docs/:path*",
-        destination: "/zh-CN/docs/:path*",
-        permanent: true,
-      },
-    ];
-  },
 };
 export default createMDX()(config);

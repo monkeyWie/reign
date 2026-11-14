@@ -26,7 +26,7 @@ export default async function Layout({
               ♜ Reign <span className="docs-wordmark">/ {t("文档")}</span>
             </span>
           ),
-          url: `/${lang}`,
+          url: localizeHref("/", lang),
         }}
         githubUrl="https://github.com/monkeyWie/reign"
         links={[

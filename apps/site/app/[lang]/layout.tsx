@@ -1,10 +1,12 @@
 import { notFound } from "next/navigation";
 import { LocaleProvider } from "../../components/locale";
-import { isLocale, locales } from "../../lib/i18n";
+import { isLocale } from "../../lib/i18n";
 import "../globals.css";
 
+export const dynamicParams = false;
+
 export function generateStaticParams() {
-  return locales.map((lang) => ({ lang }));
+  return [{ lang: "zh-CN" }];
 }
 export default async function RootLayout({
   children,

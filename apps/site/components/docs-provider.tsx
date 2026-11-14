@@ -1,7 +1,7 @@
 "use client";
 import type { ReactNode } from "react";
 import { RootProvider } from "fumadocs-ui/provider/next";
-import { i18n, type Locale } from "../lib/i18n";
+import { i18n, isLocale, switchLocale, type Locale } from "../lib/i18n";
 import { useLocale } from "./locale";
 import { i18nProvider, uiTranslations } from "fumadocs-ui/i18n";
 import { useStaticSearch } from "fumadocs-core/search/client";
@@ -89,7 +89,16 @@ export function DocsProvider({
   return (
     <RootProvider
       search={{ SearchDialog: DocumentSearch }}
-      i18n={i18nProvider(translations, locale)}
+      i18n={{
+        ...i18nProvider(translations, locale),
+        onLocaleChange: (next) => {
+          if (!isLocale(next)) return;
+          const url = new URL(location.href);
+          url.pathname = switchLocale(url.pathname, next);
+          url.searchParams.set("lang", next);
+          location.assign(url);
+        },
+      }}
     >
       {children}
     </RootProvider>

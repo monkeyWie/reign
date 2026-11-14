@@ -41,7 +41,7 @@ export default async function Page({ params }: Props) {
   );
 }
 export function generateStaticParams() {
-  return source.generateParams();
+  return source.generateParams().filter((params) => params.lang === "zh-CN");
 }
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { slug, lang } = await params;

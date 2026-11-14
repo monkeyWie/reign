@@ -2,7 +2,7 @@
 import { useT, useLocale } from "./locale";
 import { LocalizedLink as Link } from "./locale";
 import { localizeHref, switchLocale } from "../lib/i18n";
-import NextLink from "next/link";
+
 import { usePathname } from "next/navigation";
 import { ArrowUpRight, Menu } from "lucide-react";
 
@@ -36,9 +36,20 @@ export function SiteHeader() {
           ))}
         </nav>
         <div className="site-header-actions">
-          <NextLink
+          <a
             className="site-language-link"
-            href={switchLocale(pathname, locale === "en" ? "zh-CN" : "en")}
+            onClick={(event) => {
+              const next = locale === "en" ? "zh-CN" : "en";
+              const url = new URL(location.href);
+              url.pathname = switchLocale(url.pathname, next);
+              url.searchParams.set("lang", next);
+              event.currentTarget.href = url.href;
+            }}
+            href={
+              switchLocale(pathname, locale === "en" ? "zh-CN" : "en") +
+              "?lang=" +
+              (locale === "en" ? "zh-CN" : "en")
+            }
             hrefLang={locale === "en" ? "zh-CN" : "en"}
             lang={locale === "en" ? "zh-CN" : "en"}
             aria-label={
@@ -48,7 +59,7 @@ export function SiteHeader() {
             }
           >
             {locale === "en" ? "简体中文" : "English"}
-          </NextLink>
+          </a>
           <Link className="site-console-link" href="/chat">
             {t("控制台")}
             <ArrowUpRight size={14} />

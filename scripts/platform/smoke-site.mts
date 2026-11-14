@@ -1,12 +1,13 @@
 // Read-only smoke checks, reusable against local builds and deployed sites.
 import assert from "node:assert/strict";
+import { publicLocalePath } from "../../apps/site/lib/language-routing";
 import { pathToFileURL } from "node:url";
 
 export async function smokeSite(origin: string) {
   const pending = new Set(
     ["en", "zh-CN"].flatMap((lang) =>
       ["", "/features", "/technology", "/pricing", "/download", "/docs"].map(
-        (path) => `/${lang}${path}`,
+        (path) => publicLocalePath(path || "/", lang as "en" | "zh-CN"),
       ),
     ),
   );
@@ -15,12 +16,20 @@ export async function smokeSite(origin: string) {
   while (pending.size) {
     const path = pending.values().next().value!;
     pending.delete(path);
-    const response = await fetch(origin + path);
+    const response = await fetch(origin + path, {
+      headers: { Cookie: "reign_locale=en" },
+      redirect: "manual",
+    });
     assert.equal(response.status, 200, path);
     const html = await response.text();
-    const lang = path.startsWith("/en") ? "en" : "zh-CN";
+    const lang = path.startsWith("/zh-CN") ? "zh-CN" : "en";
     assert.match(html, new RegExp(`<html[^>]*lang="${lang}"`), path);
     assert.match(html, /<h1[\s>]/, path);
+    assert.doesNotMatch(
+      html,
+      /https?:\/\/[^"<>\s]+\/en(?:\/|["<])/,
+      `English-prefixed SEO URL: ${path}`,
+    );
     assert.doesNotMatch(
       html,
       /\[object Object\]/,
@@ -40,9 +49,9 @@ export async function smokeSite(origin: string) {
       canonicalOrigin = new URL(canonical[1]).origin;
       assert.equal(canonical[1], canonicalOrigin + path, path);
       for (const alternate of ["en", "zh-CN", "x-default"]) {
-        const alternatePath = path.replace(
-          /^\/(en|zh-CN)/,
-          "/" + (alternate === "x-default" ? "en" : alternate),
+        const alternatePath = publicLocalePath(
+          path,
+          alternate === "zh-CN" ? "zh-CN" : "en",
         );
         assert.ok(
           html.includes(
@@ -60,14 +69,14 @@ export async function smokeSite(origin: string) {
         path,
       );
     }
-    if (path === "/en") {
+    if (path === "/") {
       assert.match(html, /Beyond your desk/);
       assert.ok(
         !html.includes("Agent 在电脑上"),
         "English homepage must have translated content",
       );
     }
-    if (/^\/(en|zh-CN)$/.test(path)) {
+    if (path === "/" || path === "/zh-CN") {
       for (const text of [
         "8.9",
         "39–48",
@@ -105,18 +114,25 @@ export async function smokeSite(origin: string) {
     );
     visited.add(path);
     for (const match of html.matchAll(
-      /href="(\/(?:en|zh-CN)\/docs(?:\/[^"?#]*)?)(?:[?#][^"]*)?"/g,
+      /href="(\/(?:zh-CN\/)?docs(?:\/[^"?#]*)?)(?:[?#][^"]*)?"/g,
     )) {
       const linked = match[1];
       if (!visited.has(linked)) pending.add(linked);
     }
-    // Localized prose must not send the reader back through legacy Chinese redirects.
     assert.ok(
-      !/href="\/(?:docs|features|technology|pricing|download)(?:["/#?])/.test(
-        html,
-      ),
-      `Unlocalized website link: ${path}`,
+      !/href="\/en(?:["/?#])/.test(html),
+      `English prefix in public links: ${path}`,
     );
+    if (lang === "zh-CN")
+      for (const match of html.matchAll(
+        /href="(\/(?:docs|features|technology|pricing|download)(?:[^"\s]*))"/g,
+      )) {
+        assert.equal(
+          new URL(match[1], origin).searchParams.get("lang"),
+          "en",
+          `Chinese page has an unlocalized content link: ${path} -> ${match[1]}`,
+        );
+      }
   }
   for (const lang of ["en", "zh-CN"]) {
     for (const path of [
@@ -126,27 +142,55 @@ export async function smokeSite(origin: string) {
       "architecture/performance",
     ]) {
       assert.ok(
-        visited.has(`/${lang}/docs/${path}`),
+        visited.has(publicLocalePath(`/docs/${path}`, lang as "en" | "zh-CN")),
         `Unlinked translation: ${lang}/${path}`,
       );
     }
     assert.equal(
-      (await fetch(`${origin}/${lang}/docs/not-a-reign-page`)).status,
+      (
+        await fetch(
+          origin +
+            publicLocalePath("/docs/not-a-reign-page", lang as "en" | "zh-CN"),
+          { headers: { Cookie: "reign_locale=en" } },
+        )
+      ).status,
       404,
     );
   }
   assert.equal((await fetch(origin + "/fr/docs")).status, 404);
-  const root = await fetch(origin + "/", { redirect: "manual" });
-  assert.ok([307, 308].includes(root.status));
-  assert.equal(new URL(root.headers.get("location")!, origin).pathname, "/en");
-  for (const path of ["/docs/quick-start", "/features"]) {
-    const response = await fetch(origin + path, { redirect: "manual" });
-    assert.equal(response.status, 308);
+  for (const path of ["/", "/docs/quick-start", "/features"]) {
+    const neutral = await fetch(origin + path, { redirect: "manual" });
+    assert.equal(neutral.status, 200, path);
+    const chinese = await fetch(origin + path, {
+      headers: { "Accept-Language": "zh-CN,en;q=0.8" },
+      redirect: "manual",
+    });
+    assert.equal(chinese.status, 307, path);
     assert.equal(
-      new URL(response.headers.get("location")!, origin).pathname,
-      "/zh-CN" + path,
+      new URL(chinese.headers.get("Location")!, origin).pathname,
+      publicLocalePath(path, "zh-CN"),
     );
+    assert.match(chinese.headers.get("Cache-Control")!, /no-store/);
+    const selected = await fetch(origin + path + "?lang=en&from=check", {
+      headers: { "Accept-Language": "zh-CN", Cookie: "reign_locale=zh-CN" },
+      redirect: "manual",
+    });
+    assert.equal(selected.status, 303);
+    assert.match(selected.headers.get("Set-Cookie")!, /reign_locale=en/);
+    assert.equal(
+      new URL(selected.headers.get("Location")!, origin).search,
+      "?from=check",
+    );
+    const remembered = await fetch(origin + path, {
+      headers: { "Accept-Language": "zh-CN", Cookie: "reign_locale=en" },
+      redirect: "manual",
+    });
+    assert.equal(remembered.status, 200, path);
   }
+  assert.equal(
+    (await fetch(origin + "/en/docs", { redirect: "manual" })).status,
+    404,
+  );
   const search = await fetch(origin + "/api/search");
   assert.equal(search.status, 200);
   const index = await search.json();
@@ -167,6 +211,7 @@ export async function smokeSite(origin: string) {
   for (const path of ["/chat", "/account", "/admin", "/api/", "/p2p/"])
     assert.ok(robots.includes(`Disallow: ${path}`));
   const sitemap = await (await fetch(origin + "/sitemap.xml")).text();
+  assert.doesNotMatch(sitemap, /<loc>[^<]*\/en(?:\/|<)/);
   if (canonicalOrigin) {
     assert.ok(robots.includes(`Sitemap: ${canonicalOrigin}/sitemap.xml`));
     for (const path of visited)
@@ -186,7 +231,7 @@ export async function smokeSite(origin: string) {
     assert.match(card.headers.get("content-type") ?? "", /image\/png/);
   }
   console.log(
-    `Bilingual website, ${visited.size - 10} linked docs, localized metadata/search, legacy redirects, noindex and sitemap passed`,
+    `Bilingual website, ${visited.size - 10} linked docs, localized metadata/search, first-visit language choice, remembered preference, noindex and sitemap passed`,
   );
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href)
