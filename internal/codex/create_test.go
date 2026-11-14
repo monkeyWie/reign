@@ -11,10 +11,10 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
-	"github.com/monkeyWie/reign/internal/config"
-	"github.com/monkeyWie/reign/internal/events"
-	"github.com/monkeyWie/reign/internal/provider"
-	"github.com/monkeyWie/reign/internal/rpc"
+	"github.com/monkeyWie/reignhub/internal/config"
+	"github.com/monkeyWie/reignhub/internal/events"
+	"github.com/monkeyWie/reignhub/internal/provider"
+	"github.com/monkeyWie/reignhub/internal/rpc"
 )
 
 // Reproduce Codex's deferred materialization: thread/start subscribes the

@@ -5,7 +5,7 @@ package main
 */
 import "C"
 import (
-	"github.com/monkeyWie/reign/internal/bridge"
+	"github.com/monkeyWie/reignhub/internal/bridge"
 	"unsafe"
 )
 

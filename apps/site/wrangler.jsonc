@@ -1,6 +1,6 @@
 {
   "$schema": "../../node_modules/wrangler/config-schema.json",
-  "name": "reign",
+  "name": "reignhub",
   "main": "worker.ts",
   // Theme initialization serializes a function into HTML; avoid injected helpers.
   "keep_names": false,

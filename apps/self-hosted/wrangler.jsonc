@@ -1,13 +1,13 @@
 {
   "$schema": "../../node_modules/wrangler/config-schema.json",
-  "name": "reign-self-hosted",
+  "name": "reignhub-self-hosted",
   "main": "src/index.ts",
   "compatibility_date": "2026-11-13",
   "workers_dev": true,
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "reign",
+      "database_name": "reignhub",
       "database_id": "00000000-0000-0000-0000-000000000000",
       "migrations_dir": "../../packages/worker-core/migrations",
     },

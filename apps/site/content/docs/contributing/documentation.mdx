@@ -44,8 +44,8 @@ The build-time `SITE_URL` controls canonical URLs, hreflang, social cards, robot
 
 ```sh
 pnpm dev
-pnpm --filter @reign/site check
-SITE_URL=https://reign.example.com pnpm build:web
+pnpm --filter @reignhub/site check
+SITE_URL=https://reignhub.example.com pnpm build:web
 ```
 
 With a local Worker running, execute `pnpm exec tsx scripts/platform/smoke-site.mts http://localhost:8787` to check bilingual links, unknown-page 404s, localized search and SEO output. CI runs these checks too.

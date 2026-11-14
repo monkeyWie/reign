@@ -1,4 +1,4 @@
-import type { Item, Session } from "@reign/protocol";
+import type { Item, Session } from "@reignhub/protocol";
 export interface Turn {
   id: string;
   status: string;

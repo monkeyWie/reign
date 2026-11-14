@@ -7,8 +7,8 @@ import {
   X,
   File as FileIcon,
 } from "lucide-react";
-import { Connection, ReignCache, b64, un64, sha, hex } from "@reign/client-sdk";
-import type { Attachment } from "@reign/protocol";
+import { Connection, ReignHubCache, b64, un64, sha, hex } from "@reignhub/client-sdk";
+import type { Attachment } from "@reignhub/protocol";
 import { Button, Dialog } from "./ui";
 export async function upload(
   c: Connection,
@@ -58,7 +58,7 @@ export async function upload(
 }
 export async function loadAttachment(
   c: Connection,
-  cache: ReignCache,
+  cache: ReignHubCache,
   provider: string,
   session: string,
   a: Attachment,
@@ -126,7 +126,7 @@ function ImageThumb({
 }: {
   a: Attachment;
   c: Connection;
-  cache: ReignCache;
+  cache: ReignHubCache;
   provider: string;
   session: string;
   onClick: () => void;
@@ -165,7 +165,7 @@ export function Attachments({
 }: {
   items: Attachment[];
   c: Connection;
-  cache: ReignCache;
+  cache: ReignHubCache;
   provider: string;
   session: string;
   onError: (s: string) => void;

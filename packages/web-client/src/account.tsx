@@ -99,7 +99,7 @@ export function AccountPage({
     <main className="account-page">
       <nav>
         <a className="brand" href="/">
-          ♜ Reign
+          ♜ ReignHub
         </a>
         <a href="/chat">返回控制台 ↗</a>
       </nav>
@@ -243,7 +243,7 @@ export function AccountPage({
         </>
       ) : (
         <>
-          <h1>登录 Reign</h1>
+          <h1>登录 ReignHub</h1>
           <p className="muted">
             同步你的设备，随时接续 Agent 工作。首次连接仍由电脑授权。
           </p>
@@ -351,7 +351,7 @@ export function AdminPage() {
     <main className="account-page">
       <nav>
         <a className="brand" href="/">
-          ♜ Reign
+          ♜ ReignHub
         </a>
         <a href="/account">返回账号</a>
       </nav>

@@ -6,7 +6,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { Service } from "../../packages/client-sdk/src/service";
 import { Connection } from "../../packages/client-sdk/src/connection";
-import type { ReignCache } from "../../packages/client-sdk/src/cache";
+import type { ReignHubCache } from "../../packages/client-sdk/src/cache";
 
 const origin = process.argv[2] || "http://127.0.0.1:8787";
 const table = () => {
@@ -26,7 +26,7 @@ const table = () => {
 const cache = {
   identities: table(),
   devices: table(),
-} as unknown as ReignCache;
+} as unknown as ReignHubCache;
 const child = spawn("go", ["run", "./testsupport/workerfixture", origin], {
   cwd: fileURLToPath(new URL("../../clients/nsgo", import.meta.url)),
   detached: true,
@@ -59,7 +59,7 @@ try {
   for (const path of ["/chat", "/account"]) {
     const response = await fetch(origin + path);
     assert.equal(response.status, 200, path);
-    assert.match(await response.text(), /Reign/);
+    assert.match(await response.text(), /ReignHub/);
   }
   const releaseResponse = await fetch(origin + "/api/releases");
   assert.equal(releaseResponse.status, 200, "release catalogue");

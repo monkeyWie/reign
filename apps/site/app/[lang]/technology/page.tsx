@@ -269,7 +269,7 @@ export default async function Technology({
           </div>
           <p className="measurement-note">
             {t(
-              "Apple M5 · macOS 26.6 · arm64 预览构建 · 演示面板与会话场景，Reign 应用进程物理内存实测。",
+              "Apple M5 · macOS 26.6 · arm64 预览构建 · 演示面板与会话场景，ReignHub 应用进程物理内存实测。",
             )}
           </p>
           <Link

@@ -11,13 +11,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/monkeyWie/reign/internal/assets"
-	"github.com/monkeyWie/reign/internal/config"
-	"github.com/monkeyWie/reign/internal/device"
-	"github.com/monkeyWie/reign/internal/events"
-	"github.com/monkeyWie/reign/internal/provider"
-	"github.com/monkeyWie/reign/internal/rpc"
-	"github.com/monkeyWie/reign/internal/system"
+	"github.com/monkeyWie/reignhub/internal/assets"
+	"github.com/monkeyWie/reignhub/internal/config"
+	"github.com/monkeyWie/reignhub/internal/device"
+	"github.com/monkeyWie/reignhub/internal/events"
+	"github.com/monkeyWie/reignhub/internal/provider"
+	"github.com/monkeyWie/reignhub/internal/rpc"
+	"github.com/monkeyWie/reignhub/internal/system"
 )
 
 type pending struct {

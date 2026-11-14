@@ -4,7 +4,7 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/monkeyWie/reign/internal/control"
+	"github.com/monkeyWie/reignhub/internal/control"
 )
 
 // HostStatus reports authenticated live links, not a persistent device registry.

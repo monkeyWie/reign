@@ -1,11 +1,11 @@
 {
-  "name": "@reign/client-sdk",
+  "name": "@reignhub/client-sdk",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "exports": "./src/index.ts",
   "dependencies": {
-    "@reign/protocol": "workspace:*",
+    "@reignhub/protocol": "workspace:*",
     "@noble/curves": "^2.0.1",
     "dexie": "^4.2.1"
   },

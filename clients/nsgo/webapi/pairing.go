@@ -20,7 +20,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/monkeyWie/reign/clients/nsgo/browserclient"
+	"github.com/monkeyWie/reignhub/clients/nsgo/browserclient"
 )
 
 type Object = map[string]any

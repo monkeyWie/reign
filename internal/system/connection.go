@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/monkeyWie/reign/internal/provider"
+	"github.com/monkeyWie/reignhub/internal/provider"
 )
 
 // ProcessStamp identifies a process generation without reading its environment.

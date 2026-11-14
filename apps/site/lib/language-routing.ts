@@ -1,6 +1,6 @@
 // Shared by the self-hosted and official Workers. Routing never needs account
 // data and does not change API, P2P, console or static-asset requests.
-export const localeCookie = "reign_locale";
+export const localeCookie = "reignhub_locale";
 export type SiteLocale = "en" | "zh-CN";
 export function isSiteLocale(value: unknown): value is SiteLocale {
   return value === "en" || value === "zh-CN";

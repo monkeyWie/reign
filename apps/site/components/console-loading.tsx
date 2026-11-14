@@ -12,7 +12,7 @@ export function ConsoleLoading() {
           <span className="console-loading-piece" />
           <span className="console-loading-piece" />
         </div>
-        <div className="console-loading-wordmark">Reign</div>
+        <div className="console-loading-wordmark">ReignHub</div>
         <p className="console-loading-caption">Opening your workspace</p>
       </div>
     </div>

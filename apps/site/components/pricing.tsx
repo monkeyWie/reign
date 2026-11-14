@@ -78,7 +78,7 @@ export function PricingCards() {
             </Link>
             <a
               className="site-text-link"
-              href={`https://myreign.cloud/${locale}/pricing`}
+              href={`https://reignhub.app/${locale}/pricing`}
             >
               {t("了解官方服务 ↗")}
             </a>
@@ -232,7 +232,7 @@ export function PricingCards() {
       )}
       <p className="pricing-status">
         {t(
-          "Reign 服务方案与 Agent 模型费用独立，模型订阅或 API 用量由你使用的模型服务计费。",
+          "ReignHub 服务方案与 Agent 模型费用独立，模型订阅或 API 用量由你使用的模型服务计费。",
         )}
       </p>
     </>

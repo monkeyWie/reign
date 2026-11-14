@@ -1,5 +1,5 @@
 # Test host identity for `nsgo test -target ... ./hubui`.
-name: Reign UI Tests
+name: ReignHub UI Tests
 id: dev.agenthub.nsgo.tests
 version: 0.1.0
 build:

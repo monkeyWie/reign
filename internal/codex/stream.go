@@ -8,8 +8,8 @@ import (
 	"time"
 	"unicode/utf16"
 
-	"github.com/monkeyWie/reign/internal/provider"
-	"github.com/monkeyWie/reign/internal/rpc"
+	"github.com/monkeyWie/reignhub/internal/provider"
+	"github.com/monkeyWie/reignhub/internal/rpc"
 )
 
 type liveItem struct {

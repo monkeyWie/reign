@@ -17,7 +17,7 @@ type demoAPI struct {
 
 func newDemoAPI() *demoAPI {
 	now := time.Now().UnixMilli()
-	s := Object{"id": "demo-chat", "providerId": "codex-app", "title": "Reign 界面与连接方案", "cwd": "/workspace/agenthub", "updatedAt": now, "sourceKind": "app", "model": "gpt-5.4"}
+	s := Object{"id": "demo-chat", "providerId": "codex-app", "title": "ReignHub 界面与连接方案", "cwd": "/workspace/agenthub", "updatedAt": now, "sourceKind": "app", "model": "gpt-5.4"}
 	return &demoAPI{sessions: []Object{s, {"id": "demo-cli", "providerId": "codex-cli", "title": "检查客户端的同步状态", "cwd": "/workspace/agenthub", "updatedAt": now - 1000, "sourceKind": "cli"}, {"id": "demo-claude", "providerId": "claude-code", "title": "整理组件与主题", "cwd": "/workspace/design-system", "updatedAt": now - 2000, "sourceKind": "custom"}}, transcript: Object{"session": s, "turns": []Object{{"id": "demo-turn", "status": "completed", "items": []Object{{"id": "demo-user", "role": "user", "text": "统一聚合这些会话，按照工作目录分组。\n\n桌面和手机都要保持一致的体验。", "timestampMs": now - 20000}, {"id": "demo-assistant", "role": "assistant", "text": "已按工作目录聚合会话，最近更新的项目和会话会排在最前面。\n\n## 连接方式\n\n- 优先尝试 **WebRTC 直连**\n- 不可直连时使用自己的 WSS 中继\n- 断线后保留本地消息缓存\n\n```go\nfunc main() {\n    nsgo.Run(hubui.Root)\n}\n```\n\n| 平台 | UI |\n| --- | --- |\n| 桌面 / 手机 | 原生视图 |\n| 浏览器 | Go WASM + DOM |", "timestampMs": now - 10000}}}}}}
 }
 func (*demoAPI) CanHost() bool { return true }

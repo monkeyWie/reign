@@ -5,13 +5,13 @@ description: Check availability, permission, agent integration and transport.
 
 ## Sessions are visible but sending fails
 
-Check that the host provider is ready. If Codex App was launched independently, Reign may only be reading history. Wait for the task to finish, quit the App and launch through Reign so both connect to the same app-server.
+Check that the host provider is ready. If Codex App was launched independently, ReignHub may only be reading history. Wait for the task to finish, quit the App and launch through ReignHub so both connect to the same app-server.
 
 Codex CLI sessions owned by another backend can also have writer conflicts. Shared history files do not establish control of an active session. See [Codex CLI](/docs/agents/codex-cli).
 
 ## Device appears offline
 
-Check sleep settings, whether Reign is running, network access to the service and whether both sides use the same service root URL. Enterprise Wi-Fi may isolate peers even on the same SSID.
+Check sleep settings, whether ReignHub is running, network access to the service and whether both sides use the same service root URL. Enterprise Wi-Fi may isolate peers even on the same SSID.
 
 Do not delete local data to refresh the network: this loses pairing identity. Restore connectivity and reconnect; the client catches up to current message state.
 

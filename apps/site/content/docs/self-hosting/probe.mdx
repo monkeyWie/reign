@@ -5,7 +5,7 @@ description: One Go binary for TCP and UDP discovery on the same port.
 
 ## When you need it
 
-Workers cannot listen on raw UDP/TCP probe sockets. Public UDP STUN works by default. To add your own mapping discovery or cover unreachable public probes, run `reign-probe` on a public server.
+Workers cannot listen on raw UDP/TCP probe sockets. Public UDP STUN works by default. To add your own mapping discovery or cover unreachable public probes, run `reignhub-probe` on a public server.
 
 The probe returns address mappings only. It does not store a device directory, run agents, serve Web pages or relay application traffic. You can deploy the Worker without it.
 
@@ -14,8 +14,8 @@ The probe returns address mappings only. It does not store a device directory, r
 Use the Go version in `go.mod`, or Linux amd64/arm64 probe artifacts when available:
 
 ```sh
-go build -o reign-probe ./cmd/reign-probe
-./reign-probe --listen :26330
+go build -o reignhub-probe ./cmd/reignhub-probe
+./reignhub-probe --listen :26330
 ```
 
 Allow both in the server firewall and cloud security group:

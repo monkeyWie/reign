@@ -22,7 +22,7 @@ pnpm run deploy
 ## 数据备份
 
 ```sh
-pnpm exec wrangler d1 export DB --remote --output ./reign-backup.sql
+pnpm exec wrangler d1 export DB --remote --output ./reignhub-backup.sql
 ```
 
 把备份放在私有位置，不要提交 Git。D1 虽不保存聊天明文，但包含设备元数据、凭据哈希、配对记录及服务签名身份。

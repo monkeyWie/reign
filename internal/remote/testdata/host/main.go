@@ -12,11 +12,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/monkeyWie/reign/internal/assets"
-	"github.com/monkeyWie/reign/internal/control"
-	"github.com/monkeyWie/reign/internal/provider"
-	"github.com/monkeyWie/reign/internal/relay"
-	"github.com/monkeyWie/reign/internal/remote"
+	"github.com/monkeyWie/reignhub/internal/assets"
+	"github.com/monkeyWie/reignhub/internal/control"
+	"github.com/monkeyWie/reignhub/internal/provider"
+	"github.com/monkeyWie/reignhub/internal/relay"
+	"github.com/monkeyWie/reignhub/internal/remote"
 )
 
 type fixture struct {

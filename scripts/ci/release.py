@@ -23,7 +23,7 @@ def desktop_suffixes(target):
 
 
 def desktop_assets(v):
-    return [f'reign-{v}-{t.replace("_", "-")}{suffix}'
+    return [f'reignhub-{v}-{t.replace("_", "-")}{suffix}'
             for t in DESKTOP for suffix in desktop_suffixes(t)]
 
 
@@ -62,8 +62,8 @@ def collect(args):
     source, output = Path(args.source), Path(args.output)
     output.mkdir(parents=True, exist_ok=True)
     for target in args.targets.split(','):
-        stem = f'reign-{args.version}-{target.replace("_", "-")}'
-        bundle = source / f'Reign-{args.version}-{target}'
+        stem = f'reignhub-{args.version}-{target.replace("_", "-")}'
+        bundle = source / f'ReignHub-{args.version}-{target}'
         if target in DESKTOP:
             for suffix in desktop_suffixes(target):
                 src = source / 'releases' / (stem + suffix)
@@ -79,14 +79,14 @@ def collect(args):
             src = source / 'releases' / (stem + suffix)
             if not src.is_file():
                 raise SystemExit(f'Missing release file: {src}')
-            if target == 'android_arm64' and not os.environ.get('REIGN_ANDROID_STABLE_SIGNING'):
+            if target == 'android_arm64' and not os.environ.get('REIGNHUB_ANDROID_STABLE_SIGNING'):
                 stem += '-debug'
             if target == 'ios':
                 stem += '-unsigned'
             archive = output / (stem + suffix)
             shutil.copy2(src, archive)
         elif target == 'ios_simulator':
-            if not (bundle / 'Reign.app').is_dir():
+            if not (bundle / 'ReignHub.app').is_dir():
                 raise SystemExit('Missing iOS simulator application')
             continue  # A compile check, not a distributable device package.
         else:
@@ -98,12 +98,12 @@ def collect(args):
 def verify(args):
     output = Path(args.output)
     expected = desktop_assets(args.version)
-    expected += [f'reign-web-worker-{args.version}.tar.gz', f'reign-{args.version}-ios-unsigned.ipa']
-    apks = list(output.glob(f'reign-{args.version}-android-arm64*.apk'))
+    expected += [f'reignhub-web-worker-{args.version}.tar.gz', f'reignhub-{args.version}-ios-unsigned.ipa']
+    apks = list(output.glob(f'reignhub-{args.version}-android-arm64*.apk'))
     if len(apks) != 1:
         raise SystemExit('Expected exactly one Android APK')
     expected += [apks[0].name]
-    expected += [f'reign-probe-{args.version}-linux-{arch}.tar.gz' for arch in ('amd64', 'arm64')]
+    expected += [f'reignhub-probe-{args.version}-linux-{arch}.tar.gz' for arch in ('amd64', 'arm64')]
     actual = {p.name for p in output.iterdir() if p.is_file() and p.suffix != '.sha256' and p.name != 'SHA256SUMS'}
     if actual != set(expected):
         raise SystemExit(f'Release assets differ: missing={set(expected) - actual}, unexpected={actual - set(expected)}')

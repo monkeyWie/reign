@@ -8,7 +8,7 @@ import (
 	"strings"
 	"unicode/utf16"
 
-	"github.com/monkeyWie/reign/pkg/messagecontent"
+	"github.com/monkeyWie/reignhub/pkg/messagecontent"
 )
 
 type Directory struct {

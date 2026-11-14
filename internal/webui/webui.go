@@ -20,7 +20,7 @@ func Handler() http.Handler {
 	if _, err := fs.Stat(root, "nsgo.json"); err != nil {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Cache-Control", "no-store")
-			http.Error(w, "Reign Web is not embedded in this development build. Build a release with clients/nsgo/scripts/package-service.py or supply --web DIR.", http.StatusServiceUnavailable)
+			http.Error(w, "ReignHub Web is not embedded in this development build. Build a release with clients/nsgo/scripts/package-service.py or supply --web DIR.", http.StatusServiceUnavailable)
 		})
 	}
 	return fileHandler(root)

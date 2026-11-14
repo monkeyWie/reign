@@ -8,9 +8,9 @@ import (
 	"testing"
 
 	"github.com/egoist/mygo/ui"
-	"github.com/monkeyWie/reign/internal/config"
-	"github.com/monkeyWie/reign/internal/control"
-	"github.com/monkeyWie/reign/internal/provider"
+	"github.com/monkeyWie/reignhub/internal/config"
+	"github.com/monkeyWie/reignhub/internal/control"
+	"github.com/monkeyWie/reignhub/internal/provider"
 )
 
 func TestHostViewsAndTakeoverConfirmation(t *testing.T) {

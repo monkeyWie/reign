@@ -7,13 +7,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/monkeyWie/reign/internal/config"
-	"github.com/monkeyWie/reign/internal/control"
-	"github.com/monkeyWie/reign/internal/device"
-	"github.com/monkeyWie/reign/internal/deviceservice"
-	"github.com/monkeyWie/reign/internal/provider"
-	"github.com/monkeyWie/reign/internal/remote"
-	"github.com/monkeyWie/reign/internal/store"
+	"github.com/monkeyWie/reignhub/internal/config"
+	"github.com/monkeyWie/reignhub/internal/control"
+	"github.com/monkeyWie/reignhub/internal/device"
+	"github.com/monkeyWie/reignhub/internal/deviceservice"
+	"github.com/monkeyWie/reignhub/internal/provider"
+	"github.com/monkeyWie/reignhub/internal/remote"
+	"github.com/monkeyWie/reignhub/internal/store"
 	"golang.org/x/crypto/bcrypt"
 	"os"
 	"os/exec"
@@ -251,7 +251,7 @@ func (m *Manager) poll(ctx context.Context) {
 			continue
 		}
 		var in Intent
-		if e := device.Open(i.Private, p.Public, "reign/pair/request/"+p.ID, p.Envelope, &in); e != nil {
+		if e := device.Open(i.Private, p.Public, "reignhub/pair/request/"+p.ID, p.Envelope, &in); e != nil {
 			continue
 		}
 		m.mu.Lock()
@@ -312,7 +312,7 @@ func (m *Manager) respond(ctx context.Context, id string, allow bool) error {
 			g.Expires = time.Now().Add(8 * time.Hour).Unix()
 		}
 		var e error
-		reply, e = device.Seal(i.Private, p.Public, "reign/pair/reply/"+p.ID, map[string]any{"key": g.Key, "host": i.ID, "public": i.Public, "expires": g.Expires})
+		reply, e = device.Seal(i.Private, p.Public, "reignhub/pair/reply/"+p.ID, map[string]any{"key": g.Key, "host": i.ID, "public": i.Public, "expires": g.Expires})
 		if e != nil {
 			return e
 		}

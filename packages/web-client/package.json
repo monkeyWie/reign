@@ -1,12 +1,12 @@
 {
-  "name": "@reign/web-client",
+  "name": "@reignhub/web-client",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "exports": "./src/index.tsx",
   "dependencies": {
-    "@reign/protocol": "workspace:*",
-    "@reign/client-sdk": "workspace:*",
+    "@reignhub/protocol": "workspace:*",
+    "@reignhub/client-sdk": "workspace:*",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "lucide-react": "^0.577.0",

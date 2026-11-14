@@ -8,7 +8,7 @@ export function PlatformShowcase({ lang }: { lang: Locale }) {
     <section className="platform-section site-width">
       <div className="platform-heading">
         <div>
-          <span className="site-eyebrow">SIX PLATFORMS. ONE REIGN.</span>
+          <span className="site-eyebrow">SIX PLATFORMS. ONE WORKSPACE.</span>
           <h2>{t("每一块屏幕，都是你的主场。")}</h2>
         </div>
         <p>{t("桌面原生，移动随行，浏览器即开即用。")}</p>

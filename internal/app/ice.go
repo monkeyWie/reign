@@ -1,9 +1,9 @@
 package app
 
 import (
-	"github.com/monkeyWie/reign/internal/config"
-	"github.com/monkeyWie/reign/internal/connectivity"
-	"github.com/monkeyWie/reign/internal/remote"
+	"github.com/monkeyWie/reignhub/internal/config"
+	"github.com/monkeyWie/reignhub/internal/connectivity"
+	"github.com/monkeyWie/reignhub/internal/remote"
 	"github.com/pion/webrtc/v4"
 )
 

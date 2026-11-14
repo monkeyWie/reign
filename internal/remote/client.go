@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/monkeyWie/reign/internal/control"
-	"github.com/monkeyWie/reign/internal/relay"
+	"github.com/monkeyWie/reignhub/internal/control"
+	"github.com/monkeyWie/reignhub/internal/relay"
 )
 
 type Client struct {

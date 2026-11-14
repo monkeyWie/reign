@@ -4,7 +4,7 @@ package webapi
 
 import (
 	"context"
-	"github.com/monkeyWie/reign/internal/deviceservice"
+	"github.com/monkeyWie/reignhub/internal/deviceservice"
 	"net/http/httptest"
 	"path/filepath"
 	"testing"

@@ -7,7 +7,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/monkeyWie/reign/internal/provider"
+	"github.com/monkeyWie/reignhub/internal/provider"
 )
 
 type snapshotProvider struct {

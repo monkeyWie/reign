@@ -1,5 +1,5 @@
 {
-  "name": "@reign/site",
+  "name": "@reignhub/site",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -14,10 +14,10 @@
   },
   "dependencies": {
     "@opennextjs/cloudflare": "1.20.17",
-    "@reign/client-sdk": "workspace:*",
-    "@reign/protocol": "workspace:*",
-    "@reign/web-client": "workspace:*",
-    "@reign/worker-core": "workspace:*",
+    "@reignhub/client-sdk": "workspace:*",
+    "@reignhub/protocol": "workspace:*",
+    "@reignhub/web-client": "workspace:*",
+    "@reignhub/worker-core": "workspace:*",
     "@tailwindcss/postcss": "4.3.0",
     "@types/mdx": "2.0.13",
     "fumadocs-core": "16.19.0",

@@ -53,7 +53,7 @@ func testMobileDeviceAndScanner(t *testing.T, os core.OS, scan bool) {
 	app.Press("id:scan-qr")
 	app.Find("id:live-qr-camera")
 	app.Emit("id:live-qr-camera", "code", "not-a-ras-qr")
-	app.Find("text:不是有效的 Reign 设备二维码，请扫描电脑上的设备二维码。")
+	app.Find("text:不是有效的 ReignHub 设备二维码，请扫描电脑上的设备二维码。")
 	code := pairingCode(Object{"service": DefaultService, "connectionId": "654321", "public": "fixture-public"})
 	app.Emit("id:live-qr-camera", "code", code)
 	app.Find("id:dialog-connect")

@@ -1,7 +1,7 @@
 package hubui
 
 import (
-	"github.com/monkeyWie/reign/pkg/messagecontent"
+	"github.com/monkeyWie/reignhub/pkg/messagecontent"
 	"github.com/nsgo-dev/nsgo/core"
 	"github.com/nsgo-dev/nsgo/icons/lucide"
 )

@@ -9,7 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"github.com/monkeyWie/reign/clients/nsgo/browserclient"
+	"github.com/monkeyWie/reignhub/clients/nsgo/browserclient"
 	"strings"
 	"sync"
 	"time"
@@ -171,7 +171,7 @@ func (a *API) connect(ctx context.Context, p Object) (any, error) {
 	}
 	if str(s, "key") == "" || expired {
 		request := randomHex(16)
-		envelope, e := seal(i, str(d, "public"), "reign/pair/request/"+request, Object{"password": p["password"], "remember": p["remember"] != false})
+		envelope, e := seal(i, str(d, "public"), "reignhub/pair/request/"+request, Object{"password": p["password"], "remember": p["remember"] != false})
 		if e != nil {
 			return nil, e
 		}
@@ -203,7 +203,7 @@ func (a *API) connect(ctx context.Context, p Object) (any, error) {
 		if result["state"] != "approved" {
 			return nil, errors.New("等待主机确认超时")
 		}
-		reply, e := openEnvelope(i, str(d, "public"), "reign/pair/reply/"+request, str(result, "reply"))
+		reply, e := openEnvelope(i, str(d, "public"), "reignhub/pair/reply/"+request, str(result, "reply"))
 		if e != nil {
 			return nil, e
 		}

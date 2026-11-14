@@ -8,11 +8,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/monkeyWie/reign/internal/config"
-	"github.com/monkeyWie/reign/internal/control"
-	"github.com/monkeyWie/reign/internal/host"
-	"github.com/monkeyWie/reign/internal/provider"
-	"github.com/monkeyWie/reign/internal/remote"
+	"github.com/monkeyWie/reignhub/internal/config"
+	"github.com/monkeyWie/reignhub/internal/control"
+	"github.com/monkeyWie/reignhub/internal/host"
+	"github.com/monkeyWie/reignhub/internal/provider"
+	"github.com/monkeyWie/reignhub/internal/remote"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -63,7 +63,7 @@ func main() {
 	if len(os.Args) != 2 {
 		panic("pass local isolated Worker origin")
 	}
-	dir, err := os.MkdirTemp("", "reign-worker-fixture-")
+	dir, err := os.MkdirTemp("", "reignhub-worker-fixture-")
 	if err != nil {
 		panic(err)
 	}

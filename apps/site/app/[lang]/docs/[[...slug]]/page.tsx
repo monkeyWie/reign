@@ -38,7 +38,7 @@ export default async function Page({ params }: Props) {
         />
       </DocsBody>
       <EditOnGitHub
-        href={`https://github.com/monkeyWie/reign/edit/main/apps/site/content/docs/${page.path}`}
+        href={`https://github.com/monkeyWie/reignhub/edit/main/apps/site/content/docs/${page.path}`}
       >
         {lang === "en" ? "Edit this page on GitHub" : "在 GitHub 上编辑此页"}
       </EditOnGitHub>
@@ -56,7 +56,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   return pageMetadata(
     lang,
     `/docs${slug?.length ? "/" + slug.join("/") : ""}`,
-    `${page.data.title} · Reign ${lang === "en" ? "Docs" : "文档"}`,
+    `${page.data.title} · ReignHub ${lang === "en" ? "Docs" : "文档"}`,
     page.data.description ?? "",
   );
 }

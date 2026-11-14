@@ -29,7 +29,7 @@ export function SiteFooter() {
       <div className="footer-top">
         <div>
           <Link className="brand" href="/">
-            ♜ Reign
+            ♜ ReignHub
           </Link>
           <p>
             {t("你的 Agent，你的电脑。")}
@@ -61,7 +61,7 @@ export function SiteFooter() {
           [
             t("开发者"),
             [
-              ["GitHub", "https://github.com/monkeyWie/reign"],
+              ["GitHub", "https://github.com/monkeyWie/reignhub"],
               [t("贡献指南"), "/docs/contributing"],
               [t("连接协议"), "/docs/architecture/protocol"],
               [t("安全与隐私"), "/docs/privacy"],
@@ -81,7 +81,7 @@ export function SiteFooter() {
       <div className="footer-bottom">
         <span>
           © {new Date().getFullYear()}
-          {t("Reign · 开源核心采用 MIT 许可")}
+          {t("ReignHub · 开源核心采用 MIT 许可")}
         </span>
         {legal ? (
           <nav className="footer-legal" aria-label={t("法律信息")}>

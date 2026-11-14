@@ -5,13 +5,13 @@ import {
   type Identity,
   type Pairing,
   type ServiceConfig,
-} from "@reign/protocol";
+} from "@reignhub/protocol";
 import { keypair, envelope, hex, random } from "./crypto";
-import { ReignCache, type SavedDevice } from "./cache";
+import { ReignHubCache, type SavedDevice } from "./cache";
 export class Service {
   constructor(
     public origin: string,
-    public cache: ReignCache,
+    public cache: ReignHubCache,
   ) {
     const u = new URL(origin);
     if (
@@ -100,7 +100,7 @@ export class Service {
     if (previous && (!previous.expires || previous.expires > Date.now() / 1000))
       return { ...previous, name: d.name };
     const id = hex(random(16));
-    const request = "reign/pair/request/" + id;
+    const request = "reignhub/pair/request/" + id;
     const packet = await envelope(i.private, d.public, request, {
       password,
       remember: true,
@@ -126,7 +126,7 @@ export class Service {
         const reply = (await envelope(
           i.private,
           d.public,
-          "reign/pair/reply/" + id,
+          "reignhub/pair/reply/" + id,
           undefined,
           p.reply,
         )) as { key: string; host: string; public: string; expires: number };

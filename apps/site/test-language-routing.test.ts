@@ -10,7 +10,7 @@ const content = () =>
     headers: { "Content-Type": "text/html" },
   });
 const request = (path: string, headers: Record<string, string> = {}) =>
-  new Request("https://reign.test" + path, { headers });
+  new Request("https://reignhub.test" + path, { headers });
 
 test("first visits negotiate browser language with quality weighting and a neutral English fallback", async () => {
   assert.equal(preferredLocale("fr,en;q=0.8,zh-CN;q=0.9"), "zh-CN");
@@ -25,52 +25,52 @@ test("first visits negotiate browser language with quality weighting and a neutr
   assert.equal(first.status, 307);
   assert.equal(
     first.headers.get("Location"),
-    "https://reign.test/zh-CN/docs/quick-start?from=site",
+    "https://reignhub.test/zh-CN/docs/quick-start?from=site",
   );
-  assert.match(first.headers.get("Set-Cookie")!, /reign_locale=zh-CN/);
+  assert.match(first.headers.get("Set-Cookie")!, /reignhub_locale=zh-CN/);
   assert.match(first.headers.get("Cache-Control")!, /no-store/);
   const english = await withSiteLanguage(request("/"), content);
   assert.equal(english.status, 200);
-  assert.match(english.headers.get("Set-Cookie")!, /reign_locale=en/);
+  assert.match(english.headers.get("Set-Cookie")!, /reignhub_locale=en/);
   assert.match(english.headers.get("Vary")!, /Cookie/);
 });
 test("manual language selection wins over browser language and persists across visits", async () => {
   const selection = await withSiteLanguage(
     request("/zh-CN/docs?lang=en&search=code", {
       "Accept-Language": "zh-CN",
-      Cookie: "reign_locale=zh-CN",
+      Cookie: "reignhub_locale=zh-CN",
     }),
     content,
   );
   assert.equal(selection.status, 303);
   assert.equal(
     selection.headers.get("Location"),
-    "https://reign.test/docs?search=code",
+    "https://reignhub.test/docs?search=code",
   );
   assert.match(
     selection.headers.get("Set-Cookie")!,
-    /reign_locale=en; Path=\/; Max-Age=31536000; SameSite=Lax; Secure/,
+    /reignhub_locale=en; Path=\/; Max-Age=31536000; SameSite=Lax; Secure/,
   );
   const next = await withSiteLanguage(
-    request("/docs", { "Accept-Language": "zh-CN", Cookie: "reign_locale=en" }),
+    request("/docs", { "Accept-Language": "zh-CN", Cookie: "reignhub_locale=en" }),
     content,
   );
   assert.equal(next.status, 200);
   assert.equal(next.headers.get("Location"), null);
   const chosenChinese = await withSiteLanguage(
-    request("/", { "Accept-Language": "en", Cookie: "reign_locale=zh-CN" }),
+    request("/", { "Accept-Language": "en", Cookie: "reignhub_locale=zh-CN" }),
     content,
   );
   assert.equal(chosenChinese.status, 307);
   assert.equal(
     chosenChinese.headers.get("Location"),
-    "https://reign.test/zh-CN",
+    "https://reignhub.test/zh-CN",
   );
 });
 test("explicit Chinese URLs stay available and language negotiation never touches application traffic or prefetches", async () => {
   const zh = await withSiteLanguage(
     request("/zh-CN/docs", {
-      Cookie: "reign_locale=en",
+      Cookie: "reignhub_locale=en",
       "Accept-Language": "en",
     }),
     content,

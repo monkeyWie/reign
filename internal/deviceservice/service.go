@@ -10,7 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"github.com/monkeyWie/reign/pkg/access"
+	"github.com/monkeyWie/reignhub/pkg/access"
 	"math/big"
 	"net"
 	"net/http"
@@ -19,10 +19,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/monkeyWie/reign/internal/connectivity"
-	"github.com/monkeyWie/reign/internal/device"
-	"github.com/monkeyWie/reign/internal/relay"
-	"github.com/monkeyWie/reign/pkg/database"
+	"github.com/monkeyWie/reignhub/internal/connectivity"
+	"github.com/monkeyWie/reignhub/internal/device"
+	"github.com/monkeyWie/reignhub/internal/relay"
+	"github.com/monkeyWie/reignhub/pkg/database"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )

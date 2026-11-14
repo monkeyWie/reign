@@ -1,6 +1,6 @@
 # Security policy
 
-Reign is in development preview and has not undergone an independent security audit.
+ReignHub is in development preview and has not undergone an independent security audit.
 
 ## Reporting a vulnerability
 

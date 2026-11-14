@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/monkeyWie/reign/pkg/localstate"
+	"github.com/monkeyWie/reignhub/pkg/localstate"
 	"os"
 	"path/filepath"
 	"sync"

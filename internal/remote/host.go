@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/monkeyWie/reign/internal/control"
-	"github.com/monkeyWie/reign/internal/relay"
+	"github.com/monkeyWie/reignhub/internal/control"
+	"github.com/monkeyWie/reignhub/internal/relay"
 )
 
 // RunHost reconnects the outbound relay link. Losing relay also closes existing

@@ -1,11 +1,11 @@
 {
-  "name": "@reign/worker-core",
+  "name": "@reignhub/worker-core",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "exports": "./src/index.ts",
   "dependencies": {
-    "@reign/protocol": "workspace:*",
+    "@reignhub/protocol": "workspace:*",
     "drizzle-orm": "^0.45.2"
   },
   "devDependencies": {

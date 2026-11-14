@@ -4,7 +4,7 @@ cd "$(dirname "$0")/.."
 target="${1:-android}"
 agenthub_transport_flags=""
 if [[ "${AGENTHUB_ALLOW_LAN_HTTP:-false}" == true ]]; then
-  agenthub_transport_flags='-X github.com/monkeyWie/reign/internal/device.AllowLANHTTP=true'
+  agenthub_transport_flags='-X github.com/monkeyWie/reignhub/internal/device.AllowLANHTTP=true'
 fi
 if [[ "$target" == android ]]; then
   sdk="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-$HOME/Library/Android/sdk}}"

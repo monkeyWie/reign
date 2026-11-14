@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/monkeyWie/reign/internal/assets"
+	"github.com/monkeyWie/reignhub/internal/assets"
 )
 
 func TestTranscriptAttachmentsAndSourceLifetime(t *testing.T) {

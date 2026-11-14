@@ -5,7 +5,7 @@ description: 部署开源 Worker，初始化 D1，连接自己的设备。
 
 ## 一键部署
 
-打开仓库中的 [Deploy to Cloudflare](https://deploy.workers.cloudflare.com/?url=https://github.com/monkeyWie/reign) 入口，授权你自己的 Cloudflare 账号，按向导创建服务。
+打开仓库中的 [Deploy to Cloudflare](https://deploy.workers.cloudflare.com/?url=https://github.com/monkeyWie/reignhub) 入口，授权你自己的 Cloudflare 账号，按向导创建服务。
 
 部署根仓库，**不要只选择 `apps/site` 子目录**，因为它依赖同一 pnpm workspace 中的连接核心与 SDK。向导需要配置 Worker、一个 D1 数据库和 SQLite Durable Object。
 
@@ -16,8 +16,8 @@ description: 部署开源 Worker，初始化 D1，连接自己的设备。
 需要 Git、Node.js 24、pnpm 10.34.5 和 Cloudflare 账号。在自己的目录克隆开源仓库：
 
 ```sh
-git clone https://github.com/monkeyWie/reign.git
-cd reign
+git clone https://github.com/monkeyWie/reignhub.git
+cd reignhub
 corepack enable
 pnpm install --frozen-lockfile
 pnpm exec wrangler login
@@ -51,7 +51,7 @@ curl https://YOUR-WORKER.YOUR-SUBDOMAIN.workers.dev/p2p/config
 英文使用 `/docs` 等无前缀路径，中文使用 `/zh-CN/docs`。首次访问按浏览器语言选择，手动切换后记住选择；控制台使用 `/chat`。如果使用固定公网域名，在构建时设置：
 
 ```sh
-SITE_URL=https://reign.example.com pnpm build:web
+SITE_URL=https://reignhub.example.com pnpm build:web
 pnpm run deploy
 ```
 

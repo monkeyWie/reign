@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/monkeyWie/reign/internal/connectivity"
+	"github.com/monkeyWie/reignhub/internal/connectivity"
 )
 
 func TestNetworkDiscoveryAdvertisesReachableSTUNHost(t *testing.T) {

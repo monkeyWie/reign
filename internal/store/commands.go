@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"github.com/monkeyWie/reign/internal/control"
+	"github.com/monkeyWie/reignhub/internal/control"
 )
 
 // Execute reserves a command durably before invoking the external Agent. A crash

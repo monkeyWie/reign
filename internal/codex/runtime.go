@@ -11,10 +11,10 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/monkeyWie/reign/internal/device"
-	"github.com/monkeyWie/reign/internal/provider"
-	"github.com/monkeyWie/reign/internal/rpc"
-	"github.com/monkeyWie/reign/internal/system"
+	"github.com/monkeyWie/reignhub/internal/device"
+	"github.com/monkeyWie/reignhub/internal/provider"
+	"github.com/monkeyWie/reignhub/internal/rpc"
+	"github.com/monkeyWie/reignhub/internal/system"
 )
 
 type sharedRuntime struct {

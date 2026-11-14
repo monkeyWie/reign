@@ -1,10 +1,10 @@
 {
-  "name": "@reign/self-hosted",
+  "name": "@reignhub/self-hosted",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "dependencies": {
-    "@reign/worker-core": "workspace:*"
+    "@reignhub/worker-core": "workspace:*"
   },
   "scripts": {
     "dev": "wrangler dev --port 18787",

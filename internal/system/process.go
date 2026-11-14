@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/monkeyWie/reign/internal/provider"
+	"github.com/monkeyWie/reignhub/internal/provider"
 )
 
 func FindApp(configured string) string {

@@ -4,7 +4,7 @@ package hubui
 
 import (
 	"errors"
-	"github.com/monkeyWie/reign/clients/nsgo/browserclient"
+	"github.com/monkeyWie/reignhub/clients/nsgo/browserclient"
 	"net/url"
 	"strings"
 	"syscall/js"

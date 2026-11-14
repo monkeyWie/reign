@@ -31,7 +31,7 @@ if [ "$#" -gt 0 ]; then
     esac
     nsgo_prev=$nsgo_arg
   done
-  export REIGN_BUILD_VERSION="$nsgo_version" REIGN_BUILD_NUMBER="$nsgo_build_number"
+  export REIGNHUB_BUILD_VERSION="$nsgo_version" REIGNHUB_BUILD_NUMBER="$nsgo_build_number"
   go tool nsgo build -target "$exec_target" "$@"
   case "$exec_target" in *android*) python3 scripts/build-android-host.py --targets "$exec_target" --output "$nsgo_output";; esac
 else

@@ -1,4 +1,4 @@
-module github.com/monkeyWie/reign
+module github.com/monkeyWie/reignhub
 
 go 1.27.3
 

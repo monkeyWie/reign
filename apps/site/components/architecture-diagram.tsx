@@ -13,16 +13,16 @@ export function ArchitectureDiagram({
   const label = (cn: string, en: string) => (zh ? cn : en);
   const id = `architecture-${kind}-${locale}`;
   const titles = {
-    overview: label("Reign 整体架构", "Reign system architecture"),
+    overview: label("ReignHub 整体架构", "ReignHub system architecture"),
     connection: label(
       "从配对到加密对话",
       "From pairing to encrypted conversations",
     ),
     codex: label(
-      "Reign 与 Codex App 共享后端",
-      "Reign and Codex App share one backend",
+      "ReignHub 与 Codex App 共享后端",
+      "ReignHub and Codex App share one backend",
     ),
-    stack: label("Reign 技术分层", "Reign technology layers"),
+    stack: label("ReignHub 技术分层", "ReignHub technology layers"),
   };
   const captions = {
     overview: label(
@@ -147,7 +147,7 @@ export function ArchitectureDiagram({
               <Node
                 x={310}
                 y={198}
-                title={label("被控电脑 · Reign", "Host computer · Reign")}
+                title={label("被控电脑 · ReignHub", "Host computer · ReignHub")}
                 detail={label("Go 核心 · Provider", "Go core · providers")}
                 accent
               />
@@ -220,7 +220,7 @@ export function ArchitectureDiagram({
                     y={18}
                     w={160}
                     title={name}
-                    detail={i === 1 ? "Worker" : "Reign"}
+                    detail={i === 1 ? "Worker" : "ReignHub"}
                     accent={i === 1}
                   />
                   <path
@@ -315,7 +315,7 @@ export function ArchitectureDiagram({
                 x={25}
                 y={151}
                 w={170}
-                title="Reign"
+                title="ReignHub"
                 detail={label("远程会话与指令", "Remote sessions and commands")}
               />
               <Node

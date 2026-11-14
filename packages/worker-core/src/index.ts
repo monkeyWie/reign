@@ -1,13 +1,13 @@
 import { drizzle } from "drizzle-orm/d1";
 import { and, eq, gt } from "drizzle-orm";
-import { APIError, PROTOCOL, routes, type Device } from "@reign/protocol";
+import { APIError, PROTOCOL, routes, type Device } from "@reignhub/protocol";
 import { devices, grants, pairings, type DeviceRow } from "./schema";
 import { hash, id, random, serviceIdentity, un64 } from "./crypto";
 import { unrestricted, type CoreEnv, type Policy } from "./types";
 export * from "./schema";
 export * from "./types";
 export { issueGrant, serviceIdentity, hash, id, random } from "./crypto";
-export { ReignRoom, RelayRoom } from "./room";
+export { ReignHubRoom, RelayRoom } from "./room";
 export function json(value: unknown, status = 200): Response {
   return Response.json(value, {
     status,
@@ -21,7 +21,7 @@ export function fail(error: unknown): Response {
       error.status,
     );
   console.error(
-    "Reign request failed",
+    "ReignHub request failed",
     error instanceof Error ? error.message : "unknown",
   );
   return json(
@@ -234,7 +234,7 @@ export async function handleCore(
       // Strip caller-supplied metadata. Only authenticated routing identity crosses this boundary.
       const headers = new Headers();
       headers.set("Upgrade", "websocket");
-      headers.set("x-reign-device", device.id);
+      headers.set("x-reignhub-device", device.id);
       if (request.headers.has("Sec-WebSocket-Protocol"))
         headers.set(
           "Sec-WebSocket-Protocol",

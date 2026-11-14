@@ -33,7 +33,7 @@ function fixture(version = "0.1.0-rc.1") {
     prerelease: true,
     published_at: "2026-11-14T00:00:00Z",
     assets: [
-      ...names.map((name) => `reign-${version}-${name}`),
+      ...names.map((name) => `reignhub-${version}-${name}`),
       "SHA256SUMS",
     ].map((name) => ({
       name,
@@ -79,12 +79,12 @@ test("the native Worker fetch function is called with the global receiver", asyn
 test("published release assets match every CI client platform, excluding untrusted URLs and development signatures", () => {
   const release = fixture();
   release.assets.push({
-    name: "reign-0.1.0-rc.1-android-arm64-debug.apk",
+    name: "reignhub-0.1.0-rc.1-android-arm64-debug.apk",
     size: 12,
     browser_download_url: `${releasesURL}/download/v0.1.0-rc.1/debug.apk`,
   });
   release.assets.push({
-    name: "reign-0.1.0-rc.1-windows-x64-setup.exe",
+    name: "reignhub-0.1.0-rc.1-windows-x64-setup.exe",
     size: 123,
     browser_download_url: "https://malicious.test/download.exe",
   });
@@ -93,7 +93,7 @@ test("published release assets match every CI client platform, excluding untrust
     "macos-arm64.tar.gz",
     "macos-arm64.deb",
   ]) {
-    const name = `reign-0.1.0-rc.1-${suffix}`;
+    const name = `reignhub-0.1.0-rc.1-${suffix}`;
     release.assets.push({
       name,
       size: 123,
@@ -116,7 +116,7 @@ test("published release assets match every CI client platform, excluding untrust
   assert.ok(parsed.checksumsURL?.endsWith("/SHA256SUMS"));
   assert.ok(
     parsed.assets.every((a) =>
-      a.url.startsWith("https://github.com/monkeyWie/reign/releases/download/"),
+      a.url.startsWith("https://github.com/monkeyWie/reignhub/releases/download/"),
     ),
   );
   const draft = { ...fixture("0.2.0"), draft: true };

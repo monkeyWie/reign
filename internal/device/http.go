@@ -5,7 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/monkeyWie/reign/internal/connectivity"
+	"github.com/monkeyWie/reignhub/internal/connectivity"
 	"io"
 	"net/http"
 	"net/url"

@@ -27,11 +27,11 @@ import {
 } from "lucide-react";
 import {
   Connection,
-  ReignCache,
+  ReignHubCache,
   Service,
   type SavedDevice,
-} from "@reign/client-sdk";
-import type { Item, Provider, Session } from "@reign/protocol";
+} from "@reignhub/client-sdk";
+import type { Item, Provider, Session } from "@reignhub/protocol";
 import { Button, Dialog, ErrorNotice, copyText } from "./ui";
 import { Attachments, upload } from "./attachments";
 import { applyEvents, type Batch, type Transcript } from "./transcript";
@@ -50,7 +50,7 @@ export function RemoteApp() {
   const [cloudDevices, setCloudDevices] = useState<
     { id: string; name: string; connectionId: string }[]
   >([]);
-  const [cache] = useState(() => new ReignCache());
+  const [cache] = useState(() => new ReignHubCache());
   const [service, setService] = useState(() => location.origin);
   const [devices, setDevices] = useState<SavedDevice[]>([]);
   const [connections, setConnections] = useState<Record<string, Connection>>(
@@ -372,7 +372,7 @@ export function RemoteApp() {
     <div className={"remote-app view-" + view}>
       <aside className="device-rail">
         <a href="/" className="brand">
-          ♜ Reign
+          ♜ ReignHub
         </a>
         <Button variant="primary" onClick={() => setPairDialog(true)}>
           <Plus size={16} />
@@ -651,7 +651,7 @@ function Chat({
   onBack,
 }: {
   c: Connection;
-  cache: ReignCache;
+  cache: ReignHubCache;
   selected: Selected;
   transcript?: Transcript;
   onError: (e: unknown) => void;
@@ -803,7 +803,7 @@ function Chat({
       const message = errorText(e);
       onError(
         message.includes("就绪") || message.includes("read-only")
-          ? "此会话尚未接入控制。请在被控电脑打开 Reign，在 Agent 状态面板点击「启用／通过 Reign 启动 Codex App」，再重新连接。\n" +
+          ? "此会话尚未接入控制。请在被控电脑打开 ReignHub，在 Agent 状态面板点击「启用／通过 ReignHub 启动 Codex App」，再重新连接。\n" +
               message
           : message,
       );

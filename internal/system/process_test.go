@@ -1,7 +1,7 @@
 package system
 
 import (
-	"github.com/monkeyWie/reign/internal/provider"
+	"github.com/monkeyWie/reignhub/internal/provider"
 	"testing"
 )
 

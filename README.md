@@ -1,12 +1,12 @@
-# Reign
+# ReignHub
 
-Remote control for the AI Agents on your own computers. Native desktop and mobile clients use NSGo + Go; the website and browser controller use Next.js, React and shadcn/ui. The default service is `https://myreign.cloud`.
+Remote control for the AI Agents on your own computers. Native desktop and mobile clients use NSGo + Go; the website and browser controller use Next.js, React and shadcn/ui. The default service is `https://reignhub.app`.
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/monkeyWie/reign)
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/monkeyWie/reignhub)
 
 ## Website and documentation
 
-The official site is [myreign.cloud](https://myreign.cloud), with [quick start](https://myreign.cloud/docs/quick-start), [self-hosting](https://myreign.cloud/docs/self-hosting), [technology](https://myreign.cloud/technology) and [contribution guides](CONTRIBUTING.md). Documentation uses Fumadocs on Next.js; edit Markdown/MDX in `apps/site/content/docs` and each folder’s `meta.json` for sidebar order. Run `pnpm dev` for a content preview. The complete Worker build also includes the static browser-search index.
+The official site is [reignhub.app](https://reignhub.app), with [quick start](https://reignhub.app/docs/quick-start), [self-hosting](https://reignhub.app/docs/self-hosting), [technology](https://reignhub.app/technology) and [contribution guides](CONTRIBUTING.md). Documentation uses Fumadocs on Next.js; edit Markdown/MDX in `apps/site/content/docs` and each folder’s `meta.json` for sidebar order. Run `pnpm dev` for a content preview. The complete Worker build also includes the static browser-search index.
 
 ## Architecture
 
@@ -14,7 +14,7 @@ The official site is [myreign.cloud](https://myreign.cloud), with [quick start](
 - **Direct first:** native clients try WebRTC/UDP and native TCP in parallel. Browsers use WebRTC. Public and optional self-hosted discovery servers provide candidates concurrently. If direct connectivity fails, self-hosted clients use their own Worker relay.
 - **One service address:** clients discover optional probe endpoints from `/p2p/config`. No second service address is required in the UI.
 - **End-to-end encryption:** pairing uses X25519/HKDF/AES-GCM; session traffic uses fresh directional AEAD keys and replay protection. Servers do not hold chat pairing keys or store chat plaintext.
-- **Providers:** Codex App and CLI are separate controlled connections, grouped into one `codex` product family for optional policy. Codex App must be connected through Reign's shared app-server setup. Local Agent tasks continue independently of remote connection authorization.
+- **Providers:** Codex App and CLI are separate controlled connections, grouped into one `codex` product family for optional policy. Codex App must be connected through ReignHub's shared app-server setup. Local Agent tasks continue independently of remote connection authorization.
 - **Caching:** native clients use SQLite. Browsers use IndexedDB for paired identities, snapshots and bounded attachment caching.
 
 The open-source deployment has no account, subscription, or commercial device limits. Our hosted service composes this same public core with private identity, payment and entitlement policies. Cloudflare's own infrastructure limits and charges still apply to your deployment.
@@ -45,8 +45,8 @@ For manual deployment, run `pnpm build:web`, `pnpm exec wrangler login`, then `p
 An optional Go probe improves native TCP/UDP candidate discovery. It runs independently:
 
 ```sh
-go build -o reign-probe ./cmd/reign-probe
-./reign-probe --listen :26330
+go build -o reignhub-probe ./cmd/reignhub-probe
+./reignhub-probe --listen :26330
 ```
 
 Expose **26330/TCP and 26330/UDP** directly. The probe contains no website, device directory, account database, or relay. No TURN, DERP, cloudflared or Tailcat is required.
@@ -62,7 +62,7 @@ Expose **26330/TCP and 26330/UDP** directly. The probe contains no website, devi
 | `packages/worker-core` | D1 directory/pairing, signed leases and hibernating rooms |
 | `clients/nsgo`         | Native desktop, Android and iOS UI                        |
 | `internal`             | Native Go application, Providers, transport and SQLite    |
-| `cmd/reign-probe`      | Optional TCP/UDP discovery binary                         |
+| `cmd/reignhub-probe`      | Optional TCP/UDP discovery binary                         |
 | `.github/workflows`    | Native, Web, Worker and probe checks/builds/releases      |
 
 Protocol compatibility with older prototypes is intentionally not provided. See [implementation scope](docs/platform/implementation.md) and [protocol](docs/platform/protocol.md). Older documents outside `docs/platform` describe historical prototypes.

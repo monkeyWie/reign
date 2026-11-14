@@ -1,13 +1,13 @@
 {
-  "name": "reign",
+  "name": "reignhub",
   "private": true,
   "packageManager": "pnpm@10.34.5",
   "scripts": {
     "check": "pnpm -r --if-present check",
     "test": "pnpm -r --if-present test",
-    "build:web": "pnpm --filter @reign/site build:worker",
-    "build:worker": "pnpm --filter @reign/site build:worker",
-    "dev": "pnpm --filter @reign/site dev",
+    "build:web": "pnpm --filter @reignhub/site build:worker",
+    "build:worker": "pnpm --filter @reignhub/site build:worker",
+    "dev": "pnpm --filter @reignhub/site dev",
     "build": "pnpm build:web",
     "deploy": "wrangler deploy && wrangler d1 migrations apply DB --remote"
   },

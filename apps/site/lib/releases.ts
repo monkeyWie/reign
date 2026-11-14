@@ -1,5 +1,5 @@
 // Only metadata crosses the Worker: binaries download directly from GitHub.
-export const releaseRepository = "monkeyWie/reign";
+export const releaseRepository = "monkeyWie/reignhub";
 export const releasesURL = `https://github.com/${releaseRepository}/releases`;
 export type Platform = "macos" | "windows" | "linux" | "android" | "ios";
 export interface ReleaseAsset {
@@ -79,7 +79,7 @@ export function parseReleases(value: unknown): ReleaseVersion | null {
         checksumsURL = url;
         continue;
       }
-      const prefix = `reign-${version}-`;
+      const prefix = `reignhub-${version}-`;
       if (!a.name.startsWith(prefix)) continue;
       const suffix = a.name.slice(prefix.length);
       const match =

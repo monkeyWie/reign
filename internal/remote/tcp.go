@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/monkeyWie/reign/internal/connectivity"
+	"github.com/monkeyWie/reignhub/internal/connectivity"
 )
 
 const (

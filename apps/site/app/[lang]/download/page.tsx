@@ -39,7 +39,7 @@ export default async function DownloadPage({
             <h2>{t("也可以，什么都不安装。")}</h2>
             <p>
               {t(
-                "浏览器打开控制台，输入设备编号，配对后继续对话。被控电脑仍需运行 Reign 桌面端。",
+                "浏览器打开控制台，输入设备编号，配对后继续对话。被控电脑仍需运行 ReignHub 桌面端。",
               )}
             </p>
           </div>
@@ -53,7 +53,7 @@ export default async function DownloadPage({
           <h2>{t("第一次使用？")}</h2>
           <p>
             {t(
-              "先在安装 Agent 的电脑上启动 Reign，按面板提示接入 Codex。然后在另一台设备输入编号，完成授权。",
+              "先在安装 Agent 的电脑上启动 ReignHub，按面板提示接入 Codex。然后在另一台设备输入编号，完成授权。",
             )}
           </p>
           <Link className="button" href="/docs/quick-start">

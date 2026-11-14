@@ -22,8 +22,8 @@ Linux 和 macOS 分别运行两个 Go module 的 `go vet`、`go test -race` 与�
 | Android arm64 | 含原生 QR host 的 APK |
 | iOS | `-unsigned.ipa`，需自行签名才能安装 |
 | iOS Simulator | 编译验证，不作为设备安装包发布 |
-| Web + Worker | `reign-web-worker-<version>.tar.gz`，官网、控制台和开源服务 |
-| Linux amd64 / arm64 探测服务 | `reign-probe-<version>-linux-<arch>.tar.gz`，独立 TCP/UDP 探测 |
+| Web + Worker | `reignhub-web-worker-<version>.tar.gz`，官网、控制台和开源服务 |
+| Linux amd64 / arm64 探测服务 | `reignhub-probe-<version>-linux-<arch>.tar.gz`，独立 TCP/UDP 探测 |
 
 PR 和 main 构建的产物在对应 Actions run 的 Artifacts 中，保留 14 天；覆盖率保留 7 天。每次完整构建都会把公开产物合并到 `release-bundle` artifact，验证 15 个预期安装包/归档及各自 `.sha256`，生成总 `SHA256SUMS`；tag 发布直接使用这一份已验证的产物。缺失、额外文件或校验和错误都会阻止发布。
 
@@ -35,7 +35,7 @@ Web job 构建 React 网站与 Worker，并使用迁移后的本地 D1 验证原
 
 | 名称 | 类型 | 用途 |
 | --- | --- | --- |
-| `REIGN_SERVER_URL` | Variable | 原生客户端内置默认服务地址；未配置为 `https://myreign.cloud`。Web 始终使用当前 origin |
+| `REIGNHUB_SERVER_URL` | Variable | 原生客户端内置默认服务地址；未配置为 `https://reignhub.app`。Web 始终使用当前 origin |
 | `ANDROID_SIGNING_PEM_BASE64` | Secret | 可选的固定 Android 签名身份，使用 NSGo PEM 格式（RSA private key + certificate） |
 
 没有签名 Secret 也能完成流水线。Android 包名会加 `-debug.apk`，使用本次临时生成的调试身份，无法覆盖安装另一签名的旧包。需要跨版本覆盖安装时，将已有 NSGo `.nsgo/android/debug.pem`（或同格式的专用发布身份）Base64 后保存到上述 Secret，之后持续使用同一身份。不要提交密钥文件；流水线不会把 `.nsgo` 或密钥上传为产物，PR 也不会恢复这个 Secret。这不是 Google Play 上传密钥 / JKS 配置。

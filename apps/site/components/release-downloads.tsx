@@ -32,7 +32,7 @@ export function ReleaseDownloads({
       arch: "Apple Silicon / Intel",
       format: "DMG",
       note: t(
-        "打开 DMG，将 Reign 拖入 Applications。当前预览尚未完成 Apple 公证。",
+        "打开 DMG，将 ReignHub 拖入 Applications。当前预览尚未完成 Apple 公证。",
       ),
     },
     {
@@ -83,10 +83,12 @@ export function ReleaseDownloads({
             ? release.prerelease
               ? t("开发预览")
               : t("最新版本")
-            : "REIGN"}
+            : "REIGNHUB"}
         </span>
         <div>
-          <h2>{release ? `Reign ${release.version}` : t("获取 Reign")}</h2>
+          <h2>
+            {release ? `ReignHub ${release.version}` : t("获取 ReignHub")}
+          </h2>
           <p>
             {release
               ? `${t("发布于")} ${new Intl.DateTimeFormat(lang, { dateStyle: "medium", timeZone: "UTC" }).format(new Date(release.publishedAt))}`

@@ -25,7 +25,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/monkeyWie/reign/internal/provider"
+	"github.com/monkeyWie/reignhub/internal/provider"
 	"golang.org/x/image/draw"
 	_ "golang.org/x/image/webp"
 )

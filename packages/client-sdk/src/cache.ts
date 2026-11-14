@@ -1,12 +1,12 @@
 import Dexie, { type Table } from "dexie";
-import type { Identity, Device } from "@reign/protocol";
+import type { Identity, Device } from "@reignhub/protocol";
 export interface SavedDevice extends Device {
   key: string;
   service: string;
   expires: number;
   identityId: string;
 }
-export class ReignCache extends Dexie {
+export class ReignHubCache extends Dexie {
   identities!: Table<Identity, string>;
   devices!: Table<SavedDevice, string>;
   snapshots!: Table<{ key: string; value: unknown; updated: number }, string>;

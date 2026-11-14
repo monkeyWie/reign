@@ -337,7 +337,7 @@ func (s *State) scanPhoto(cx *core.Scope, done func(string)) {
 						return
 					}
 				}
-				done("不是 Reign 设备二维码")
+				done("不是 ReignHub 设备二维码")
 			})
 		}()
 	}

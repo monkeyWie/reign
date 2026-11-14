@@ -6,9 +6,9 @@ import (
 	"flag"
 	"log"
 
-	"github.com/monkeyWie/reign/internal/app"
-	"github.com/monkeyWie/reign/internal/config"
-	"github.com/monkeyWie/reign/internal/desktop"
+	"github.com/monkeyWie/reignhub/internal/app"
+	"github.com/monkeyWie/reignhub/internal/config"
+	"github.com/monkeyWie/reignhub/internal/desktop"
 )
 
 func main() {

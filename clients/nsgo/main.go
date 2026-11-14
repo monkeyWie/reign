@@ -1,8 +1,8 @@
 package main
 
 import (
-	"github.com/monkeyWie/reign/clients/nsgo/hubui"
-	"github.com/monkeyWie/reign/clients/nsgo/nativecap"
+	"github.com/monkeyWie/reignhub/clients/nsgo/hubui"
+	"github.com/monkeyWie/reignhub/clients/nsgo/nativecap"
 	"github.com/nsgo-dev/nsgo"
 )
 

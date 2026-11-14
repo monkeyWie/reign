@@ -3,7 +3,7 @@ package clienthub
 import (
 	"context"
 	"fmt"
-	"github.com/monkeyWie/reign/internal/device"
+	"github.com/monkeyWie/reignhub/internal/device"
 )
 
 // Account calls use a device credential, never an OAuth cookie or a refresh

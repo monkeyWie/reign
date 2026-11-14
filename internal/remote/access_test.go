@@ -4,8 +4,8 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
-	"github.com/monkeyWie/reign/internal/control"
-	"github.com/monkeyWie/reign/pkg/access"
+	"github.com/monkeyWie/reignhub/internal/control"
+	"github.com/monkeyWie/reignhub/pkg/access"
 	"testing"
 	"time"
 )

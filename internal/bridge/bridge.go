@@ -13,10 +13,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/monkeyWie/reign/internal/app"
-	"github.com/monkeyWie/reign/internal/clienthub"
-	"github.com/monkeyWie/reign/internal/config"
-	"github.com/monkeyWie/reign/internal/control"
+	"github.com/monkeyWie/reignhub/internal/app"
+	"github.com/monkeyWie/reignhub/internal/clienthub"
+	"github.com/monkeyWie/reignhub/internal/config"
+	"github.com/monkeyWie/reignhub/internal/control"
 )
 
 var mu sync.Mutex

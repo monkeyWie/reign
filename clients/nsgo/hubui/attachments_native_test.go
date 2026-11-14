@@ -7,7 +7,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"github.com/monkeyWie/reign/internal/assets"
+	"github.com/monkeyWie/reignhub/internal/assets"
 	"github.com/nsgo-dev/nsgo/core"
 	"github.com/nsgo-dev/nsgo/nsgotest"
 	"image"

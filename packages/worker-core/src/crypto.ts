@@ -1,4 +1,4 @@
-import type { Grant, Role, Decision } from "@reign/protocol";
+import type { Grant, Role, Decision } from "@reignhub/protocol";
 import type { CoreEnv } from "./types";
 const enc = new TextEncoder();
 export function bytes64(b: Uint8Array): string {

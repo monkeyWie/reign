@@ -5,7 +5,7 @@ import {
   type Identity,
   type RPCRequest,
   type ServiceConfig,
-} from "@reign/protocol";
+} from "@reignhub/protocol";
 import {
   Cipher,
   b64,

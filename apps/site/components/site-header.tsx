@@ -19,8 +19,8 @@ export function SiteHeader() {
   return (
     <header className="site-header">
       <div className="site-header-inner">
-        <Link href="/" className="brand" aria-label={t("Reign 首页")}>
-          <span className="brand-symbol">♜</span> Reign
+        <Link href="/" className="brand" aria-label={t("ReignHub 首页")}>
+          <span className="brand-symbol">♜</span> ReignHub
         </Link>
         <nav className="site-nav" aria-label={t("主导航")}>
           {links.map(([href, title]) => (

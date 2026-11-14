@@ -15,7 +15,7 @@ type API interface {
 	Close()
 }
 
-var DefaultService = "https://myreign.cloud"
+var DefaultService = "https://reignhub.app"
 
 func object(v any) Object {
 	if m, ok := v.(map[string]any); ok && m != nil {

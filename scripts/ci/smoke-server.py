@@ -16,11 +16,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--archive', required=True, type=Path)
     args = parser.parse_args()
-    with tempfile.TemporaryDirectory(prefix='reign-server-smoke-') as temp:
+    with tempfile.TemporaryDirectory(prefix='reignhub-server-smoke-') as temp:
         work = Path(temp)
         with tarfile.open(args.archive) as tar:
             tar.extractall(work, filter='data')
-        binaries = list(work.glob('*/reign-server'))
+        binaries = list(work.glob('*/reignhub-server'))
         if len(binaries) != 1:
             raise SystemExit('Expected one packaged server binary')
         with socket.socket() as sock:
@@ -29,7 +29,7 @@ def main():
         base = f'http://127.0.0.1:{port}'
         with (work / 'server.log').open('w+') as log:
             process = subprocess.Popen([str(binaries[0]), '--listen', f'127.0.0.1:{port}',
-                '--state', str(work / 'state/reign.db'), '--stun-listen', '127.0.0.1:0',
+                '--state', str(work / 'state/reignhub.db'), '--stun-listen', '127.0.0.1:0',
                 '--tcp-stun-listen', '127.0.0.1:0'], stdout=log, stderr=log)
             try:
                 deadline = time.monotonic() + 20
@@ -61,7 +61,7 @@ def main():
                 with urllib.request.urlopen(req, timeout=3) as r:
                     network = json.load(r)
                     assert network['selfStun'] and network['tcpStun']
-                assert (work / 'state/reign.db').read_bytes()[:16] == b'SQLite format 3\x00'
+                assert (work / 'state/reignhub.db').read_bytes()[:16] == b'SQLite format 3\x00'
                 print('Packaged server: HTTP, embedded Web, SQLite and STUN discovery passed')
             finally:
                 process.terminate()

@@ -144,7 +144,7 @@ export class ReleaseService {
         try {
           const headers: Record<string, string> = {
             Accept: "application/vnd.github+json",
-            "User-Agent": "Reign-Release-Catalog",
+            "User-Agent": "ReignHub-Release-Catalog",
             "X-GitHub-Api-Version": "2022-11-28",
           };
           if (row.etag) headers["If-None-Match"] = row.etag;

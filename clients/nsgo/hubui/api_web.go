@@ -3,7 +3,7 @@
 package hubui
 
 import (
-	"github.com/monkeyWie/reign/clients/nsgo/webapi"
+	"github.com/monkeyWie/reignhub/clients/nsgo/webapi"
 	"github.com/nsgo-dev/nsgo/core"
 	"net/url"
 	"strings"

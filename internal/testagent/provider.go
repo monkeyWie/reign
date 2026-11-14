@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/monkeyWie/reign/internal/assets"
-	"github.com/monkeyWie/reign/internal/provider"
+	"github.com/monkeyWie/reignhub/internal/assets"
+	"github.com/monkeyWie/reignhub/internal/provider"
 )
 
 type Provider struct {

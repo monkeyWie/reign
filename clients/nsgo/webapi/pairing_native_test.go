@@ -3,7 +3,7 @@
 package webapi
 
 import (
-	"github.com/monkeyWie/reign/internal/device"
+	"github.com/monkeyWie/reignhub/internal/device"
 	"testing"
 )
 
@@ -11,7 +11,7 @@ func TestPairingEnvelopesWithExistingHost(t *testing.T) {
 	client, _ := device.NewIdentity("browser")
 	host, _ := device.NewIdentity("host")
 	identity := Object{"private": client.Private}
-	context := "reign/pair/request/fixture"
+	context := "reignhub/pair/request/fixture"
 	packet, e := seal(identity, host.Public, context, Object{"password": "fixture"})
 	if e != nil {
 		t.Fatal(e)

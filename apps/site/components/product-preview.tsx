@@ -12,7 +12,7 @@ import {
 export function ProductPreview() {
   const t = useT();
   return (
-    <div className="product-scene" aria-label={t("Reign 会话界面示意")}>
+    <div className="product-scene" aria-label={t("ReignHub 会话界面示意")}>
       <div className="product-window">
         <div className="window-top">
           <div className="window-dots">
@@ -20,7 +20,7 @@ export function ProductPreview() {
             <i />
             <i />
           </div>
-          <span>Reign</span>
+          <span>ReignHub</span>
           <span className="preview-caption">{t("界面示意")}</span>
         </div>
         <div className="preview-workspace">
@@ -36,7 +36,7 @@ export function ProductPreview() {
             </div>
             <span className="preview-label">{t("项目")}</span>
             <div className="preview-project">
-              <Folder size={13} /> reign <ChevronDown size={12} />
+              <Folder size={13} /> reignhub <ChevronDown size={12} />
             </div>
             <div className="preview-session active">
               <Terminal size={13} />

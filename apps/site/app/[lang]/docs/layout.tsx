@@ -23,12 +23,12 @@ export default async function Layout({
         nav={{
           title: (
             <span className="brand">
-              ♜ Reign <span className="docs-wordmark">/ {t("文档")}</span>
+              ♜ ReignHub <span className="docs-wordmark">/ {t("文档")}</span>
             </span>
           ),
           url: localizeHref("/", lang),
         }}
-        githubUrl="https://github.com/monkeyWie/reign"
+        githubUrl="https://github.com/monkeyWie/reignhub"
         links={[
           { text: t("特性"), url: localizeHref("/features", lang) },
           { text: t("技术栈"), url: localizeHref("/technology", lang) },

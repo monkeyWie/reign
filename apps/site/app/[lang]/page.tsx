@@ -40,7 +40,7 @@ export default async function Home({
               __html: JSON.stringify({
                 "@context": "https://schema.org",
                 "@type": "WebSite",
-                name: "Reign",
+                name: "ReignHub",
                 url: siteOrigin + localizeHref("/", lang),
                 description: marketingMeta["/"][lang][1],
                 inLanguage: lang,
@@ -65,7 +65,7 @@ export default async function Home({
             </p>
             <div className="site-actions">
               <Link className="button primary" href="/download">
-                {t("下载 Reign")}
+                {t("下载 ReignHub")}
                 <ArrowUpRight size={16} />
               </Link>
               <Link className="button" href="/chat">
@@ -184,7 +184,7 @@ export default async function Home({
               title={t("熟悉的 Agent，更大的掌控半径。")}
             >
               {t(
-                "使用你已有的模型账号、项目与开发环境。Reign 负责把它们带到你面前。",
+                "使用你已有的模型账号、项目与开发环境。ReignHub 负责把它们带到你面前。",
               )}
             </SectionHeading>
             <Link className="site-text-link" href="/docs/agents">
@@ -228,7 +228,7 @@ export default async function Home({
             {[
               [
                 "01",
-                t("在电脑打开 Reign"),
+                t("在电脑打开 ReignHub"),
                 t("确认 Agent 已安装，并按照面板提示完成接入。"),
               ],
               [
@@ -309,7 +309,7 @@ export default async function Home({
               </div>
             </div>
             <small>
-              {t("Apple M5 · macOS · Reign 应用进程实测")}{" "}
+              {t("Apple M5 · macOS · ReignHub 应用进程实测")}{" "}
               <Link href="/docs/architecture/performance">
                 {t("查看测试 ↗")}
               </Link>
@@ -339,7 +339,7 @@ export default async function Home({
             <div>
               <span className="online-dot" /> YOUR OWN CONNECTION SERVICE
             </div>
-            <code>https://your-reign.workers.dev</code>
+            <code>https://your-reignhub.workers.dev</code>
             <p>{t("一个服务地址，所有客户端。")}</p>
             <span>{t("官网 / 文档 / Web 控制台 / 信令 / 加密中继")}</span>
           </div>

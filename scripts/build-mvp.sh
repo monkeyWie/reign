@@ -11,7 +11,7 @@ if [[ "$platform" != web && -n "${AGENTHUB_SERVICE:-}" ]]; then
 fi
 if [[ "${AGENTHUB_ALLOW_LAN_HTTP:-false}" == true ]]; then
   agenthub_flutter_args+=("--dart-define=AGENTHUB_ALLOW_LAN_HTTP=true")
-  agenthub_go_ldflags='-X github.com/monkeyWie/reign/internal/device.AllowLANHTTP=true'
+  agenthub_go_ldflags='-X github.com/monkeyWie/reignhub/internal/device.AllowLANHTTP=true'
 fi
 mkdir -p build
 if [[ "$platform" == macos ]]; then

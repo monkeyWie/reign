@@ -1,4 +1,4 @@
-# Self-hosted Reign
+# Self-hosted ReignHub
 
 ## One-click Cloudflare deployment
 
@@ -29,8 +29,8 @@ For a local Worker, apply migrations with `--local` before `wrangler dev`. Do no
 ## Optional discovery probe
 
 ```sh
-go build -o reign-probe ./cmd/reign-probe
-./reign-probe --listen :26330
+go build -o reignhub-probe ./cmd/reignhub-probe
+./reignhub-probe --listen :26330
 ```
 
 Open `26330/TCP` and `26330/UDP` on the VM and firewall. Both protocols use the same port number. These are STUN Binding/probe listeners, **not HTTP endpoints**, so an Nginx HTTP reverse proxy cannot carry them. A Cloudflare DNS record for this probe must be **DNS only**, not proxied.

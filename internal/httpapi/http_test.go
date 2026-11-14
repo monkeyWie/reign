@@ -2,8 +2,8 @@ package httpapi
 
 import (
 	"context"
-	"github.com/monkeyWie/reign/internal/control"
-	"github.com/monkeyWie/reign/internal/provider"
+	"github.com/monkeyWie/reignhub/internal/control"
+	"github.com/monkeyWie/reignhub/internal/provider"
 	"net/http"
 	"net/http/httptest"
 	"strings"

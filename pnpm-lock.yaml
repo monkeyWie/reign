@@ -29,7 +29,7 @@ importers:
 
   apps/self-hosted:
     dependencies:
-      '@reign/worker-core':
+      '@reignhub/worker-core':
         specifier: workspace:*
         version: link:../../packages/worker-core
 
@@ -38,16 +38,16 @@ importers:
       '@opennextjs/cloudflare':
         specifier: 1.20.17
         version: 1.20.17(next@16.4.6(@types/node@24.19.2)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(rclone.js@0.6.6)(wrangler@4.160.0(@cloudflare/workers-types@5.20261110.1)(@types/node@24.19.2))
-      '@reign/client-sdk':
+      '@reignhub/client-sdk':
         specifier: workspace:*
         version: link:../../packages/client-sdk
-      '@reign/protocol':
+      '@reignhub/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
-      '@reign/web-client':
+      '@reignhub/web-client':
         specifier: workspace:*
         version: link:../../packages/web-client
-      '@reign/worker-core':
+      '@reignhub/worker-core':
         specifier: workspace:*
         version: link:../../packages/worker-core
       '@tailwindcss/postcss':
@@ -102,7 +102,7 @@ importers:
       '@noble/curves':
         specifier: ^2.0.1
         version: 2.4.0
-      '@reign/protocol':
+      '@reignhub/protocol':
         specifier: workspace:*
         version: link:../protocol
       dexie:
@@ -122,10 +122,10 @@ importers:
       '@radix-ui/react-tooltip':
         specifier: ^1.2.8
         version: 1.4.1(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
-      '@reign/client-sdk':
+      '@reignhub/client-sdk':
         specifier: workspace:*
         version: link:../client-sdk
-      '@reign/protocol':
+      '@reignhub/protocol':
         specifier: workspace:*
         version: link:../protocol
       '@tanstack/react-virtual':
@@ -171,7 +171,7 @@ importers:
 
   packages/worker-core:
     dependencies:
-      '@reign/protocol':
+      '@reignhub/protocol':
         specifier: workspace:*
         version: link:../protocol
       drizzle-orm:

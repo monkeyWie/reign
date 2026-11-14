@@ -8,7 +8,7 @@ import {
   type Frame,
   type Role,
   type Decision,
-} from "@reign/protocol";
+} from "@reignhub/protocol";
 import { devices, type DeviceRow } from "./schema";
 import { id, issueGrant } from "./crypto";
 import { unrestricted, type CoreEnv, type Policy } from "./types";
@@ -29,7 +29,7 @@ interface SocketState {
   bytes: number;
 }
 const enc = new TextEncoder();
-export class ReignRoom extends DurableObject<CoreEnv> {
+export class ReignHubRoom extends DurableObject<CoreEnv> {
   protected policy: Policy = unrestricted;
   private state(ws: WebSocket): SocketState | null {
     return ws.deserializeAttachment() as SocketState | null;
@@ -156,7 +156,7 @@ export class ReignRoom extends DurableObject<CoreEnv> {
       }
       const role = url.searchParams.get("role") as Role;
       const hostID = url.searchParams.get("id")!;
-      const deviceID = request.headers.get("x-reign-device")!;
+      const deviceID = request.headers.get("x-reignhub-device")!;
       const relay = url.pathname === "/p2p/relay";
       const currentHost = this.host();
       let state: SocketState;
@@ -386,4 +386,4 @@ export class ReignRoom extends DurableObject<CoreEnv> {
     this.disconnect(ws, 1011, "socket error");
   }
 }
-export class RelayRoom extends ReignRoom {}
+export class RelayRoom extends ReignHubRoom {}

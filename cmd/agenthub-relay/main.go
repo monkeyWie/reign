@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"flag"
-	"github.com/monkeyWie/reign/internal/relay"
+	"github.com/monkeyWie/reignhub/internal/relay"
 	"log"
 	"net/http"
 	"os"

@@ -17,9 +17,9 @@ const config = {
   outputFileTracingRoot:
     process.env.NEXT_PRIVATE_OUTPUT_TRACE_ROOT || workspaceRoot,
   transpilePackages: [
-    "@reign/web-client",
-    "@reign/client-sdk",
-    "@reign/protocol",
+    "@reignhub/web-client",
+    "@reignhub/client-sdk",
+    "@reignhub/protocol",
   ],
   images: { unoptimized: true },
   poweredByHeader: false,

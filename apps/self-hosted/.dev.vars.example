@@ -1,4 +1,4 @@
-# Optional: permit a separately hosted Reign Web origin.
+# Optional: permit a separately hosted ReignHub Web origin.
 ALLOWED_ORIGINS=http://localhost:3000
 # Optional Go probe endpoints. Do not use an orange-cloud proxied hostname.
 SELF_STUN=

@@ -11,7 +11,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/monkeyWie/reign/internal/bridge"
+	"github.com/monkeyWie/reignhub/internal/bridge"
 	"github.com/nsgo-dev/nsgo/core"
 )
 

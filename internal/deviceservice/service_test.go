@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
-	"github.com/monkeyWie/reign/internal/device"
+	"github.com/monkeyWie/reignhub/internal/device"
 )
 
 func TestIdentityAndDeviceRouteIsolation(t *testing.T) {

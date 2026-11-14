@@ -7,15 +7,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/monkeyWie/reign/internal/clienthub"
-	"github.com/monkeyWie/reign/internal/config"
-	"github.com/monkeyWie/reign/internal/control"
-	"github.com/monkeyWie/reign/internal/deviceservice"
-	"github.com/monkeyWie/reign/internal/host"
-	"github.com/monkeyWie/reign/internal/provider"
-	"github.com/monkeyWie/reign/internal/remote"
-	"github.com/monkeyWie/reign/internal/store"
-	"github.com/monkeyWie/reign/internal/testagent"
+	"github.com/monkeyWie/reignhub/internal/clienthub"
+	"github.com/monkeyWie/reignhub/internal/config"
+	"github.com/monkeyWie/reignhub/internal/control"
+	"github.com/monkeyWie/reignhub/internal/deviceservice"
+	"github.com/monkeyWie/reignhub/internal/host"
+	"github.com/monkeyWie/reignhub/internal/provider"
+	"github.com/monkeyWie/reignhub/internal/remote"
+	"github.com/monkeyWie/reignhub/internal/store"
+	"github.com/monkeyWie/reignhub/internal/testagent"
 )
 
 func TestPairedReconnectAfterHostRestart(t *testing.T) {

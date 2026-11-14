@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
-	"github.com/monkeyWie/reign/internal/config"
-	"github.com/monkeyWie/reign/internal/events"
-	"github.com/monkeyWie/reign/internal/rpc"
+	"github.com/monkeyWie/reignhub/internal/config"
+	"github.com/monkeyWie/reignhub/internal/events"
+	"github.com/monkeyWie/reignhub/internal/rpc"
 )
 
 func TestSessionCreationSourceIsIndependentOfAccessProvider(t *testing.T) {

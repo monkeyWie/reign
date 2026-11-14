@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"github.com/coder/websocket"
-	"github.com/monkeyWie/reign/internal/device"
+	"github.com/monkeyWie/reignhub/internal/device"
 	"gorm.io/gorm"
 	"net/http/httptest"
 	"os"
@@ -15,7 +15,7 @@ import (
 )
 
 func TestSQLiteReopenAndPolicy(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "reign.db")
+	path := filepath.Join(t.TempDir(), "reignhub.db")
 	s, err := New(path, nil)
 	if err != nil {
 		t.Fatal(err)

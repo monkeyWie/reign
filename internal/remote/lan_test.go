@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/monkeyWie/reign/internal/device"
+	"github.com/monkeyWie/reignhub/internal/device"
 )
 
 func TestRelaySupportsHTTPAndHTTPS(t *testing.T) {

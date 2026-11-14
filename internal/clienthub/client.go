@@ -5,12 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/monkeyWie/reign/internal/assets"
-	"github.com/monkeyWie/reign/internal/control"
-	"github.com/monkeyWie/reign/internal/device"
-	"github.com/monkeyWie/reign/internal/deviceservice"
-	"github.com/monkeyWie/reign/internal/remote"
-	"github.com/monkeyWie/reign/internal/store"
+	"github.com/monkeyWie/reignhub/internal/assets"
+	"github.com/monkeyWie/reignhub/internal/control"
+	"github.com/monkeyWie/reignhub/internal/device"
+	"github.com/monkeyWie/reignhub/internal/deviceservice"
+	"github.com/monkeyWie/reignhub/internal/remote"
+	"github.com/monkeyWie/reignhub/internal/store"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -161,7 +161,7 @@ func (h *Hub) connect(ctx context.Context, service, code, public, password, name
 	}
 	if s.Key == "" || (s.Expires > 0 && s.Expires <= time.Now().Unix()) {
 		reqID := device.Random()[:32]
-		envelope, e := device.Seal(i.Private, d.Public, "reign/pair/request/"+reqID, map[string]any{"password": password, "remember": remember})
+		envelope, e := device.Seal(i.Private, d.Public, "reignhub/pair/request/"+reqID, map[string]any{"password": password, "remember": remember})
 		if e != nil {
 			return s, e
 		}
@@ -185,7 +185,7 @@ func (h *Hub) connect(ctx context.Context, service, code, public, password, name
 					Key, Host, Public string
 					Expires           int64
 				}
-				if e = device.Open(i.Private, d.Public, "reign/pair/reply/"+reqID, result.Reply, &reply); e != nil {
+				if e = device.Open(i.Private, d.Public, "reignhub/pair/reply/"+reqID, result.Reply, &reply); e != nil {
 					return s, e
 				}
 				if reply.Host != d.ID || reply.Public != d.Public {

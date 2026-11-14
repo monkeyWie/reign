@@ -15,17 +15,17 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/monkeyWie/reign/internal/app"
-	"github.com/monkeyWie/reign/internal/assets"
-	"github.com/monkeyWie/reign/internal/config"
-	"github.com/monkeyWie/reign/internal/control"
-	"github.com/monkeyWie/reign/internal/device"
-	"github.com/monkeyWie/reign/internal/deviceservice"
-	"github.com/monkeyWie/reign/internal/host"
-	"github.com/monkeyWie/reign/internal/provider"
-	"github.com/monkeyWie/reign/internal/store"
-	"github.com/monkeyWie/reign/internal/syncstate"
-	"github.com/monkeyWie/reign/internal/testagent"
+	"github.com/monkeyWie/reignhub/internal/app"
+	"github.com/monkeyWie/reignhub/internal/assets"
+	"github.com/monkeyWie/reignhub/internal/config"
+	"github.com/monkeyWie/reignhub/internal/control"
+	"github.com/monkeyWie/reignhub/internal/device"
+	"github.com/monkeyWie/reignhub/internal/deviceservice"
+	"github.com/monkeyWie/reignhub/internal/host"
+	"github.com/monkeyWie/reignhub/internal/provider"
+	"github.com/monkeyWie/reignhub/internal/store"
+	"github.com/monkeyWie/reignhub/internal/syncstate"
+	"github.com/monkeyWie/reignhub/internal/testagent"
 )
 
 func main() {

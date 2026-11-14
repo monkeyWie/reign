@@ -4,15 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"github.com/coder/websocket"
-	"github.com/monkeyWie/reign/internal/config"
-	"github.com/monkeyWie/reign/internal/events"
+	"github.com/monkeyWie/reignhub/internal/config"
+	"github.com/monkeyWie/reignhub/internal/events"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/monkeyWie/reign/internal/rpc"
+	"github.com/monkeyWie/reignhub/internal/rpc"
 )
 
 func TestWatchRejoinsSameThreadWithoutStartingTurn(t *testing.T) {

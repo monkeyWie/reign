@@ -110,7 +110,7 @@ jobs:
       VERSION: ${{ needs.metadata.outputs.version }}
       BUILD_NUMBER: ${{ needs.metadata.outputs.build_number }}
       TARGETS: ${{ matrix.targets }}
-      AGENTHUB_SERVER_URL: ${{ vars.REIGN_SERVER_URL || 'https://myreign.cloud' }}
+      AGENTHUB_SERVER_URL: ${{ vars.REIGNHUB_SERVER_URL || 'https://reignhub.app' }}
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-go@v7.0.0
@@ -148,7 +148,7 @@ jobs:
     env:
       VERSION: ${{ needs.metadata.outputs.version }}
       BUILD_NUMBER: ${{ needs.metadata.outputs.build_number }}
-      AGENTHUB_SERVER_URL: ${{ vars.REIGN_SERVER_URL || 'https://myreign.cloud' }}
+      AGENTHUB_SERVER_URL: ${{ vars.REIGNHUB_SERVER_URL || 'https://reignhub.app' }}
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-go@v7.0.0
@@ -180,12 +180,12 @@ jobs:
               key.write_bytes(base64.b64decode(encoded, validate=True))
               key.chmod(0o600)
               with open(os.environ['GITHUB_ENV'], 'a') as f:
-                  f.write('REIGN_ANDROID_STABLE_SIGNING=1\n')
+                  f.write('REIGNHUB_ANDROID_STABLE_SIGNING=1\n')
           PY
       - name: Require persistent signing for published releases
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
-          if [ "$REIGN_ANDROID_STABLE_SIGNING" != "1" ]; then
+          if [ "$REIGNHUB_ANDROID_STABLE_SIGNING" != "1" ]; then
             echo 'Configure ANDROID_SIGNING_PEM_BASE64 before publishing an installable release.'
             exit 1
           fi
@@ -198,14 +198,14 @@ jobs:
           import hashlib, os, re, ssl, subprocess
           from pathlib import Path
           tools = Path(os.environ['ANDROID_HOME']) / 'build-tools/35.0.0'
-          apk = Path('clients/nsgo/dist/releases') / ('reign-' + os.environ['VERSION'] + '-android-arm64.apk')
+          apk = Path('clients/nsgo/dist/releases') / ('reignhub-' + os.environ['VERSION'] + '-android-arm64.apk')
           badging = subprocess.check_output([str(tools / 'aapt'), 'dump', 'badging', str(apk)], text=True)
           assert "versionName='" + os.environ['VERSION'] + "'" in badging
           assert "versionCode='" + os.environ['BUILD_NUMBER'] + "'" in badging
           assert "name='dev.agenthub.ras.RasActivity'" in badging
           signature = subprocess.check_output([str(tools / 'apksigner'), 'verify', '--print-certs', str(apk)], text=True)
           print(signature)
-          if os.environ.get('REIGN_ANDROID_STABLE_SIGNING'):
+          if os.environ.get('REIGNHUB_ANDROID_STABLE_SIGNING'):
               identity = Path('clients/nsgo/.nsgo/android/debug.pem').read_text()
               certificate = re.search(r'-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----', identity, re.S).group(0)
               expected = hashlib.sha256(ssl.PEM_cert_to_DER_cert(certificate)).hexdigest()
@@ -249,11 +249,11 @@ jobs:
       - run: pnpm test
       - run: pnpm build:web
         env:
-          SITE_URL: https://reign.example.com
+          SITE_URL: https://reignhub.example.com
       - name: Verify actual Worker to native host interoperability
         run: |
           pnpm exec wrangler d1 migrations apply DB --local
-          pnpm exec wrangler dev --port 8787 > /tmp/reign-worker.log 2>&1 &
+          pnpm exec wrangler dev --port 8787 > /tmp/reignhub-worker.log 2>&1 &
           worker_pid=$!
           trap 'kill "$worker_pid" 2>/dev/null || true' EXIT
           for attempt in $(seq 1 60); do
@@ -285,7 +285,7 @@ jobs:
           go-version-file: go.mod
           cache-dependency-path: go.sum
       - run: python3 scripts/platform/package-probe.py --version "$VERSION" --output dist/release
-      - run: python3 scripts/ci/smoke-probe.py --archive "dist/release/reign-probe-$VERSION-linux-amd64.tar.gz"
+      - run: python3 scripts/ci/smoke-probe.py --archive "dist/release/reignhub-probe-$VERSION-linux-amd64.tar.gz"
       - name: Add probe checksums
         run: |
           python3 - <<'PY'
@@ -354,21 +354,21 @@ jobs:
       - name: Prepare release notes
         run: |
           cat > build-notes.md <<'NOTES'
-          Reign native clients, Cloudflare Worker with React Web, and optional probes.
+          ReignHub native clients, Cloudflare Worker with React Web, and optional probes.
 
-          - macOS DMG: open and drag Reign into Applications. Builds are ad hoc signed and not notarized.
+          - macOS DMG: open and drag ReignHub into Applications. Builds are ad hoc signed and not notarized.
           - Windows setup EXE: includes installation, shortcuts and an uninstaller.
           - Linux: DEB, Arch Linux packages and AppImage for x64 and arm64; GTK 4 is required.
           - Android packages ending in `-debug.apk` use a temporary development signing key and cannot update previous builds with another key. A configured persistent signing identity removes this suffix.
           - iOS `-unsigned.ipa` requires your own signing/provisioning before installation.
           - Probe binaries use TCP/UDP 26330 and do not contain Web or account services.
           - Verify downloads against `SHA256SUMS` or the individual `.sha256` files.
-          - Native clients default to https://myreign.cloud; self-hosted services can be configured in settings. Web uses its current origin.
+          - Native clients default to https://reignhub.app; self-hosted services can be configured in settings. Web uses its current origin.
           NOTES
       - name: Publish only after every build succeeds
         run: |
           if ! gh release view "$TAG" > /dev/null 2>&1; then
-            gh release create "$TAG" --verify-tag --draft --title "Reign $VERSION" \
+            gh release create "$TAG" --verify-tag --draft --title "ReignHub $VERSION" \
               --generate-notes --notes-file build-notes.md
           fi
           gh release upload "$TAG" dist/release/* --clobber

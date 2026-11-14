@@ -9,11 +9,11 @@ case "$nsgo_tool" in
       set -- -checklinkname=0 "$@"
     fi
     if [ -n "${AGENTHUB_SERVER_URL:-}" ]; then
-      set -- "-X=github.com/monkeyWie/reign/clients/nsgo/hubui.DefaultService=$AGENTHUB_SERVER_URL" "$@"
+      set -- "-X=github.com/monkeyWie/reignhub/clients/nsgo/hubui.DefaultService=$AGENTHUB_SERVER_URL" "$@"
     fi
     if [ "${AGENTHUB_ALLOW_LAN_HTTP:-false}" = true ]; then
-      set -- "-X=github.com/monkeyWie/reign/internal/device.AllowLANHTTP=true" "$@"
-      set -- "-X=github.com/monkeyWie/reign/clients/nsgo/browserclient.AllowLANHTTP=true" "$@"
+      set -- "-X=github.com/monkeyWie/reignhub/internal/device.AllowLANHTTP=true" "$@"
+      set -- "-X=github.com/monkeyWie/reignhub/clients/nsgo/browserclient.AllowLANHTTP=true" "$@"
     fi
     exec "$nsgo_tool" "$@"
     ;;

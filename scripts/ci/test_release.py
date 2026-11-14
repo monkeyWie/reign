@@ -26,8 +26,8 @@ class ReleaseContractTests(unittest.TestCase):
             output = Path(tmp)
             v = '1.2.3'
             names = release.desktop_assets(v)
-            names += [f'reign-web-worker-{v}.tar.gz', f'reign-{v}-ios-unsigned.ipa', f'reign-{v}-android-arm64-debug.apk']
-            names += [f'reign-probe-{v}-linux-{a}.tar.gz' for a in ('amd64', 'arm64')]
+            names += [f'reignhub-web-worker-{v}.tar.gz', f'reignhub-{v}-ios-unsigned.ipa', f'reignhub-{v}-android-arm64-debug.apk']
+            names += [f'reignhub-probe-{v}-linux-{a}.tar.gz' for a in ('amd64', 'arm64')]
             args = SimpleNamespace(version=v, output=tmp)
             for name in names:
                 path = output / name
@@ -55,14 +55,14 @@ class ReleaseContractTests(unittest.TestCase):
             source.mkdir(parents=True)
             for name in release.desktop_assets('1.2.3'):
                 (source / name).write_bytes(b'native installer fixture: ' + name.encode())
-            (source / 'reign-1.2.3-windows-x64.zip').write_bytes(b'portable archive')
+            (source / 'reignhub-1.2.3-windows-x64.zip').write_bytes(b'portable archive')
             args = SimpleNamespace(version='1.2.3', source=str(source.parent), output=str(root / 'out'), targets=','.join(release.DESKTOP))
             release.collect(args)
             names = {p.name for p in (root / 'out').iterdir() if p.suffix != '.sha256'}
             self.assertEqual(names, set(release.desktop_assets('1.2.3')))
             for name in names:
                 self.assertEqual((root / 'out' / name).read_bytes(), (source / name).read_bytes())
-            (source / 'reign-1.2.3-windows-x64-setup.exe').unlink()
+            (source / 'reignhub-1.2.3-windows-x64-setup.exe').unlink()
             with self.assertRaisesRegex(SystemExit, 'Missing native installer'):
                 release.collect(args)
 

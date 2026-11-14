@@ -1,4 +1,4 @@
-import { handleCore, RelayRoom, type CoreEnv } from "@reign/worker-core";
+import { handleCore, RelayRoom, type CoreEnv } from "@reignhub/worker-core";
 export { RelayRoom };
 export default {
   async fetch(request: Request, env: CoreEnv) {
@@ -7,7 +7,7 @@ export default {
       new Response(
         new URL(request.url).pathname === "/healthz"
           ? "ok"
-          : "Reign self-hosted service",
+          : "ReignHub self-hosted service",
         { headers: { "Cache-Control": "no-store" } },
       )
     );

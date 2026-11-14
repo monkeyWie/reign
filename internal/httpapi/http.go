@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/monkeyWie/reign/internal/control"
+	"github.com/monkeyWie/reignhub/internal/control"
 )
 
 func Handler(key string, d *control.Dispatcher) http.Handler {

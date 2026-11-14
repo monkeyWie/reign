@@ -1,13 +1,13 @@
 import { env, SELF, applyD1Migrations } from "cloudflare:test";
 import { beforeAll, describe, it, expect } from "vitest";
-import { routes } from "@reign/protocol";
+import { routes } from "@reignhub/protocol";
 import type { CoreEnv } from "../src";
 const bindings = env as unknown as CoreEnv & {
   TEST_MIGRATIONS: Parameters<typeof applyD1Migrations>[1];
 };
 beforeAll(() => applyD1Migrations(bindings.DB, bindings.TEST_MIGRATIONS));
 async function post(path: string, body: unknown, token?: string) {
-  return SELF.fetch("https://reign.test" + path, {
+  return SELF.fetch("https://reignhub.test" + path, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -37,7 +37,7 @@ async function socket(
   peer = "",
 ) {
   return SELF.fetch(
-    `https://reign.test${path}?id=${id}&role=${role}&peer=${peer}`,
+    `https://reignhub.test${path}?id=${id}&role=${role}&peer=${peer}`,
     { headers: { Upgrade: "websocket", Authorization: "Bearer " + token } },
   );
 }
@@ -65,7 +65,7 @@ describe("device authorization and separated ingress", () => {
     ).toBe(401);
     expect(
       (
-        await SELF.fetch("https://reign.test/p2p/config", {
+        await SELF.fetch("https://reignhub.test/p2p/config", {
           headers: { Origin: "https://evil.test" },
         })
       ).status,

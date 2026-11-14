@@ -41,7 +41,7 @@ export default async function Pricing({
     [
       t("包含 Codex 或其他模型费用吗？"),
       t(
-        "不包含。你需要自行安装 Agent、登录模型账号，并承担对应模型服务或 API 的费用。Reign 是连接和会话控制工具，不提供模型算力。",
+        "不包含。你需要自行安装 Agent、登录模型账号，并承担对应模型服务或 API 的费用。ReignHub 是连接和会话控制工具，不提供模型算力。",
       ),
     ],
     [

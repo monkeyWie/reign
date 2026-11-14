@@ -5,7 +5,7 @@ package probecmd
 import (
 	"context"
 	"flag"
-	"github.com/monkeyWie/reign/internal/connectivity"
+	"github.com/monkeyWie/reignhub/internal/connectivity"
 	"log"
 	"os"
 	"os/signal"
@@ -26,7 +26,7 @@ func Run() {
 		log.Fatal(err)
 	}
 	defer udp.Close()
-	log.Printf("Reign probe TCP %s; UDP %s", tcp.Addr(), udp.Addr())
+	log.Printf("ReignHub probe TCP %s; UDP %s", tcp.Addr(), udp.Addr())
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	<-ctx.Done()

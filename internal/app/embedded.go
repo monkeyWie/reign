@@ -9,16 +9,16 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/monkeyWie/reign/internal/assets"
-	"github.com/monkeyWie/reign/internal/codex"
-	"github.com/monkeyWie/reign/internal/config"
-	"github.com/monkeyWie/reign/internal/control"
-	"github.com/monkeyWie/reign/internal/device"
-	"github.com/monkeyWie/reign/internal/events"
-	"github.com/monkeyWie/reign/internal/host"
-	"github.com/monkeyWie/reign/internal/provider"
-	"github.com/monkeyWie/reign/internal/store"
-	"github.com/monkeyWie/reign/internal/syncstate"
+	"github.com/monkeyWie/reignhub/internal/assets"
+	"github.com/monkeyWie/reignhub/internal/codex"
+	"github.com/monkeyWie/reignhub/internal/config"
+	"github.com/monkeyWie/reignhub/internal/control"
+	"github.com/monkeyWie/reignhub/internal/device"
+	"github.com/monkeyWie/reignhub/internal/events"
+	"github.com/monkeyWie/reignhub/internal/host"
+	"github.com/monkeyWie/reignhub/internal/provider"
+	"github.com/monkeyWie/reignhub/internal/store"
+	"github.com/monkeyWie/reignhub/internal/syncstate"
 )
 
 // Embedded runs the host in the caller's process. Calls go straight to the

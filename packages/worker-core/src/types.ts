@@ -1,4 +1,4 @@
-import type { Decision, Role } from "@reign/protocol";
+import type { Decision, Role } from "@reignhub/protocol";
 import type { DeviceRow } from "./schema";
 export interface CoreEnv {
   DB: D1Database;

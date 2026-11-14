@@ -13,8 +13,8 @@ parser.add_argument('--targets', required=True)
 args = parser.parse_args()
 out = pathlib.Path(args.output).resolve()
 name = re.search(r'^name:\s*(\S+)\s*$', (root/'nsgo.yaml').read_text(), re.M).group(1)
-version = os.environ.get('REIGN_BUILD_VERSION', '')
-build_number = os.environ.get('REIGN_BUILD_NUMBER', '')
+version = os.environ.get('REIGNHUB_BUILD_VERSION', '')
+build_number = os.environ.get('REIGNHUB_BUILD_NUMBER', '')
 overrides = []
 if version:
     overrides += ['-version', version]
@@ -38,7 +38,7 @@ if not zxing.exists():
 if hashlib.sha256(zxing.read_bytes()).hexdigest() != expected:
     raise SystemExit('ZXing dependency checksum mismatch')
 for target in android:
-    with tempfile.TemporaryDirectory(prefix='reign-native-android-') as tmp:
+    with tempfile.TemporaryDirectory(prefix='reignhub-native-android-') as tmp:
         tmp = pathlib.Path(tmp)
         subprocess.run(['go','tool','nsgo','build','-embed','-target',target,'-output',str(tmp/'aar'),*overrides],cwd=root,check=True)
         aar = next((tmp/'aar').rglob(name+'.aar'))

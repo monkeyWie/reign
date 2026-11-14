@@ -1,6 +1,6 @@
-# Contributing to Reign
+# Contributing to ReignHub
 
-Start with the [contribution guide](https://myreign.cloud/docs/contributing) and [local development](https://myreign.cloud/docs/contributing/development). Their editable MDX source is in `apps/site/content/docs/contributing/`.
+Start with the [contribution guide](https://reignhub.app/docs/contributing) and [local development](https://reignhub.app/docs/contributing/development). Their editable MDX source is in `apps/site/content/docs/contributing/`.
 
 - Keep each PR focused. Explain the trigger, resulting behavior, validation and known limits.
 - Run `gofmt` for Go and Prettier for TypeScript/MDX. Check both Go modules when affected.

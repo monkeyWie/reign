@@ -17,7 +17,7 @@ export async function smokeSite(origin: string) {
     const path = pending.values().next().value!;
     pending.delete(path);
     const response = await fetch(origin + path, {
-      headers: { Cookie: "reign_locale=en" },
+      headers: { Cookie: "reignhub_locale=en" },
       redirect: "manual",
     });
     assert.equal(response.status, 200, path);
@@ -35,7 +35,7 @@ export async function smokeSite(origin: string) {
       /\[object Object\]/,
       `Invalid rendered content: ${path}`,
     );
-    assert.match(html, /<title>[^<]+Reign|<title>Reign/, path);
+    assert.match(html, /<title>[^<]+ReignHub|<title>ReignHub/, path);
     assert.match(html, /<meta name="description" content="[^\"]+"/, path);
     assert.match(
       html,
@@ -150,8 +150,8 @@ export async function smokeSite(origin: string) {
       (
         await fetch(
           origin +
-            publicLocalePath("/docs/not-a-reign-page", lang as "en" | "zh-CN"),
-          { headers: { Cookie: "reign_locale=en" } },
+            publicLocalePath("/docs/not-a-reignhub-page", lang as "en" | "zh-CN"),
+          { headers: { Cookie: "reignhub_locale=en" } },
         )
       ).status,
       404,
@@ -172,17 +172,17 @@ export async function smokeSite(origin: string) {
     );
     assert.match(chinese.headers.get("Cache-Control")!, /no-store/);
     const selected = await fetch(origin + path + "?lang=en&from=check", {
-      headers: { "Accept-Language": "zh-CN", Cookie: "reign_locale=zh-CN" },
+      headers: { "Accept-Language": "zh-CN", Cookie: "reignhub_locale=zh-CN" },
       redirect: "manual",
     });
     assert.equal(selected.status, 303);
-    assert.match(selected.headers.get("Set-Cookie")!, /reign_locale=en/);
+    assert.match(selected.headers.get("Set-Cookie")!, /reignhub_locale=en/);
     assert.equal(
       new URL(selected.headers.get("Location")!, origin).search,
       "?from=check",
     );
     const remembered = await fetch(origin + path, {
-      headers: { "Accept-Language": "zh-CN", Cookie: "reign_locale=en" },
+      headers: { "Accept-Language": "zh-CN", Cookie: "reignhub_locale=en" },
       redirect: "manual",
     });
     assert.equal(remembered.status, 200, path);

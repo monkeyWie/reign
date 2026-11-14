@@ -8,7 +8,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/monkeyWie/reign/internal/control"
+	"github.com/monkeyWie/reignhub/internal/control"
 )
 
 func TestDurableCommandDeduplication(t *testing.T) {

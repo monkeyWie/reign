@@ -55,7 +55,7 @@ func TestSQLiteSettingsSurviveReload(t *testing.T) {
 		t.Fatal(err)
 	}
 	c.ServiceURL = "https://instance.example"
-	c.DeviceName = "Reign desktop"
+	c.DeviceName = "ReignHub desktop"
 	if err = c.Save(); err != nil {
 		t.Fatal(err)
 	}

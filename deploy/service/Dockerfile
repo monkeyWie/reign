@@ -20,4 +20,4 @@ COPY --from=ui /src/build/web /web
 VOLUME /data
 EXPOSE 26331/tcp 26330/tcp 26330/udp
 ENTRYPOINT ["/agenthub-service"]
-CMD ["--listen","0.0.0.0:26331","--state","/data/reign.db","--web","/web"]
+CMD ["--listen","0.0.0.0:26331","--state","/data/reignhub.db","--web","/web"]

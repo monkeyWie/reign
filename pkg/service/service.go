@@ -1,12 +1,12 @@
-// Package service is the public composition API used by both self-hosted Reign
+// Package service is the public composition API used by both self-hosted ReignHub
 // and separately maintained commercial services. It contains no account/billing
 // policy; callers configure storage and trusted admission hooks.
 package service
 
 import (
-	"github.com/monkeyWie/reign/internal/connectivity"
-	"github.com/monkeyWie/reign/internal/deviceservice"
-	"github.com/monkeyWie/reign/internal/webui"
+	"github.com/monkeyWie/reignhub/internal/connectivity"
+	"github.com/monkeyWie/reignhub/internal/deviceservice"
+	"github.com/monkeyWie/reignhub/internal/webui"
 	"gorm.io/gorm"
 	"net/http"
 )

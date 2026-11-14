@@ -4,7 +4,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { Connection } from "../src/connection";
 import { Cipher, envelope, keypair, sum } from "../src/crypto";
-import type { Identity, ServiceConfig } from "@reign/protocol";
+import type { Identity, ServiceConfig } from "@reignhub/protocol";
 import type { SavedDevice } from "../src/cache";
 test("browser SDK and Go host share handshake, AEAD, fragmentation, conditional snapshots", async () => {
   const cwd = fileURLToPath(new URL("../../../clients/nsgo", import.meta.url));
@@ -102,21 +102,21 @@ test("X25519 pairing envelopes bind identities and context", async () => {
   const sealed = (await envelope(
     a.private,
     b.public,
-    "reign/pair/request/test",
+    "reignhub/pair/request/test",
     { remember: true },
   )) as string;
   assert.deepEqual(
     await envelope(
       b.private,
       a.public,
-      "reign/pair/request/test",
+      "reignhub/pair/request/test",
       undefined,
       sealed,
     ),
     { remember: true },
   );
   await assert.rejects(
-    envelope(b.private, a.public, "reign/pair/reply/test", undefined, sealed),
+    envelope(b.private, a.public, "reignhub/pair/reply/test", undefined, sealed),
   );
 });
 test("AEAD rejects duplicate data and authenticated-context substitution", async () => {

@@ -23,7 +23,7 @@ const filenames = [
   "linux-x64.AppImage",
   "android-arm64.apk",
   "ios-unsigned.ipa",
-].map((suffix) => `reign-1.2.3-${suffix}`);
+].map((suffix) => `reignhub-1.2.3-${suffix}`);
 const catalog: ReleaseCatalog = {
   release: parseReleases([
     {
@@ -47,7 +47,7 @@ test("English and Chinese download HTML includes every native link before JavaSc
     const html = renderToStaticMarkup(
       createElement(ReleaseDownloads, { lang, catalog }),
     );
-    assert.ok(html.includes("Reign 1.2.3"));
+    assert.ok(html.includes("ReignHub 1.2.3"));
     for (const name of filenames)
       assert.ok(html.includes(`href="${releasesURL}/download/${tag}/${name}"`));
     assert.doesNotMatch(html, /正在获取|正在加载|Loading|Fetching|aria-busy/);
@@ -61,7 +61,7 @@ test("stale snapshots still render downloads; an unavailable catalogue provides 
       catalog: { ...catalog, stale: true },
     }),
   );
-  assert.ok(stale.includes("Reign 1.2.3"));
+  assert.ok(stale.includes("ReignHub 1.2.3"));
   const unavailable = renderToStaticMarkup(
     createElement(ReleaseDownloads, {
       lang: "en",

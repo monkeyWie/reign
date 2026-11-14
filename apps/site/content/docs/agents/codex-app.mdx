@@ -1,22 +1,22 @@
 ---
 title: Connect Codex App
-description: Let Reign and the desktop App share one Codex app-server.
+description: Let ReignHub and the desktop App share one Codex app-server.
 ---
 
-## Why launch through Reign?
+## Why launch through ReignHub?
 
 Other clients may read Codex history, but the corresponding backend owns running sessions. Reading a record does not connect to that backend.
 
-Reign starts a shared Codex app-server and passes connection settings when launching Codex App. Both clients connect directly to the same backend, sharing session state and live output.
+ReignHub starts a shared Codex app-server and passes connection settings when launching Codex App. Both clients connect directly to the same backend, sharing session state and live output.
 
 <ArchitectureDiagram kind="codex" />
 
 ## Steps
 
 1. Install Codex App, sign in and confirm it works locally.
-2. Find Codex App in the Reign local dashboard and check readiness.
+2. Find Codex App in the ReignHub local dashboard and check readiness.
 3. If it is running independently, wait for the task to finish and quit it.
-4. Use Enable / Launch through Reign, and wait for ready status.
+4. Use Enable / Launch through ReignHub, and wait for ready status.
 5. Connect from a controller and open an existing session or create one.
 
 <Callout title="Protect running tasks" type="warn">
@@ -25,11 +25,11 @@ Reign starts a shared Codex app-server and passes connection settings when launc
   to finish.
 </Callout>
 
-## Independent launch and quitting Reign
+## Independent launch and quitting ReignHub
 
 An App opened directly through the OS may not use the shared backend and can require reintegration. Follow the dashboard instructions and wait for Ready before sending remote instructions.
 
-The shared backend has an independently managed lifecycle. The shared backend continues to manage local Codex tasks after Reign closes. Killing the backend, logging out or losing connectivity can still disrupt connections.
+The shared backend has an independently managed lifecycle. The shared backend continues to manage local Codex tasks after ReignHub closes. Killing the backend, logging out or losing connectivity can still disrupt connections.
 
 ## Compatibility boundaries
 

@@ -1,11 +1,11 @@
-module github.com/monkeyWie/reign/clients/nsgo
+module github.com/monkeyWie/reignhub/clients/nsgo
 
 go 1.27.3
 
 require (
 	github.com/coder/websocket v1.8.15
 	github.com/liyue201/goqr v0.0.0-20200803022322-df443203d4ea
-	github.com/monkeyWie/reign v0.0.0
+	github.com/monkeyWie/reignhub v0.0.0
 	github.com/nsgo-dev/nsgo v0.0.0-20261112150101-70cef6a4ed17
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	go.yaml.in/yaml/v3 v3.0.6
@@ -58,6 +58,6 @@ require (
 	rsc.io/qr v0.2.0 // indirect
 )
 
-replace github.com/monkeyWie/reign => ../..
+replace github.com/monkeyWie/reignhub => ../..
 
 tool github.com/nsgo-dev/nsgo/cmd/nsgo

@@ -5,7 +5,7 @@ description: 一个 Go 二进制，在同一个端口提供 TCP 和 UDP 探测�
 
 ## 什么时候需要
 
-Worker 不能直接监听原始 UDP／TCP 探测 Socket。默认可以使用公共 UDP STUN；如果希望补充自己的候选地址发现、提高公共探测服务不可达时的覆盖，可在有公网地址的服务器运行 `reign-probe`。
+Worker 不能直接监听原始 UDP／TCP 探测 Socket。默认可以使用公共 UDP STUN；如果希望补充自己的候选地址发现、提高公共探测服务不可达时的覆盖，可在有公网地址的服务器运行 `reignhub-probe`。
 
 探测器只返回地址映射，不保存设备目录、不运行 Agent、不托管网页，也不是业务中继。没有它也可以部署 Worker。
 
@@ -14,8 +14,8 @@ Worker 不能直接监听原始 UDP／TCP 探测 Socket。默认可以使用公�
 Go 版本以仓库 `go.mod` 为准，也可以使用发布产物中的 Linux amd64／arm64 探测器。
 
 ```sh
-go build -o reign-probe ./cmd/reign-probe
-./reign-probe --listen :26330
+go build -o reignhub-probe ./cmd/reignhub-probe
+./reignhub-probe --listen :26330
 ```
 
 服务器与云安全组同时放行：

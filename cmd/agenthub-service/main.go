@@ -1,6 +1,6 @@
 // Legacy command name; release builds use cmd/ras-server.
 package main
 
-import "github.com/monkeyWie/reign/internal/servercmd"
+import "github.com/monkeyWie/reignhub/internal/servercmd"
 
 func main() { servercmd.Run() }

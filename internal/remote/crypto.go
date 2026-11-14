@@ -10,7 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"github.com/monkeyWie/reign/internal/device"
+	"github.com/monkeyWie/reignhub/internal/device"
 	"github.com/pion/webrtc/v4"
 	"net/url"
 	"sync"

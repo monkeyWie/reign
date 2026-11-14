@@ -1,6 +1,6 @@
 # 开源核心与商业服务
 
-当前实现统一使用 NSGo UI 和 Go 核心。公共仓库 `reign` 使用 MIT；商业实现独立放在私有 `reign-cloud`，通过固定 commit 的 `open-source` Git submodule 依赖公共仓库。闭源代码不会进入公共仓库。
+当前实现统一使用 NSGo UI 和 Go 核心。公共仓库 `reignhub` 使用 MIT；商业实现独立放在私有 `reignhub-cloud`，通过固定 commit 的 `open-source` Git submodule 依赖公共仓库。闭源代码不会进入公共仓库。
 
 | 公共核心 | 私有商业层 |
 | --- | --- |

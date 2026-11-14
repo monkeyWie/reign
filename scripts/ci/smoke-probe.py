@@ -6,9 +6,9 @@ p=argparse.ArgumentParser();p.add_argument('--archive',required=True,type=Path);
 with tempfile.TemporaryDirectory() as tmp:
  root=Path(tmp)
  with tarfile.open(a.archive) as tar:
-  members=[m for m in tar.getmembers() if m.isfile() and Path(m.name).name=='reign-probe']
+  members=[m for m in tar.getmembers() if m.isfile() and Path(m.name).name=='reignhub-probe']
   assert len(members)==1, 'Expected exactly one probe binary'
-  executable=root/'reign-probe';executable.write_bytes(tar.extractfile(members[0]).read());executable.chmod(0o755)
+  executable=root/'reignhub-probe';executable.write_bytes(tar.extractfile(members[0]).read());executable.chmod(0o755)
  with socket.socket() as s:s.bind(('127.0.0.1',0));port=s.getsockname()[1]
  process=subprocess.Popen([str(executable),'--listen',f'127.0.0.1:{port}'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
  try:
