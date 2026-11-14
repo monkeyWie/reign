@@ -16,6 +16,9 @@ type Progress struct {
 	Timeout time.Duration
 }
 
+// StageTimeout is a fresh budget for each connection stage, never a total attempt budget.
+const StageTimeout = 2 * time.Minute
+
 type progressKey struct{}
 
 func WithProgress(ctx context.Context, observe func(Progress)) context.Context {

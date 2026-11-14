@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
 )
 
 // AllowLANHTTP is retained for older build scripts. HTTP/WS are now supported
@@ -20,10 +19,11 @@ var AllowLANHTTP = "false"
 // Network falls back to public STUN if an older/unreachable service cannot
 // advertise its endpoints. This must never prevent pairing or WSS fallback.
 func Network(ctx context.Context, service string) connectivity.Policy {
-	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, connectivity.StageTimeout)
 	defer cancel()
 	var policy connectivity.Policy
 	if err := Post(ctx, service, "", "/p2p/config", map[string]any{}, &policy); err != nil {
+		connectivity.Note(ctx, "network-fallback", "network", "连接配置暂不可用，使用公共 STUN", "继续尝试直连与可用的服务中继", "warning")
 		return connectivity.DefaultPolicy()
 	}
 	return policy
@@ -63,7 +63,7 @@ func Post(ctx context.Context, service, token, path string, in, out any) error {
 	if token != "" {
 		r.Header.Set("Authorization", "Bearer "+token)
 	}
-	resp, e := (&http.Client{Timeout: 12 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}).Do(r)
+	resp, e := connectivity.ConnectionHTTPClient.Do(r)
 	if e != nil {
 		return e
 	}

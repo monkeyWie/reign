@@ -46,7 +46,7 @@ type TCPAgent struct {
 }
 
 func NewTCPAgent(ctx context.Context, onCandidate func(TCPCandidate), onConn func(net.Conn)) (*TCPAgent, error) {
-	life, cancel := context.WithTimeout(ctx, 25*time.Second)
+	life, cancel := context.WithTimeout(ctx, StageTimeout)
 	a := &TCPAgent{ctx: life, cancel: cancel, onCandidate: onCandidate, onConn: onConn,
 		remote: make(map[string]bool), local: make(map[string]bool), slots: make(chan struct{}, 16)}
 	for _, family := range []string{"tcp4", "tcp6"} {
@@ -174,7 +174,8 @@ func (a *TCPAgent) dial(ctx context.Context, s *tcpSocket, address string) (net.
 }
 func (a *TCPAgent) probe(s *tcpSocket, server string) {
 	a.progress("tcp-stun:"+s.network+server, "探测 TCP 公网映射", server+" · "+s.network, "running")
-	c, err := a.dial(a.ctx, s, server)
+	d := net.Dialer{LocalAddr: s.local, Control: reuseTCPPort, Timeout: StageTimeout, KeepAlive: 15 * time.Second}
+	c, err := d.DialContext(a.ctx, s.network, server)
 	if err != nil {
 		if a.Trace != nil {
 			a.Trace("TCP STUN %s %s: %v", s.network, server, err)

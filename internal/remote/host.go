@@ -35,9 +35,7 @@ func serveHost(ctx context.Context, p Pairing, opts Options, d *control.Dispatch
 	return serveHostObserved(ctx, p, opts, d, nil)
 }
 func serveHostObserved(ctx context.Context, p Pairing, opts Options, d *control.Dispatcher, status *HostStatus) error {
-	dialCtx, stop := context.WithTimeout(ctx, 15*time.Second)
-	ws, dataWS, _, err := dial(dialCtx, p, "host")
-	stop()
+	ws, dataWS, _, err := dial(ctx, p, "host")
 	if err != nil {
 		return err
 	}

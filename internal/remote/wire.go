@@ -85,6 +85,10 @@ type assembly struct {
 }
 
 func dial(ctx context.Context, p Pairing, role string) (*websocket.Conn, *websocket.Conn, string, error) {
+	return dialWithTimeout(ctx, p, role, connectivity.StageTimeout)
+}
+
+func dialWithTimeout(ctx context.Context, p Pairing, role string, timeout time.Duration) (*websocket.Conn, *websocket.Conn, string, error) {
 	if err := p.Validate(); err != nil {
 		return nil, nil, "", err
 	}
@@ -94,7 +98,10 @@ func dial(ctx context.Context, p Pairing, role string) (*websocket.Conn, *websoc
 	q.Set("role", role)
 	q.Set("id", p.Host)
 	u.RawQuery = q.Encode()
-	ws, resp, err := websocket.Dial(ctx, u.String(), &websocket.DialOptions{HTTPHeader: http.Header{"Authorization": []string{"Bearer " + p.RelayToken}}})
+	connectivity.Report(ctx, "signal", "正在建立信令连接", timeout)
+	signalCtx, stopSignal := context.WithTimeout(ctx, timeout)
+	defer stopSignal()
+	ws, resp, err := websocket.Dial(signalCtx, u.String(), &websocket.DialOptions{HTTPClient: connectivity.ConnectionHTTPClient, HTTPHeader: http.Header{"Authorization": []string{"Bearer " + p.RelayToken}}})
 	if err != nil {
 		if resp != nil && resp.Body != nil {
 			body, _ := io.ReadAll(io.LimitReader(resp.Body, 2000))
@@ -106,14 +113,15 @@ func dial(ctx context.Context, p Pairing, role string) (*websocket.Conn, *websoc
 				err = fmt.Errorf("信令服务拒绝连接（HTTP %d）：%s", resp.StatusCode, detail.Message)
 			}
 		}
-		return nil, nil, "", err
+		return nil, nil, "", fmt.Errorf("建立信令连接失败: %w", err)
 	}
 	ws.SetReadLimit(2 << 20)
-	_, raw, err := ws.Read(ctx)
+	_, raw, err := ws.Read(signalCtx)
 	if err != nil {
 		ws.CloseNow()
-		return nil, nil, "", err
+		return nil, nil, "", fmt.Errorf("等待信令服务响应失败: %w", err)
 	}
+	stopSignal()
 	var f relay.Frame
 	if json.Unmarshal(raw, &f) != nil || f.Kind != "welcome" || f.Peer == "" {
 		ws.CloseNow()
@@ -126,22 +134,30 @@ func dial(ctx context.Context, p Pairing, role string) (*websocket.Conn, *websoc
 	connectivity.Note(ctx, "signal", "signal", "信令连接已建立", u.Scheme+"://"+u.Host+"/p2p/signal", "success")
 	var data *websocket.Conn
 	if f.AllowRelay {
-		connectivity.Note(ctx, "relay-ready", "relay", "准备备用中继通道", u.Scheme+"://"+u.Host+"/p2p/relay", "running")
+		connectivity.Report(ctx, "relay-ready", "准备备用中继通道", timeout)
+		connectivity.Note(ctx, "relay-endpoint", "relay", "中继服务地址", u.Scheme+"://"+u.Host+"/p2p/relay", "info")
+		relayCtx, stopRelay := context.WithTimeout(ctx, timeout)
+		defer stopRelay()
 		u.Path = "/p2p/relay"
 		q.Set("peer", f.Peer)
 		u.RawQuery = q.Encode()
-		data, resp, err = websocket.Dial(ctx, u.String(), &websocket.DialOptions{HTTPHeader: http.Header{"Authorization": []string{"Bearer " + p.RelayToken}}})
+		data, resp, err = websocket.Dial(relayCtx, u.String(), &websocket.DialOptions{HTTPClient: connectivity.ConnectionHTTPClient, HTTPHeader: http.Header{"Authorization": []string{"Bearer " + p.RelayToken}}})
 		if err != nil {
 			if resp != nil && resp.Body != nil {
 				resp.Body.Close()
 			}
 			ws.CloseNow()
-			return nil, nil, "", err
+			return nil, nil, "", fmt.Errorf("建立备用中继通道失败: %w", err)
 		}
 		data.SetReadLimit(2 << 20)
-		_, raw, err = data.Read(ctx)
+		_, raw, err = data.Read(relayCtx)
 		var welcome relay.Frame
-		if err != nil || json.Unmarshal(raw, &welcome) != nil || welcome.Kind != "welcome" || welcome.Peer != f.Peer {
+		if err != nil {
+			data.CloseNow()
+			ws.CloseNow()
+			return nil, nil, "", fmt.Errorf("等待中继服务响应失败: %w", err)
+		}
+		if json.Unmarshal(raw, &welcome) != nil || welcome.Kind != "welcome" || welcome.Peer != f.Peer {
 			data.CloseNow()
 			ws.CloseNow()
 			return nil, nil, "", errors.New("invalid relay handshake")
@@ -175,6 +191,9 @@ func (w *wire) aad(kind string, out bool) string {
 	return "reign/p2p/" + w.peer + "/" + direction + "/" + kind
 }
 func (w *wire) relaySend(kind string, data []byte) error {
+	return w.relaySendContext(w.ctx, kind, data)
+}
+func (w *wire) relaySendContext(parent context.Context, kind string, data []byte) error {
 	crypto := w.cipher(kind)
 	if crypto == nil {
 		return errors.New("handshake not ready")
@@ -185,7 +204,7 @@ func (w *wire) relaySend(kind string, data []byte) error {
 	}
 	f := relay.Frame{Peer: w.peer, Kind: kind, Body: sealed}
 	raw, _ := json.Marshal(f)
-	ctx, cancel := context.WithTimeout(w.ctx, 10*time.Second)
+	ctx, cancel := context.WithTimeout(parent, connectivity.StageTimeout)
 	defer cancel()
 	return w.ws.Write(ctx, websocket.MessageText, raw)
 }
@@ -247,20 +266,11 @@ func (w *wire) close() {
 		_ = pc.Close()
 	}
 }
-func (w *wire) send(data []byte) error { return w.sendContext(w.ctx, data) }
-func (w *wire) sendContext(ctx context.Context, data []byte) error {
-	if err := w.ctx.Err(); err != nil {
-		return err
-	}
-	if len(data) > 16<<20 {
-		return errors.New("response exceeds 16 MiB")
-	}
-	w.sendMu.Lock()
-	defer w.sendMu.Unlock()
+func (w *wire) waitPath(ctx context.Context) error {
 	// Give direct negotiation a short head start even when relay is permitted.
 	// P2P-only accounts must establish a direct path before any business RPC.
 	if w.dataWS == nil || (!w.host && !w.opts.RelayOnly && time.Now().Before(w.preferDirectUntil)) {
-		deadline := time.NewTimer(25 * time.Second)
+		deadline := time.NewTimer(connectivity.StageTimeout)
 		defer deadline.Stop()
 		for {
 			if w.dataWS != nil && !time.Now().Before(w.preferDirectUntil) {
@@ -282,6 +292,21 @@ func (w *wire) sendContext(ctx context.Context, data []byte) error {
 			case <-time.After(20 * time.Millisecond):
 			}
 		}
+	}
+	return nil
+}
+func (w *wire) send(data []byte) error { return w.sendContext(w.ctx, data) }
+func (w *wire) sendContext(ctx context.Context, data []byte) error {
+	if err := w.ctx.Err(); err != nil {
+		return err
+	}
+	if len(data) > 16<<20 {
+		return errors.New("response exceeds 16 MiB")
+	}
+	w.sendMu.Lock()
+	defer w.sendMu.Unlock()
+	if err := w.waitPath(ctx); err != nil {
+		return err
 	}
 	w.mu.Lock()
 	dc, direct, crypto := w.dc, w.direct, w.crypto
@@ -581,7 +606,7 @@ func (w *wire) cipher(kind string) *cryptor {
 }
 func (w *wire) handshake(ctx context.Context) error {
 	raw, _ := json.Marshal(helloMessage{ClientNonce: w.clientNonce})
-	if err := w.relaySend("hello", raw); err != nil {
+	if err := w.relaySendContext(ctx, "hello", raw); err != nil {
 		return err
 	}
 	select {

@@ -135,3 +135,27 @@ func TestOperationErrorDetailsDoNotRepeatSummary(t *testing.T) {
 		})
 	}
 }
+
+func TestNeverConnectedDeviceDoesNotStartAutomaticRetries(t *testing.T) {
+	f := &connectionFixture{demoAPI: newDemoAPI()}
+	app, s := conversationFixture(t, f, 390, Object{}, false)
+	checked := make(chan bool, 1)
+	app.Post(func() {
+		s.cx.Post(func() {
+			s.devices = []Object{{"id": "never-connected", "connected": false, "autoReconnect": true}}
+			s.autoReconnect()
+			checked <- s.connection("never-connected").reconnecting
+		})
+	})
+	app.WaitUntil(time.Second, func() bool {
+		select {
+		case retrying := <-checked:
+			if retrying || f.reconnects.Load() != 0 {
+				t.Fatal("first failed connection retried automatically")
+			}
+			return true
+		default:
+			return false
+		}
+	})
+}

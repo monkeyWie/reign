@@ -18,6 +18,7 @@ import {
   utf8,
 } from "./crypto";
 import {
+  CONNECTION_STAGE_TIMEOUT,
   progressStep,
   recordProgress,
   type ConnectionProgress,
@@ -116,8 +117,12 @@ export class Connection extends EventTarget {
     const welcome = await new Promise<Frame>((resolve, reject) => {
       const timeout = setTimeout(() => {
         ws.close();
-        reject(Error("连接服务超时"));
-      }, 15000);
+        reject(
+          Error(
+            `${path === routes.relay ? "备用中继通道" : "信令连接"}超时（2 分钟）`,
+          ),
+        );
+      }, CONNECTION_STAGE_TIMEOUT);
       ws.onerror = () => {
         clearTimeout(timeout);
         ws.close();
@@ -178,6 +183,19 @@ export class Connection extends EventTarget {
       };
       ws.onclose = () => this.close("信令连接已断开");
       ws.onerror = () => this.close("信令连接异常");
+      this.tick = setInterval(() => {
+        if (Date.now() - this.heartbeat > 85000) {
+          this.close("连接心跳超时");
+          return;
+        }
+        if (this.signal.readyState === WebSocket.OPEN) {
+          this.signal.send("reign:ping");
+          if (++this.pulses % 3 === 0)
+            this.signal.send(JSON.stringify({ kind: "renew" }));
+        }
+        if (this.relay?.readyState === WebSocket.OPEN)
+          this.relay.send("reign:ping");
+      }, 25000);
       if (this.allowRelay) {
         this.report(
           "relay-ready",
@@ -217,7 +235,7 @@ export class Connection extends EventTarget {
       });
       const timeout = setTimeout(
         () => this.failHandshake(Error("配对握手超时")),
-        15000,
+        CONNECTION_STAGE_TIMEOUT,
       );
       this.report("handshake", "handshake", "与被控设备建立加密握手");
       await this.sendFrame("hello", { clientNonce: this.nonce });
@@ -256,20 +274,10 @@ export class Connection extends EventTarget {
           "warning",
         );
       }
-      this.tick = setInterval(() => {
-        if (Date.now() - this.heartbeat > 85000) {
-          this.close("连接心跳超时");
-          return;
-        }
-        if (this.signal.readyState === WebSocket.OPEN) {
-          this.signal.send("reign:ping");
-          if (++this.pulses % 3 === 0)
-            this.signal.send(JSON.stringify({ kind: "renew" }));
-        }
-        if (this.relay?.readyState === WebSocket.OPEN)
-          this.relay.send("reign:ping");
-      }, 25000);
-      await this.call({ method: "providers" });
+      this.report("direct", "direct", "正在验证直连或中继路径");
+      await this.waitPath();
+      this.report("verify", "verify", "正在验证设备响应");
+      await this.call({ method: "providers" }, CONNECTION_STAGE_TIMEOUT);
       this.report(
         "connected",
         "connected",
@@ -569,9 +577,8 @@ export class Connection extends EventTarget {
     }
     p.resolve(r.result);
   }
-  private async send(raw: Uint8Array) {
-    if (raw.length > 1024 * 1024) throw Error("请求过大");
-    const deadline = Date.now() + 25000;
+  private async waitPath() {
+    const deadline = Date.now() + CONNECTION_STAGE_TIMEOUT;
     while (
       !this.closed &&
       this.dc?.readyState !== "open" &&
@@ -581,6 +588,11 @@ export class Connection extends EventTarget {
         throw Error("直连失败，当前套餐不包含官方中继");
       await new Promise((r) => setTimeout(r, 30));
     }
+    if (this.closed) throw Error("连接已断开");
+  }
+  private async send(raw: Uint8Array) {
+    if (raw.length > 1024 * 1024) throw Error("请求过大");
+    await this.waitPath();
     if (this.closed || !this.cipher) throw Error("连接已断开");
     const id = hex(random(16));
     const n = Math.max(1, Math.ceil(raw.length / 12000));
@@ -617,7 +629,7 @@ export class Connection extends EventTarget {
       } else throw Error("发送中断，请刷新确认结果后再重试");
     }
   }
-  async call<T = unknown>(request: RPCRequest): Promise<T> {
+  async call<T = unknown>(request: RPCRequest, timeout = 40000): Promise<T> {
     if (this.closed) throw Error("连接已断开");
     const r: RPCRequest & { id: string } = {
       ...request,
@@ -641,7 +653,7 @@ export class Connection extends EventTarget {
       const timer = setTimeout(() => {
         this.pending.delete(r.id);
         reject(Error("请求超时，请刷新确认操作结果后再重试"));
-      }, 40000);
+      }, timeout);
       this.pending.set(r.id, {
         resolve: resolve as (v: unknown) => void,
         reject,

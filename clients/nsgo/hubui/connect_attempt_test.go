@@ -156,6 +156,8 @@ func TestRetryKeepsStatusPanelAndShowsActualTransportSteps(t *testing.T) {
 	app.WaitFor("id:connection-retry", time.Second)
 	app.Press("id:connection-retry")
 	app.WaitUntil(time.Second, func() bool { return f.calls.Load() == 2 })
+	app.WaitFor("text:上一轮连接失败", time.Second)
+	app.WaitFor("text:网络验证失败", time.Second)
 	if app.Exists("id:connection-error-raw") {
 		t.Fatal("new attempt retained the previous connection failure")
 	}

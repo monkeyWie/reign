@@ -35,8 +35,9 @@ func (s *State) connect(p Object) {
 		s.dialog.Set("connecting")
 		return
 	}
-	ctx, cancel := context.WithTimeout(s.ctx, 190*time.Second)
-	a := &connectAttempt{params: copyObject(p), cancel: cancel, active: true, started: time.Now(), stepStarted: time.Now(), step: connectivity.Progress{Stage: "service", Message: "正在连接服务并验证本机身份", Timeout: 15 * time.Second}}
+	ctx, cancel := context.WithCancel(s.ctx)
+	a := &connectAttempt{params: copyObject(p), cancel: cancel, active: true, started: time.Now(), stepStarted: time.Now(), step: connectivity.Progress{Stage: "service", Message: "正在连接服务并验证本机身份", Timeout: connectivity.StageTimeout}}
+	a.inherit(s.connectAttempt)
 	a.record(a.step)
 	s.connectAttempt = a
 	s.error, s.notice = "", ""
@@ -88,6 +89,7 @@ func (s *State) connect(p Object) {
 				if str(d, "connectionId") == strings.NewReplacer(" ", "", "-", "").Replace(str(p, "code")) && str(d, "service") == str(p, "service") {
 					a.target = str(d, "id")
 					s.connection(a.target).attempt = a
+					s.connection(a.target).established = true
 					s.selectDevice(a.target)
 					break
 				}
@@ -130,6 +132,30 @@ func connectionFailure(a *connectAttempt) (string, string) {
 	default:
 		return "设备连接未完成", "请确认电脑上的 ReignHub 保持运行，再重新连接。"
 	}
+}
+
+// Retain the preceding failure and node results when the user retries.
+func (a *connectAttempt) inherit(previous *connectAttempt) {
+	if previous == nil {
+		return
+	}
+	for _, step := range previous.steps {
+		if !strings.HasPrefix(step.ID, "history:") {
+			step.ID = fmt.Sprintf("history:%d:%s", previous.started.UnixNano(), step.ID)
+		}
+		if step.State == "running" {
+			step.State = "warning"
+		}
+		step.Timeout = 0
+		a.steps = append(a.steps, step)
+	}
+	if len(a.steps) > 60 {
+		a.steps = a.steps[len(a.steps)-60:]
+	}
+	if previous.err != "" {
+		a.record(connectivity.Progress{ID: fmt.Sprintf("history:%d:failure", previous.started.UnixNano()), Stage: "retry", Message: "上一轮连接失败", Detail: previous.err, State: "warning"})
+	}
+	a.record(connectivity.Progress{ID: "retry", Stage: "retry", Message: "开始新一轮连接", State: "info"})
 }
 
 func (a *connectAttempt) record(p connectivity.Progress) {
@@ -248,7 +274,7 @@ func (s *State) connectionPanel(cx *core.Scope, id string, a *connectAttempt, in
 				}
 				title := label(cx, v.Message, 12, false)
 				title.TestID = "connect-stage"
-				children := []core.Node{row(glyph(cx, icon, 12), core.View{Style: fill, Children: []core.Node{title}}, label(cx, fmt.Sprintf("%.1fs", v.at.Sub(a.started).Seconds()), 10, true))}
+				children := []core.Node{row(glyph(cx, icon, 12), core.View{Style: fill, Children: []core.Node{title}}, label(cx, v.at.Format("15:04:05"), 10, true))}
 				if v.Detail != "" {
 					detail := label(cx, v.Detail, 11, true)
 					detail.Selectable = core.SelectableOn
@@ -278,7 +304,15 @@ func (s *State) connectionPanel(cx *core.Scope, id string, a *connectAttempt, in
 	}
 	active := a != nil && a.active
 	if active {
-		d.Footer = []core.Node{button(cx, "connect-cancel", "取消", nil, "outline", func() { a.active = false; a.cancel(); close(); s.changed() })}
+		d.Footer = []core.Node{button(cx, "connect-cancel", "取消", nil, "outline", func() {
+			a.active = false
+			if id != "" {
+				s.connection(id).established = false
+			}
+			a.cancel()
+			close()
+			s.changed()
+		})}
 	} else {
 		d.Footer = []core.Node{button(cx, "connection-done", "关闭", nil, "outline", close)}
 		if initial && a != nil && !a.complete {

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"sync"
-	"time"
 
 	"github.com/monkeyWie/reignhub/internal/connectivity"
 	"github.com/monkeyWie/reignhub/internal/control"
@@ -28,10 +27,7 @@ func Connect(ctx context.Context, p Pairing, opts Options) (*Client, error) {
 	} else {
 		ctx = connectivity.WithProgress(ctx, opts.Progress)
 	}
-	connectivity.Report(ctx, "signal", "正在建立信令连接", 12*time.Second)
-	dialCtx, stopDial := context.WithTimeout(ctx, 12*time.Second)
-	ws, dataWS, peer, err := dial(dialCtx, p, "client")
-	stopDial()
+	ws, dataWS, peer, err := dial(ctx, p, "client")
 	if err != nil {
 		return nil, err
 	}
@@ -74,8 +70,8 @@ func Connect(ctx context.Context, p Pairing, opts Options) (*Client, error) {
 			}
 		}
 	}()
-	connectivity.Report(ctx, "handshake", "正在与被控电脑建立加密握手", 10*time.Second)
-	handshakeCtx, stopHandshake := context.WithTimeout(ctx, 10*time.Second)
+	connectivity.Report(ctx, "handshake", "正在与被控电脑建立加密握手", connectivity.StageTimeout)
+	handshakeCtx, stopHandshake := context.WithTimeout(ctx, connectivity.StageTimeout)
 	err = w.handshake(handshakeCtx)
 	stopHandshake()
 	if err != nil {
@@ -94,11 +90,18 @@ func Connect(ctx context.Context, p Pairing, opts Options) (*Client, error) {
 		}
 		message = "正在验证中继连接"
 	}
-	connectivity.Report(ctx, "direct", message, 25*time.Second)
+	connectivity.Report(ctx, "direct", message, connectivity.StageTimeout)
 	go w.offer()
+	if err = w.waitPath(ctx); err != nil {
+		c.Close()
+		return nil, fmt.Errorf("连接路径验证失败: %w", err)
+	}
+	connectivity.Report(ctx, "verify", "正在验证设备响应", connectivity.StageTimeout)
+	verifyCtx, stopVerify := context.WithTimeout(ctx, connectivity.StageTimeout)
+	defer stopVerify()
 	// Prove possession of the pairing key before presenting a connected UI.
 	var statuses json.RawMessage
-	if err = c.Call(ctx, control.Request{Method: "providers"}, &statuses); err != nil {
+	if err = c.Call(verifyCtx, control.Request{Method: "providers"}, &statuses); err != nil {
 		c.Close()
 		return nil, fmt.Errorf("配对验证失败: %w", err)
 	}

@@ -19,6 +19,7 @@ type connectionHealth struct {
 	attempt                      *connectAttempt
 	issues                       map[string]string
 	reconnecting, needsReconnect bool
+	established                  bool
 }
 
 func (s *State) connection(id string) *connectionHealth {
@@ -143,13 +144,18 @@ func (s *State) connectionDetails(id string) string {
 	sort.Strings(lines)
 	return strings.Join(lines, "\n\n")
 }
-func (s *State) reconnectDevice(id string) {
+func (s *State) reconnectDevice(id string) { s.reconnect(id, false) }
+
+func (s *State) reconnect(id string, automatic bool) {
 	h := s.connection(id)
 	if h.reconnecting || s.ctx.Err() != nil {
 		return
 	}
 	h.reconnecting = true
-	ctx, cancel := context.WithTimeout(s.ctx, 45*time.Second)
+	if !automatic {
+		h.established = false
+	}
+	ctx, cancel := context.WithCancel(s.ctx)
 	params := Object{}
 	for _, device := range s.devices {
 		if str(device, "id") == id {
@@ -157,6 +163,7 @@ func (s *State) reconnectDevice(id string) {
 		}
 	}
 	a := &connectAttempt{params: params, target: id, cancel: cancel, active: true, started: time.Now(), stepStarted: time.Now()}
+	a.inherit(h.attempt)
 	a.record(connectivity.Progress{ID: "service", Stage: "service", Message: "正在重新连接服务", State: "running"})
 	h.attempt = a
 	ctx = connectivity.WithProgress(ctx, func(p connectivity.Progress) {
@@ -202,6 +209,7 @@ func (s *State) reconnectDevice(id string) {
 			s.setConnectionIssue(id, "reconnect", err)
 			if err == nil {
 				h.needsReconnect = false
+				h.established = true
 				s.devices = objects(v)
 				if id == s.target {
 					s.startSessionWatch()

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { progressStep, recordProgress } from "../src/progress";
+import { archiveProgress, progressStep, recordProgress } from "../src/progress";
 test("connection trace updates node outcomes in place and bounds history", () => {
   const start = progressStep(
     "stun:cf",
@@ -28,4 +28,20 @@ test("connection trace updates node outcomes in place and bounds history", () =>
     rows = recordProgress(rows, progressStep(String(i), "udp", "候选地址"));
   assert.equal(rows.length, 80);
   assert.equal(initial[0].state, "info");
+});
+
+test("retry retains preceding failures without overwriting current stages", () => {
+  const first = [progressStep("relay-ready", "relay", "准备备用中继通道")];
+  const history = archiveProgress(first, "中继响应超时");
+  const retried = recordProgress(
+    history,
+    progressStep("relay-ready", "relay", "备用中继通道已就绪", "", "success"),
+  );
+  assert.equal(retried.filter((s) => s.id === "relay-ready").length, 1);
+  assert.ok(retried.some((s) => s.detail === "中继响应超时"));
+  const archivedID = retried[0].id;
+  const nextRound = archiveProgress(retried, "信令超时");
+  assert.equal(nextRound[0].id, archivedID);
+  assert.ok(nextRound.every((s) => s.state !== "running"));
+  assert.equal(first[0].state, "running");
 });

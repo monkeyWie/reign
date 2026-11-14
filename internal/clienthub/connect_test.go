@@ -45,3 +45,33 @@ func TestOfflineHostFailsBeforeRequestingApproval(t *testing.T) {
 		t.Fatalf("wrong progress %v", stages)
 	}
 }
+
+func TestGrantWithoutSuccessfulConnectionDoesNotEnableAutoReconnect(t *testing.T) {
+	h, err := New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close()
+	saved := Saved{ID: "host", Key: "approved-key", Expires: time.Now().Add(time.Hour).Unix()}
+	if err := h.DB.Put("saved:host", saved); err != nil {
+		t.Fatal(err)
+	}
+	devices, err := h.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if devices[0]["autoReconnect"] != false {
+		t.Fatal("approval alone enabled automatic retries")
+	}
+	saved.HasConnected = true
+	if err := h.DB.Put("saved:host", saved); err != nil {
+		t.Fatal(err)
+	}
+	devices, err = h.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if devices[0]["autoReconnect"] != true {
+		t.Fatal("successful connection cannot recover automatically")
+	}
+}

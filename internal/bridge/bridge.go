@@ -112,10 +112,11 @@ func CallContext(parent context.Context, raw string) string {
 	}
 	mu.Unlock()
 	timeout := 140 * time.Second
-	if in.Method == "client.connect" {
-		timeout = 190 * time.Second
-	}
 	ctx, cancel := context.WithTimeout(parent, timeout)
+	if in.Method == "client.connect" || in.Method == "client.reconnect" {
+		cancel()
+		ctx, cancel = context.WithCancel(parent)
+	}
 	defer cancel()
 	stop := context.AfterFunc(bridgeContext, cancel)
 	defer stop()

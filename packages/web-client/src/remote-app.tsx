@@ -36,6 +36,7 @@ import {
   ReignHubCache,
   Service,
   recordProgress,
+  archiveProgress,
   type ConnectionProgress,
   type SavedDevice,
 } from "@reignhub/client-sdk";
@@ -95,6 +96,9 @@ export function RemoteApp() {
   const [attempts, setAttempts] = useState<Record<string, ConnectionAttempt>>(
     {},
   );
+  const attemptsRef = useRef(attempts);
+  attemptsRef.current = attempts;
+  const recoveredDevices = useRef(new Set<string>());
   const [connectionPanel, setConnectionPanel] = useState("");
   const attemptResources = useRef(
     new Map<
@@ -168,7 +172,14 @@ export function RemoteApp() {
     const value: ConnectionAttempt = {
       ...data,
       active: true,
-      steps: seed?.steps || [],
+      steps:
+        seed?.steps ||
+        (attemptsRef.current[key]
+          ? archiveProgress(
+              attemptsRef.current[key].steps,
+              attemptsRef.current[key].error,
+            )
+          : []),
       started: seed?.started || Date.now(),
     };
     setAttempts((all) => ({ ...all, [key]: value }));
@@ -210,6 +221,7 @@ export function RemoteApp() {
     return { resource, observe, finish };
   }
   function cancelAttempt(key: string) {
+    recoveredDevices.current.delete(key);
     const resource = attemptResources.current.get(key);
     if (resource) {
       resource.cancelled = true;
@@ -240,8 +252,14 @@ export function RemoteApp() {
     seed?: ConnectionAttempt,
   ) {
     const key = deviceKey(d);
-    if (disposed.current || (automatic && forgotten.current.has(key))) return;
+    if (
+      disposed.current ||
+      (automatic &&
+        (forgotten.current.has(key) || !recoveredDevices.current.has(key)))
+    )
+      return;
     if (!automatic) {
+      recoveredDevices.current.delete(key);
       forgotten.current.delete(key);
       setConnectionPanel(key);
     }
@@ -263,9 +281,12 @@ export function RemoteApp() {
     setReconnecting((x) => ({ ...x, [key]: true }));
     try {
       const api = new Service(d.service, cache, observe);
-      const identity = await api.identity();
-      const config = await api.config();
-      const resolved = await api.resolve(d.connectionId);
+      const identity = await api.identity(resource.controller.signal);
+      const config = await api.config(resource.controller.signal);
+      const resolved = await api.resolve(
+        d.connectionId,
+        resource.controller.signal,
+      );
       if (resource.cancelled) return;
       if (!resolved.online)
         throw Error(
@@ -313,6 +334,7 @@ export function RemoteApp() {
         c.close();
         return;
       }
+      recoveredDevices.current.add(key);
       finish();
       setConnections((x) => ({ ...x, [key]: c }));
       setDevices(await cache.devices.toArray());
@@ -322,7 +344,12 @@ export function RemoteApp() {
       }
     } catch (e) {
       finish(e);
-      if (automatic && !resource.cancelled && !reconnectTimers.current.has(key))
+      if (
+        automatic &&
+        recoveredDevices.current.has(key) &&
+        !resource.cancelled &&
+        !reconnectTimers.current.has(key)
+      )
         reconnectTimers.current.set(
           key,
           setTimeout(() => {

@@ -102,7 +102,7 @@ export function ConnectionPanel({
                   {step.detail && <small>{step.detail}</small>}
                 </div>
                 <time>
-                  {Math.max(0, (step.at - attempt.started) / 1000).toFixed(1)}s
+                  {new Date(step.at).toLocaleTimeString([], { hour12: false })}
                 </time>
               </li>
             ))}

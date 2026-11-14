@@ -1,3 +1,5 @@
+export const CONNECTION_STAGE_TIMEOUT = 120_000;
+
 export interface ConnectionProgress {
   id: string;
   stage: string;
@@ -29,4 +31,29 @@ export function recordProgress(
   )
     return steps;
   return steps.map((step, i) => (i === at ? { ...next, at: step.at } : step));
+}
+
+export function archiveProgress(steps: ConnectionProgress[], error?: string) {
+  const round = crypto.randomUUID();
+  const history: ConnectionProgress[] = steps.slice(-60).map((step) => ({
+    ...step,
+    id: step.id.startsWith("history:")
+      ? step.id
+      : `history:${round}:${step.id}`,
+    state: step.state === "running" ? ("warning" as const) : step.state,
+  }));
+  if (error)
+    history.push(
+      progressStep(
+        `history:${round}:failure`,
+        "retry",
+        "上一轮连接失败",
+        error,
+        "warning",
+      ),
+    );
+  return [
+    ...history,
+    progressStep("retry", "retry", "开始新一轮连接", "", "info"),
+  ];
 }

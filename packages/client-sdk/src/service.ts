@@ -7,7 +7,11 @@ import {
   type ServiceConfig,
 } from "@reignhub/protocol";
 import { keypair, envelope, hex, random } from "./crypto";
-import { progressStep, type ProgressObserver } from "./progress";
+import {
+  CONNECTION_STAGE_TIMEOUT,
+  progressStep,
+  type ProgressObserver,
+} from "./progress";
 import { browserDeviceName } from "./browser-identity";
 import { ReignHubCache, type SavedDevice } from "./cache";
 export class Service {
@@ -41,8 +45,11 @@ export class Service {
       },
       body: JSON.stringify(input),
       signal: signal
-        ? AbortSignal.any([signal, AbortSignal.timeout(15000)])
-        : AbortSignal.timeout(15000),
+        ? AbortSignal.any([
+            signal,
+            AbortSignal.timeout(CONNECTION_STAGE_TIMEOUT),
+          ])
+        : AbortSignal.timeout(CONNECTION_STAGE_TIMEOUT),
     });
     const data = (await r.json()) as { code: string; message: string };
     if (!r.ok)
@@ -53,11 +60,16 @@ export class Service {
       );
     return data as T;
   }
-  async config() {
+  async config(signal?: AbortSignal) {
     this.observe?.(
       progressStep("config", "service", "获取连接配置", this.origin),
     );
-    const config = await this.post<ServiceConfig>(routes.config);
+    const config = await this.post<ServiceConfig>(
+      routes.config,
+      {},
+      undefined,
+      signal,
+    );
     this.observe?.(
       progressStep(
         "config",
@@ -70,13 +82,13 @@ export class Service {
     return config;
   }
   private identityTask?: Promise<Identity>;
-  identity(): Promise<Identity> {
-    return (this.identityTask ||= this.loadIdentity().catch((error) => {
+  identity(signal?: AbortSignal): Promise<Identity> {
+    return (this.identityTask ||= this.loadIdentity(signal).catch((error) => {
       this.identityTask = undefined;
       throw error;
     }));
   }
-  private async loadIdentity(): Promise<Identity> {
+  private async loadIdentity(signal?: AbortSignal): Promise<Identity> {
     this.observe?.(
       progressStep("identity", "service", "验证本机身份", this.origin),
     );
@@ -88,16 +100,22 @@ export class Service {
         id: string;
         connectionId: string;
         token: string;
-      }>(routes.register, { name, public: pair.public, isHost: false });
+      }>(
+        routes.register,
+        { name, public: pair.public, isHost: false },
+        undefined,
+        signal,
+      );
       i = { ...r, ...pair, name, service: this.origin };
       await this.cache.identities.put(i);
     } else if (i.name !== name) {
       // Rename the same device; keep keys, token and existing authorizations.
       try {
-        await this.post(routes.presence, { name }, i.token);
+        await this.post(routes.presence, { name }, i.token, signal);
         i = { ...i, name };
         await this.cache.identities.put(i);
       } catch {
+        signal?.throwIfAborted();
         /* A name refresh must not prevent an existing pairing from connecting. */
       }
     }
@@ -112,8 +130,8 @@ export class Service {
     );
     return i;
   }
-  async resolve(code: string) {
-    const i = await this.identity();
+  async resolve(code: string, signal?: AbortSignal) {
+    const i = await this.identity(signal);
     this.observe?.(
       progressStep("resolve", "service", "查找设备并检查在线状态", code),
     );
@@ -121,6 +139,7 @@ export class Service {
       routes.resolve,
       { connectionId: code },
       i.token,
+      signal,
     );
     this.observe?.(
       progressStep(
@@ -139,8 +158,8 @@ export class Service {
     signal?: AbortSignal,
     onWaiting?: () => void,
   ) {
-    const i = await this.identity();
-    const { device: d, online } = await this.resolve(code);
+    const i = await this.identity(signal);
+    const { device: d, online } = await this.resolve(code, signal);
     if (!online)
       throw Error("被控设备离线，请确认电脑上的 ReignHub 正在运行并已连接服务");
     const previous = await this.cache.devices.get([
@@ -185,14 +204,17 @@ export class Service {
       ),
     );
     onWaiting?.();
-    const deadline = Date.now() + 125000;
-    while (Date.now() < deadline) {
-      signal?.throwIfAborted();
+    const approvalSignal = AbortSignal.any([
+      ...(signal ? [signal] : []),
+      AbortSignal.timeout(CONNECTION_STAGE_TIMEOUT),
+    ]);
+    while (!approvalSignal.aborted) {
+      approvalSignal.throwIfAborted();
       const p = await this.post<Pairing>(
         routes.result,
         { id },
         i.token,
-        signal,
+        approvalSignal,
       );
       if (p.state === "denied") throw Error("被控设备拒绝授权或密码不正确");
       if (p.state === "approved") {
@@ -225,15 +247,16 @@ export class Service {
         return saved;
       }
       await new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(resolve, 1000);
-        signal?.addEventListener(
-          "abort",
-          () => {
-            clearTimeout(timer);
-            reject(signal.reason);
-          },
-          { once: true },
-        );
+        const aborted = () => {
+          clearTimeout(timer);
+          reject(approvalSignal.reason);
+        };
+        const timer = setTimeout(() => {
+          approvalSignal.removeEventListener("abort", aborted);
+          resolve();
+        }, 1000);
+        approvalSignal.addEventListener("abort", aborted, { once: true });
+        if (approvalSignal.aborted) aborted();
       });
     }
     throw Error("等待被控设备授权超时");

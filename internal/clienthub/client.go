@@ -28,6 +28,7 @@ type Saved struct {
 	Key               string `json:"key"`
 	Expires           int64  `json:"expires"`
 	RelayOnly         bool   `json:"relayOnly,omitempty"`
+	HasConnected      bool   `json:"hasConnected,omitempty"`
 	ReconnectDisabled bool   `json:"reconnectDisabled,omitempty"`
 }
 type Hub struct {
@@ -105,7 +106,7 @@ func (h *Hub) List() ([]map[string]any, error) {
 			path = c.Path()
 		}
 		connected := c != nil && path != "Disconnected"
-		r = append(r, map[string]any{"id": s.ID, "service": s.Service, "connectionId": s.ConnectionID, "name": s.Name, "host": s.Host, "public": s.Public, "path": path, "connected": connected, "autoReconnect": !s.ReconnectDisabled && s.Key != "" && (s.Expires == 0 || s.Expires > time.Now().Unix())})
+		r = append(r, map[string]any{"id": s.ID, "service": s.Service, "connectionId": s.ConnectionID, "name": s.Name, "host": s.Host, "public": s.Public, "path": path, "connected": connected, "autoReconnect": s.HasConnected && !s.ReconnectDisabled && s.Key != "" && (s.Expires == 0 || s.Expires > time.Now().Unix())})
 	}
 	return r, nil
 }
@@ -124,13 +125,13 @@ func (h *Hub) Reconnect(ctx context.Context, id string) (Saved, error) {
 }
 
 func (h *Hub) connect(ctx context.Context, service, code, public, password, name string, remember, relayOnly, reconnectOnly bool) (Saved, error) {
-	ctx, cancelAttempt := context.WithTimeout(ctx, 190*time.Second)
+	ctx, cancelAttempt := context.WithCancel(ctx)
 	defer cancelAttempt()
 	service, e := device.ServiceURL(service)
 	if e != nil {
 		return Saved{}, e
 	}
-	connectivity.Report(ctx, "service", "正在连接服务并验证本机身份", 15*time.Second)
+	connectivity.Report(ctx, "service", "正在连接服务并验证本机身份", connectivity.StageTimeout)
 	i, e := h.identity(ctx, service, name)
 	if e != nil {
 		return Saved{}, e
@@ -139,7 +140,7 @@ func (h *Hub) connect(ctx context.Context, service, code, public, password, name
 		Device deviceservice.Device
 		Online bool
 	}
-	connectivity.Report(ctx, "resolve", "正在查找设备并检查在线状态", 12*time.Second)
+	connectivity.Report(ctx, "resolve", "正在查找设备并检查在线状态", connectivity.StageTimeout)
 	if e = device.Post(ctx, service, i.Token, "/p2p/devices/resolve", map[string]any{"connectionId": code}, &r); e != nil {
 		return Saved{}, e
 	}
@@ -169,7 +170,7 @@ func (h *Hub) connect(ctx context.Context, service, code, public, password, name
 		return Saved{}, fmt.Errorf("设备身份已变化，需要删除旧配对再确认")
 	}
 	if s.Key == "" || (s.Expires > 0 && s.Expires <= time.Now().Unix()) {
-		connectivity.Report(ctx, "request", "正在向被控电脑请求授权", 12*time.Second)
+		connectivity.Report(ctx, "request", "正在向被控电脑请求授权", connectivity.StageTimeout)
 		reqID := device.Random()[:32]
 		envelope, e := device.Seal(i.Private, d.Public, "reignhub/pair/request/"+reqID, map[string]any{"password": password, "remember": remember})
 		if e != nil {
@@ -182,14 +183,14 @@ func (h *Hub) connect(ctx context.Context, service, code, public, password, name
 		if password != "" {
 			message = "正在等待被控电脑验证访问密码"
 		}
-		connectivity.Report(ctx, "approval", message, 125*time.Second)
-		deadline := time.NewTimer(125 * time.Second)
-		defer deadline.Stop()
+		connectivity.Report(ctx, "approval", message, connectivity.StageTimeout)
+		approvalCtx, stopApproval := context.WithTimeout(ctx, connectivity.StageTimeout)
+		defer stopApproval()
 		tick := time.NewTicker(time.Second)
 		defer tick.Stop()
 		for {
 			var result deviceservice.Pair
-			if e = device.Post(ctx, service, i.Token, "/p2p/pairings/result", map[string]string{"id": reqID}, &result); e != nil {
+			if e = device.Post(approvalCtx, service, i.Token, "/p2p/pairings/result", map[string]string{"id": reqID}, &result); e != nil {
 				return s, e
 			}
 			if result.State == "denied" {
@@ -215,17 +216,17 @@ func (h *Hub) connect(ctx context.Context, service, code, public, password, name
 			select {
 			case <-ctx.Done():
 				return s, ctx.Err()
-			case <-deadline.C:
+			case <-approvalCtx.Done():
 				return s, fmt.Errorf("等待主机授权超时，请在被控电脑上允许连接后重试")
 			case <-tick.C:
 			}
 		}
 	}
-	connectCtx, cancel := context.WithTimeout(ctx, 35*time.Second)
+	connectCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	opts := remote.Options{RelayOnly: relayOnly}
 	if !relayOnly {
-		connectivity.Report(ctx, "network", "授权已通过，正在获取直连配置", 3*time.Second)
+		connectivity.Report(ctx, "network", "授权已通过，正在获取直连配置", connectivity.StageTimeout)
 		policy := device.Network(connectCtx, service)
 		opts.PublicSTUN, opts.SelfSTUN = policy.PublicSTUN, policy.SelfSTUN
 		opts.ICEServers = policy.Servers()
@@ -246,7 +247,7 @@ func (h *Hub) connect(ctx context.Context, service, code, public, password, name
 		return s, fmt.Errorf("连接已取消")
 	}
 	s.Name, s.ConnectionID = d.Name, d.ConnectionID
-	s.RelayOnly, s.ReconnectDisabled = relayOnly, false
+	s.RelayOnly, s.ReconnectDisabled, s.HasConnected = relayOnly, false, true
 	if err := h.DB.Put("saved:"+id, s); err != nil {
 		h.mu.Unlock()
 		_ = c.Close()

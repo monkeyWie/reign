@@ -153,7 +153,7 @@ func writeAll(w io.Writer, b []byte) error {
 // TCPBinding probes an already bound TCP socket, preserving its source port.
 // The caller can keep the connection alive and reuse that port for peer dials.
 func TCPBinding(ctx context.Context, c net.Conn) (*net.TCPAddr, error) {
-	deadline := time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(StageTimeout)
 	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
 		deadline = d
 	}
