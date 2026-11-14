@@ -84,7 +84,13 @@ func deviceName(d Object) string {
 }
 func deviceStatus(d Object) string {
 	if !flag(d, "connected") {
-		return "离线 · 可查看已缓存会话"
+		if online, known := d["online"].(bool); known {
+			if online {
+				return "在线 · 点击连接"
+			}
+			return "离线"
+		}
+		return "在线状态暂不可用"
 	}
 	path := str(d, "path")
 	if path == "" {
@@ -110,13 +116,13 @@ func (s *State) phoneDevices(cx *core.Scope) core.Node {
 			return card(cx, label(cx, "尚未连接设备", 16, false), label(cx, "输入电脑上的设备 ID，或扫描设备二维码开始连接。已配对设备会保存在本机。", 13, true))
 		}},
 		core.Each(func() []Object { s.read(); return s.devices }, func(d Object) string { return str(d, "id") }, func(cx *core.Scope, d func() Object, _ func() int) core.Node {
-			return core.View{TestID: "device-" + str(d(), "id"), Role: core.RoleButton, LabelFunc: func() string { return deviceName(d()) }, OnPress: func(core.PressEvent) { s.selectDevice(str(d(), "id")) }, Style: core.Style{Padding: core.All(16), Gap: 9, CornerRadius: 10, BorderWidth: 1, MinHeight: core.Pt(96)}, StyleFunc: func() core.Style {
+			return core.View{TestID: "device-" + str(d(), "id"), Role: core.RoleButton, LabelFunc: func() string { return deviceName(d()) }, OnPress: func(core.PressEvent) { s.openDevice(str(d(), "id")) }, Style: core.Style{Padding: core.All(16), Gap: 9, CornerRadius: 10, BorderWidth: 1, MinHeight: core.Pt(96)}, StyleFunc: func() core.Style {
 				p := palette(cx)
 				return core.Style{Background: p.background, BorderColor: p.border, Hover: &core.Style{Background: p.muted}}
 			}, Children: []core.Node{
-				row(glyph(cx, lucide.Monitor, 20), singleLine(cx, func() string { return deviceName(d()) }, 16, false), spacer(), s.connectionIndicator(cx, func() string { return str(d(), "id") }), glyph(cx, lucide.ChevronRight, 18)),
+				row(glyph(cx, lucide.Monitor, 20), singleLine(cx, func() string { return deviceName(d()) }, 16, false), spacer(), s.devicePresenceIndicator(cx, d), glyph(cx, lucide.ChevronRight, 18)),
 				dynamicText(cx, func() string { return "ID " + str(d(), "connectionId") }, 12, true),
-				dynamicText(cx, func() string { return deviceStatus(d()) }, 12, true),
+				dynamicText(cx, func() string { return s.deviceListStatus(d()) }, 12, true),
 			}}
 		}),
 	}}}})

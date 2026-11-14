@@ -251,9 +251,9 @@ func (s *State) navigation(cx *core.Scope, compact bool) core.Node {
 	}
 	nodes = append(nodes, core.Scroll{Style: fill, Children: []core.Node{core.Each(func() []Object { s.read(); return s.devices }, func(d Object) string { return str(d, "id") }, func(cx *core.Scope, d func() Object, _ func() int) core.Node {
 		if compact {
-			return button(cx, "device-"+str(d(), "id"), "", lucide.Monitor, "ghost", func() { s.selectDevice(str(d(), "id")) })
+			return button(cx, "device-"+str(d(), "id"), "", lucide.Monitor, "ghost", func() { s.openDevice(str(d(), "id")) })
 		}
-		return core.View{TestID: "device-" + str(d(), "id"), Role: core.RoleButton, LabelFunc: func() string { return deviceName(d()) }, OnPress: func(core.PressEvent) { s.selectDevice(str(d(), "id")) }, Style: core.Style{Margin: core.Edges{Bottom: 6}, Padding: core.All(12), Gap: 5, CornerRadius: 6, BorderWidth: 1}, StyleFunc: func() core.Style {
+		return core.View{TestID: "device-" + str(d(), "id"), Role: core.RoleButton, LabelFunc: func() string { return deviceName(d()) }, OnPress: func(core.PressEvent) { s.openDevice(str(d(), "id")) }, Style: core.Style{Margin: core.Edges{Bottom: 6}, Padding: core.All(12), Gap: 5, CornerRadius: 6, BorderWidth: 1}, StyleFunc: func() core.Style {
 			c := palette(cx)
 			bg := c.background
 			s.read()
@@ -261,7 +261,7 @@ func (s *State) navigation(cx *core.Scope, compact bool) core.Node {
 				bg = c.muted
 			}
 			return core.Style{Background: bg, BorderColor: c.border, Hover: &core.Style{Background: c.muted}}
-		}, Children: []core.Node{row(core.View{Style: fill, Children: []core.Node{dynamicText(cx, func() string { return deviceName(d()) }, 13, false)}}, s.connectionIndicator(cx, func() string { return str(d(), "id") })), dynamicText(cx, func() string { return deviceStatus(d()) }, 10, true)}}
+		}, Children: []core.Node{row(core.View{Style: fill, Children: []core.Node{dynamicText(cx, func() string { return deviceName(d()) }, 13, false)}}, s.devicePresenceIndicator(cx, d)), dynamicText(cx, func() string { return s.deviceListStatus(d()) }, 10, true)}}
 	})}})
 	nodes = append(nodes, core.Show{When: func() bool { s.read(); return s.connectionProblem("") }, Then: func(cx *core.Scope) core.Node { return s.connectionIndicator(cx, func() string { return "" }) }}, button(cx, "account-menu", choose(compact, "", "账号与设备同步"), lucide.User, "ghost", func() { s.dialog.Set("account") }))
 	nodes = append(nodes, button(cx, "theme-toggle", choose(compact, "", "切换主题"), lucide.SunMoon, "ghost", s.toggleTheme))

@@ -10,9 +10,12 @@ import (
 	"fmt"
 	"github.com/monkeyWie/reignhub/internal/config"
 	"github.com/monkeyWie/reignhub/internal/control"
+	"github.com/monkeyWie/reignhub/internal/device"
 	"github.com/monkeyWie/reignhub/internal/host"
 	"github.com/monkeyWie/reignhub/internal/provider"
 	"github.com/monkeyWie/reignhub/internal/remote"
+	"github.com/monkeyWie/reignhub/internal/store"
+	"github.com/monkeyWie/reignhub/internal/syncstate"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -25,14 +28,15 @@ type fake struct {
 	provider.Provider
 	mu   sync.Mutex
 	text string
+	id   string
 	log  *provider.EventLog
 }
 
 func (f *fake) Status(context.Context) provider.Status {
-	return provider.Status{ID: "fixture", Name: "Test Agent", State: "ready", Capabilities: provider.Capabilities{Send: true, History: true, Streaming: true}}
+	return provider.Status{ID: f.id, Name: "Test Agent", State: "ready", Capabilities: provider.Capabilities{Send: true, History: true, Streaming: true}}
 }
 func (f *fake) Sessions(context.Context, string) (provider.SessionPage, error) {
-	return provider.SessionPage{Sessions: []provider.Session{{ID: "isolated", ProviderID: "fixture", Title: "Isolated Worker integration", CWD: "/fixture/project", UpdatedAt: time.Now().Unix(), Status: "idle", Model: "test-model"}}}, nil
+	return provider.SessionPage{Sessions: []provider.Session{{ID: "isolated", ProviderID: f.id, Title: "Isolated Worker integration", CWD: "/fixture/project", UpdatedAt: time.Now().Unix(), Status: "idle", Model: "test-model"}}}, nil
 }
 func (f *fake) Transcript(context.Context, string, string) (provider.Transcript, error) {
 	f.mu.Lock()
@@ -71,8 +75,21 @@ func main() {
 	c, _ := config.Load(filepath.Join(dir, "host"))
 	c.ServiceURL = os.Args[1]
 	c.DeviceName = "Worker test host"
-	f := &fake{text: "# Worker integration\n\nThis is an **isolated test Agent**.\n\n- End-to-end encrypted messages\n- Native Go provider\n- React browser controller", log: provider.NewEventLog()}
-	d := &control.Dispatcher{Providers: map[string]provider.Provider{"fixture": f}}
+	providerID := os.Getenv("REIGNHUB_TEST_PROVIDER")
+	if providerID == "" {
+		providerID = "fixture"
+	}
+	f := &fake{id: providerID, text: "# Worker integration\n\nThis is an **isolated test Agent**.\n\n- End-to-end encrypted messages\n- Native Go provider\n- React browser controller", log: provider.NewEventLog()}
+	d := &control.Dispatcher{Providers: map[string]provider.Provider{providerID: f}}
+	db, err := store.Open(filepath.Join(dir, "fixture.db"))
+	if err != nil {
+		panic(err)
+	}
+	defer db.Close()
+	index := &syncstate.Index{DB: db, Epoch: device.Random()}
+	d.Sync = func(ctx context.Context, p provider.Provider, r control.Request) (any, error) {
+		return index.Sync(ctx, p, r.Provider, r.Epoch, r.After)
+	}
 	m := host.New(c, d, func(config.Config) remote.Options { return remote.Options{} })
 	d.Local = m.Local
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

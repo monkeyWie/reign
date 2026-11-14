@@ -360,7 +360,9 @@ func (s *State) composer(cx *core.Scope) core.Node {
 				return "模型未知"
 			}, Options: options, Selected: func() string { s.read(); return s.model }, OnChange: func(id string) { s.model = id; s.changed() }, Width: 300, SearchLabel: "搜索模型"}}}
 		}), core.Show{When: running, Then: func(cx *core.Scope) core.Node {
-			return button(cx, "interrupt-generation", "", lucide.Square, "outline", func() { s.send("interrupt") })
+			return core.View{TestID: "interrupt-generation", Role: core.RoleButton, Label: "停止生成", Tooltip: label(cx, "停止生成", 12, false), OnPress: func(core.PressEvent) { s.send("interrupt") }, Style: core.Style{Width: core.Pt(36), Height: core.Pt(36), CornerRadius: 18, FlexShrink: 0, AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter}, StyleFunc: func() core.Style {
+				return core.Style{Background: palette(cx).foreground}
+			}, Children: []core.Node{core.View{Style: core.Style{Width: core.Pt(11), Height: core.Pt(11), CornerRadius: 2}, StyleFunc: func() core.Style { return core.Style{Background: palette(cx).background} }}}}
 		}}, core.View{TestID: "send-message", Role: core.RoleButton, LabelFunc: func() string {
 			if s.pendingSend() != "" {
 				return "正在发送"

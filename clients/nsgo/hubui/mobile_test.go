@@ -12,6 +12,9 @@ type mobileDemo struct{ *demoAPI }
 
 func (*mobileDemo) CanHost() bool { return false }
 func (d *mobileDemo) Call(ctx context.Context, method string, p Object, target string, r Object) (any, error) {
+	if method == "client.presence" {
+		return []Object{{"id": "third", "online": false, "checkedAt": time.Now().Unix()}}, nil
+	}
 	if method == "client.list" {
 		return []Object{
 			{"id": "demo-device", "name": "MacBook Pro", "connectionId": "123456", "path": "P2P · WebRTC", "connected": true},
@@ -32,7 +35,7 @@ func testMobileDeviceAndScanner(t *testing.T, os core.OS, scan bool) {
 	app.Find("text:MacBook Pro")
 	app.Find("text:开发工作站")
 	app.Find("text:Relay · WebSocket")
-	app.Find("text:离线 · 可查看已缓存会话")
+	app.WaitFor(`text:"离线"`, time.Second)
 	if !scan {
 		app.Screenshot("mobile-devices")
 	}

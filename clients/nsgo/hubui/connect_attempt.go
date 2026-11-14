@@ -93,7 +93,7 @@ func (s *State) connect(p Object) {
 				if str(d, "connectionId") == strings.NewReplacer(" ", "", "-", "").Replace(str(p, "code")) && str(d, "service") == str(p, "service") {
 					a.target = str(d, "id")
 					s.connection(a.target).attempt = a
-					s.connection(a.target).established = true
+					s.acceptConnection(a.target, s.devices)
 					s.selectDevice(a.target)
 					break
 				}

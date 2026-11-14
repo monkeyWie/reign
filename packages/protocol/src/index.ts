@@ -4,6 +4,7 @@ export const routes = {
   config: "/p2p/config",
   register: "/p2p/devices/register",
   presence: "/p2p/devices/presence",
+  status: "/p2p/devices/status",
   resolve: "/p2p/devices/resolve",
   request: "/p2p/pairings/request",
   pending: "/p2p/pairings/pending",

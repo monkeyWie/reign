@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"github.com/monkeyWie/reignhub/clients/nsgo/browserclient"
 	"github.com/monkeyWie/reignhub/internal/connectivity"
+	"github.com/monkeyWie/reignhub/internal/device"
 	"strings"
 	"sync"
 	"time"
@@ -312,6 +313,25 @@ func (a *API) Call(ctx context.Context, method string, p Object, target string, 
 	switch method {
 	case "client.list":
 		return a.list()
+	case "client.presence":
+		saved, err := a.saved()
+		if err != nil {
+			return nil, err
+		}
+		targets := []device.PresenceTarget{}
+		for _, s := range saved {
+			identity, _ := a.store.Get("identity:" + str(s, "service"))
+			targets = append(targets, device.PresenceTarget{ID: str(s, "id"), Service: str(s, "service"), Host: str(s, "host"), Token: str(obj(identity), "token")})
+		}
+		out := []Object{}
+		for _, status := range device.Presence(ctx, targets) {
+			item := Object{"id": status.ID, "host": status.Host, "name": status.Name, "checkedAt": status.CheckedAt, "online": nil}
+			if status.Online != nil {
+				item["online"] = *status.Online
+			}
+			out = append(out, item)
+		}
+		return out, ctx.Err()
 	case "client.connect":
 		return a.connect(ctx, p)
 	case "client.reconnect":

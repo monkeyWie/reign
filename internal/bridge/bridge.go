@@ -160,6 +160,8 @@ func CallContext(parent context.Context, raw string) string {
 		out, e = h.Account(ctx, p.Service, p.Name, strings.TrimPrefix(in.Method, "client.account."), p.ID)
 	case "client.list":
 		out, e = h.List()
+	case "client.presence":
+		out, e = h.Presence(ctx)
 	case "client.connect":
 		_, e = h.Connect(ctx, p.Service, p.Code, p.Public, p.Password, p.Name, p.Remember, p.RelayOnly)
 		if e == nil {

@@ -40,6 +40,7 @@ type wire struct {
 	progressLast      map[string]connectivity.Progress
 	ws                *websocket.Conn
 	dataWS            *websocket.Conn
+	hostRelay         *hostRelayLink
 	grantMu           sync.RWMutex
 	grant             string
 	crypto            *cryptor
@@ -215,6 +216,13 @@ func (w *wire) receive(f relay.Frame) {
 		go w.signal(plain)
 	}
 }
+func (w *wire) relaySocket() *websocket.Conn {
+	if w.hostRelay != nil {
+		return w.hostRelay.socket.Load()
+	}
+	return w.dataWS
+}
+
 func (w *wire) path() string {
 	w.mu.Lock()
 	direct := w.direct
@@ -228,7 +236,7 @@ func (w *wire) path() string {
 	if w.opts.RelayName != "" {
 		return "Relay · " + w.opts.RelayName
 	}
-	if w.dataWS == nil {
+	if w.relaySocket() == nil {
 		return "Connecting · direct only"
 	}
 	return "Relay · encrypted"
@@ -248,11 +256,11 @@ func (w *wire) close() {
 func (w *wire) waitPath(ctx context.Context) error {
 	// Give direct negotiation a short head start even when relay is permitted.
 	// P2P-only accounts must establish a direct path before any business RPC.
-	if w.dataWS == nil || (!w.host && !w.opts.RelayOnly && time.Now().Before(w.preferDirectUntil)) {
+	if w.relaySocket() == nil || (!w.host && !w.opts.RelayOnly && time.Now().Before(w.preferDirectUntil)) {
 		deadline := time.NewTimer(connectivity.StageTimeout)
 		defer deadline.Stop()
 		for {
-			if w.dataWS != nil && !time.Now().Before(w.preferDirectUntil) {
+			if w.relaySocket() != nil && !time.Now().Before(w.preferDirectUntil) {
 				break
 			}
 			w.mu.Lock()
@@ -318,13 +326,14 @@ func (w *wire) sendContext(ctx context.Context, data []byte) error {
 			continue
 		}
 		if !direct {
-			if w.dataWS == nil {
-				return errors.New("直连不可用；当前权益不包含中继，请检查网络或升级套餐")
+			socket := w.relaySocket()
+			if socket == nil {
+				return errors.New("中继暂不可用，请等待连接恢复后刷新")
 			}
 			w.progress("path:relay", "relay", "正在使用加密中继", "直连尚未建立，先通过服务中继；后台继续尝试直连", "success")
 			frame, _ := json.Marshal(relay.Frame{Peer: w.peer, Kind: "chunk", Body: sealed})
 			sendCtx, cancel := context.WithTimeout(w.ctx, 10*time.Second)
-			err := w.dataWS.Write(sendCtx, websocket.MessageText, frame)
+			err := socket.Write(sendCtx, websocket.MessageText, frame)
 			cancel()
 			if err != nil {
 				return err

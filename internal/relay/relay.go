@@ -167,7 +167,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			s.mu.Unlock()
 			if target != nil {
 				if target.send(f) != nil {
-					return
+					// A controller may disappear while a host reply is in flight.
+					// Retire that controller, not the shared host transport.
+					_ = target.ws.CloseNow()
+					if role != "host" {
+						return
+					}
 				}
 			}
 		}
@@ -297,7 +302,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.mu.Unlock()
 		if target != nil {
 			if target.send(f) != nil {
-				return
+				_ = target.ws.CloseNow()
+				if role != "host" {
+					return
+				}
 			}
 		}
 	}
@@ -324,4 +332,11 @@ func (s *Server) DisconnectDevice(host, device string) {
 	for _, ws := range sockets {
 		_ = ws.CloseNow()
 	}
+}
+
+// Online reads the host's signal socket; it does not create a peer connection.
+func (s *Server) Online(host string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.rooms[host] != nil
 }

@@ -110,6 +110,26 @@ func (h *Hub) List() ([]map[string]any, error) {
 	}
 	return r, nil
 }
+
+// Presence reads saved hosts without initiating any peer connection.
+func (h *Hub) Presence(ctx context.Context) ([]device.DeviceStatus, error) {
+	keys, err := h.DB.Keys("saved:")
+	if err != nil {
+		return nil, err
+	}
+	targets := []device.PresenceTarget{}
+	for _, key := range keys {
+		var saved Saved
+		if err = h.DB.Get(key, &saved); err != nil {
+			return nil, err
+		}
+		var identity device.Identity
+		_ = h.DB.Get("identity:"+saved.Service, &identity)
+		targets = append(targets, device.PresenceTarget{ID: saved.ID, Service: saved.Service, Host: saved.Host, Token: identity.Token})
+	}
+	return device.Presence(ctx, targets), ctx.Err()
+}
+
 func (h *Hub) Connect(ctx context.Context, service, code, public, password, name string, remember, relayOnly bool) (Saved, error) {
 	return h.connect(ctx, service, code, public, password, name, remember, relayOnly, false, nil)
 }

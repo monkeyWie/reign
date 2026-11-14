@@ -1,5 +1,5 @@
 import { drizzle } from "drizzle-orm/d1";
-import { and, eq, gt } from "drizzle-orm";
+import { and, eq, gt, inArray } from "drizzle-orm";
 import { APIError, PROTOCOL, routes, type Device } from "@reignhub/protocol";
 import { devices, grants, pairings, type DeviceRow } from "./schema";
 import { hash, id, random, serviceIdentity, un64 } from "./crypto";
@@ -270,17 +270,15 @@ export async function handleCore(
           if (n[0] >= 4294000000) continue;
           code = String(n[0] % 1_000_000).padStart(6, "0");
           try {
-            await db
-              .insert(devices)
-              .values({
-                id: deviceID,
-                connectionId: code,
-                name: input.name,
-                public: input.public,
-                tokenHash: await hash(token),
-                host: input.isHost,
-                seen: now,
-              });
+            await db.insert(devices).values({
+              id: deviceID,
+              connectionId: code,
+              name: input.name,
+              public: input.public,
+              tokenHash: await hash(token),
+              host: input.isHost,
+              seen: now,
+            });
             registered = true;
             break;
           } catch (e) {
@@ -316,6 +314,70 @@ export async function handleCore(
                 .set({ name, seen: now })
                 .where(eq(devices.id, device.id));
             result = json({ ok: true });
+            break;
+          }
+          case routes.status: {
+            if (
+              !Array.isArray(input.hosts) ||
+              input.hosts.length > 50 ||
+              input.hosts.some(
+                (h) => typeof h !== "string" || !/^[a-f0-9]{32}$/.test(h),
+              )
+            )
+              throw new APIError(
+                "INVALID_REQUEST",
+                "每次最多查询 50 台已配对设备",
+              );
+            const hosts = [...new Set(input.hosts as string[])];
+            if (!hosts.length) {
+              result = json({ devices: [] });
+              break;
+            }
+            const allowed = new Set(
+              (
+                await db
+                  .select({ host: grants.host })
+                  .from(grants)
+                  .where(
+                    and(
+                      eq(grants.client, device.id),
+                      inArray(grants.host, hosts),
+                    ),
+                  )
+              ).map((g) => g.host),
+            );
+            allowed.add(device.id);
+            const rows = await db
+              .select()
+              .from(devices)
+              .where(and(inArray(devices.id, hosts), eq(devices.host, true)));
+            const visible = new Map(
+              rows.filter((h) => allowed.has(h.id)).map((h) => [h.id, h]),
+            );
+            result = json({
+              devices: await Promise.all(
+                hosts.map(async (hostID) => {
+                  const host = visible.get(hostID);
+                  // Unknown and revoked devices reveal neither existence nor presence.
+                  if (!host) return { host: hostID, online: null };
+                  try {
+                    const response = await roomCall(env, hostID, "/online", {});
+                    if (!response.ok) throw new Error("presence unavailable");
+                    const state = (await response.json()) as {
+                      online: boolean;
+                    };
+                    return {
+                      host: hostID,
+                      name: host.name,
+                      online: state.online,
+                      checkedAt: now,
+                    };
+                  } catch {
+                    return { host: hostID, online: null };
+                  }
+                }),
+              ),
+            });
             break;
           }
           case routes.resolve: {

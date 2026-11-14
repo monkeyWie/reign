@@ -3,6 +3,7 @@ package connectivity
 import (
 	"net"
 	"net/http"
+	"runtime"
 	"time"
 )
 
@@ -11,7 +12,12 @@ import (
 // WebSocket lifetime is owned by its context after the upgrade succeeds.
 var ConnectionHTTPClient = func() *http.Client {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.DialContext = (&net.Dialer{Timeout: StageTimeout, KeepAlive: 30 * time.Second}).DialContext
+	if runtime.GOOS == "js" {
+		// WebAssembly must use the browser Fetch transport, not a TCP dialer.
+		transport.DialContext = nil
+	} else {
+		transport.DialContext = (&net.Dialer{Timeout: StageTimeout, KeepAlive: 30 * time.Second}).DialContext
+	}
 	transport.TLSHandshakeTimeout = StageTimeout
 	return &http.Client{Timeout: StageTimeout, Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 }()

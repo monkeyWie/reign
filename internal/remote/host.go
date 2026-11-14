@@ -12,8 +12,8 @@ import (
 	"github.com/monkeyWie/reignhub/internal/relay"
 )
 
-// RunHost reconnects the outbound relay link. Losing relay also closes existing
-// peers, providing a single, explicit lifetime and authorization boundary.
+// RunHost reconnects the authenticated signal lease. Losing that lease closes
+// existing peers; the optional data relay is repaired independently.
 func RunHost(ctx context.Context, p Pairing, opts Options, d *control.Dispatcher) {
 	RunHostObserved(ctx, p, opts, d, nil)
 }
@@ -36,7 +36,7 @@ func serveHost(ctx context.Context, p Pairing, opts Options, d *control.Dispatch
 	return serveHostObserved(ctx, p, opts, d, nil)
 }
 func serveHostObserved(ctx context.Context, p Pairing, opts Options, d *control.Dispatcher, status *HostStatus) error {
-	ws, dataWS, _, err := dialWithRelayPolicy(ctx, p, "host", connectivity.StageTimeout, opts.RelayOnly)
+	ws, dataWS, hostPeer, err := dialWithRelayPolicy(ctx, p, "host", connectivity.StageTimeout, opts.RelayOnly)
 	if err != nil {
 		return err
 	}
@@ -52,16 +52,12 @@ func serveHostObserved(ctx context.Context, p Pairing, opts Options, d *control.
 	life, cancel := context.WithCancel(ctx)
 	defer cancel()
 	go keepAlive(life, ws)
+	var replyRelay *hostRelayLink
 	if dataWS != nil {
-		go keepSocketAlive(life, dataWS, false)
-		go func() {
-			drainRelay(life, dataWS)
-			// A live signal with a dead response socket accepts handshakes but
-			// silently loses every relay reply. Rejoin with a fresh socket pair.
-			if life.Err() == nil {
-				_ = ws.CloseNow()
-			}
-		}()
+		replyRelay = &hostRelayLink{}
+		replyRelay.socket.Store(dataWS)
+		defer replyRelay.close()
+		go replyRelay.run(life, p, hostPeer, status)
 	}
 	peers := map[string]*wire{}
 	defer func() {
@@ -171,6 +167,7 @@ func serveHostObserved(ctx context.Context, p Pairing, opts Options, d *control.
 			}
 			peer.device = deviceID
 			peer.dataWS = dataWS
+			peer.hostRelay = replyRelay
 			peer.grant = f.Grant
 			w = peer
 			peers[f.Peer] = w

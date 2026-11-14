@@ -83,12 +83,10 @@ export class ReignHubRoom extends DurableObject<CoreEnv> {
           if (host) this.send(host, { peer: s.peer, kind: "bye" });
           this.ctx.waitUntil(this.release(s));
         }
-      } else if (s.role === "host" && reason !== "replaced") {
-        // The host writes responses through this socket. Keeping its signal
-        // online after losing it would allow handshakes that can never finish.
-        const host = this.host(s.generation);
-        if (host) this.disconnect(host, 1013, "host relay disconnected");
       }
+      // A relay is optional: its failure must not revoke the host's signal
+      // lease or close working direct peers. The host may reopen this relay
+      // using the same signal peer and generation.
     }
     try {
       ws.close(code, reason.slice(0, 100));
@@ -353,8 +351,12 @@ export class ReignHubRoom extends DurableObject<CoreEnv> {
           if (
             targetAuth.expires <= now ||
             (state.route === "relay" && !targetAuth.allowRelay)
-          )
-            throw new APIError("LEASE_EXPIRED", "控制端授权已到期");
+          ) {
+            // A stale controller must not tear down the host's shared reply
+            // socket and every other controller, including healthy P2P peers.
+            this.disconnect(target, 1008, "controller authorization expired");
+            return;
+          }
           this.send(target, {
             peer: targetAuth.peer,
             kind: f.kind,
@@ -370,9 +372,8 @@ export class ReignHubRoom extends DurableObject<CoreEnv> {
             (s) => this.state(s)?.generation === state.generation,
           )
         ) {
-          // Also repair hosts whose relay was lost before this Worker version
-          // observed its close event. Never forward into a missing reply path.
-          this.disconnect(target, 1013, "host relay unavailable");
+          // Reject this relay path promptly while the host repairs its reply
+          // socket. Leave its signal lease and other direct peers intact.
           throw new APIError(
             "HOST_RELAY_UNAVAILABLE",
             "被控设备中继已断开，正在重新接入",
@@ -399,8 +400,8 @@ export class ReignHubRoom extends DurableObject<CoreEnv> {
       );
     }
   }
-  webSocketClose(ws: WebSocket): void {
-    this.disconnect(ws, 1000, "closed");
+  webSocketClose(ws: WebSocket, code: number, reason: string): void {
+    this.disconnect(ws, code, reason || "closed");
   }
   webSocketError(ws: WebSocket): void {
     this.disconnect(ws, 1011, "socket error");

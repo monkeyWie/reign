@@ -217,6 +217,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	var in struct {
 		Name, Public, ConnectionID, Host, ID, Envelope, Reply, Client string
+		Hosts                                                         []string
 		IsHost                                                        bool
 		Allow                                                         bool
 	}
@@ -334,6 +335,46 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		write(map[string]bool{"ok": true})
+	case "/p2p/devices/status":
+		if len(in.Hosts) > 50 {
+			http.Error(w, "at most 50 hosts", http.StatusBadRequest)
+			return
+		}
+		for _, host := range in.Hosts {
+			if _, err := hex.DecodeString(host); err != nil || len(host) != 32 {
+				http.Error(w, "invalid host", http.StatusBadRequest)
+				return
+			}
+		}
+		var grants []DeviceGrant
+		if err := s.DB.Where("client = ? AND host IN ?", id, in.Hosts).Find(&grants).Error; err != nil {
+			http.Error(w, "presence unavailable", 503)
+			return
+		}
+		allowed := map[string]bool{id: true}
+		for _, g := range grants {
+			allowed[g.Host] = true
+		}
+		var hosts []Device
+		if err := s.DB.Where("id IN ? AND host = ?", in.Hosts, true).Find(&hosts).Error; err != nil {
+			http.Error(w, "presence unavailable", 503)
+			return
+		}
+		visible := map[string]Device{}
+		for _, h := range hosts {
+			if allowed[h.ID] {
+				visible[h.ID] = h
+			}
+		}
+		out := []map[string]any{}
+		for _, host := range in.Hosts {
+			item := map[string]any{"host": host, "online": nil}
+			if d, ok := visible[host]; ok {
+				item["name"], item["online"], item["checkedAt"] = d.Name, s.relay.Online(host), now
+			}
+			out = append(out, item)
+		}
+		write(map[string]any{"devices": out})
 	case "/p2p/devices/resolve":
 		code := strings.ReplaceAll(strings.ReplaceAll(in.ConnectionID, " ", ""), "-", "")
 		var d Device
@@ -343,7 +384,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		d.TokenHash = ""
 
-		write(map[string]any{"device": d, "online": now-d.Seen < 45})
+		write(map[string]any{"device": d, "online": s.relay.Online(d.ID)})
 
 	case "/p2p/pairings/request":
 		var host Device

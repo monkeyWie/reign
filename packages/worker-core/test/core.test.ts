@@ -1,7 +1,12 @@
-import { env, SELF, applyD1Migrations } from "cloudflare:test";
+import {
+  env,
+  SELF,
+  applyD1Migrations,
+  runInDurableObject,
+} from "cloudflare:test";
 import { beforeAll, describe, it, expect } from "vitest";
 import { routes } from "@reignhub/protocol";
-import type { CoreEnv } from "../src";
+import { room, type CoreEnv } from "../src";
 const bindings = env as unknown as CoreEnv & {
   TEST_MIGRATIONS: Parameters<typeof applyD1Migrations>[1];
 };
@@ -71,11 +76,41 @@ describe("device authorization and separated ingress", () => {
       ).status,
     ).toBe(403);
   });
+  it("bounds presence batches and requires an authenticated device", async () => {
+    expect((await post(routes.status, { hosts: [] })).status).toBe(401);
+    const c = await register();
+    expect(
+      (
+        await post(
+          routes.status,
+          { hosts: Array(51).fill("ab".repeat(16)) },
+          c.token,
+        )
+      ).status,
+    ).toBe(400);
+    expect(
+      (await post(routes.status, { hosts: ["invalid"] }, c.token)).status,
+    ).toBe(400);
+    expect(
+      await (await post(routes.status, { hosts: [] }, c.token)).json(),
+    ).toEqual({ devices: [] });
+  });
   it("pairs only after host consent and revocation closes all controller links", async () => {
     const h = await register(true),
       c = await register();
     expect(h.connectionId).toMatch(/^\d{6}$/);
     expect((await socket(h.id, c.token, "client")).status).toBe(403);
+    const unknown = await post(
+      routes.status,
+      { hosts: [h.id, "ff".repeat(16)] },
+      c.token,
+    );
+    expect(await unknown.json()).toEqual({
+      devices: [
+        { host: h.id, online: null },
+        { host: "ff".repeat(16), online: null },
+      ],
+    });
     const hr = await socket(h.id, h.token, "host");
     expect(hr.status).toBe(101);
     const host = hr.webSocket!;
@@ -112,6 +147,14 @@ describe("device authorization and separated ingress", () => {
         )
       ).status,
     ).toBe(200);
+    const statuses = await post(routes.status, { hosts: [h.id] }, c.token);
+    expect(
+      (
+        (await statuses.json()) as {
+          devices: { online: boolean; name: string }[];
+        }
+      ).devices[0],
+    ).toMatchObject({ online: true, name: "Host" });
     const cr = await socket(h.id, c.token, "client");
     expect(cr.status).toBe(101);
     const client = cr.webSocket!;
@@ -150,31 +193,87 @@ describe("device authorization and separated ingress", () => {
     data.close();
     hostRelay.close();
   });
-  it("disconnects a host whose response relay closes and admits its replacement", async () => {
+  it("isolates expired controllers from the host's shared reply socket", async () => {
+    const h = await register(true),
+      c = await register();
+    const host = (await socket(h.id, h.token, "host")).webSocket!;
+    host.accept();
+    const hw = await message(host);
+    const data = (
+      await socket(h.id, h.token, "host", routes.relay, hw.peer as string)
+    ).webSocket!;
+    data.accept();
+    await message(data);
+    const p = crypto.randomUUID().replaceAll("-", "");
+    await post(
+      routes.request,
+      { id: p, host: h.id, envelope: "encrypted" },
+      c.token,
+    );
+    await post(
+      routes.respond,
+      { id: p, allow: true, reply: "encrypted" },
+      h.token,
+    );
+    const client = (await socket(h.id, c.token, "client")).webSocket!;
+    client.accept();
+    const cw = await message(client);
+    await runInDurableObject(room(bindings, h.id), (_instance, state) => {
+      for (const ws of state.getWebSockets("client")) {
+        const attachment = ws.deserializeAttachment();
+        attachment.expires = 0;
+        ws.serializeAttachment(attachment);
+      }
+    });
+    const closed = new Promise<CloseEvent>((resolve) =>
+      client.addEventListener("close", resolve, { once: true }),
+    );
+    data.send(
+      JSON.stringify({
+        peer: cw.peer,
+        kind: "chunk",
+        body: "encrypted late response",
+      }),
+    );
+    expect((await closed).code).toBe(1008);
+    expect(host.readyState).toBe(WebSocket.OPEN);
+    expect(data.readyState).toBe(WebSocket.OPEN);
+    const replacement = (await socket(h.id, c.token, "client")).webSocket!;
+    replacement.accept();
+    await message(replacement);
+    replacement.close();
+    host.close();
+    data.close();
+  });
+  it("keeps the host signal alive while replacing its response relay", async () => {
     const h = await register(true);
-    const hr = await socket(h.id, h.token, "host");
-    const host = hr.webSocket!;
+    const host = (await socket(h.id, h.token, "host")).webSocket!;
     host.accept();
     const welcome = await message(host);
-    const dr = await socket(
+    const data = (
+      await socket(h.id, h.token, "host", routes.relay, welcome.peer as string)
+    ).webSocket!;
+    data.accept();
+    await message(data);
+    data.close(1000, "lost response channel");
+    const replacement = await socket(
       h.id,
       h.token,
       "host",
       routes.relay,
       welcome.peer as string,
     );
-    const data = dr.webSocket!;
-    data.accept();
-    await message(data);
-    const closed = new Promise<CloseEvent>((resolve) =>
-      host.addEventListener("close", resolve, { once: true }),
-    );
-    data.close(1000, "lost response channel");
-    expect((await closed).code).toBe(1013);
-    const replacement = await socket(h.id, h.token, "host");
     expect(replacement.status).toBe(101);
     replacement.webSocket!.accept();
+    await message(replacement.webSocket!);
+    expect(host.readyState).toBe(WebSocket.OPEN);
+    const status = await post(routes.status, { hosts: [h.id] }, h.token);
+    expect(
+      ((await status.json()) as { devices: { online: boolean }[] }).devices[0]
+        .online,
+    ).toBe(true);
     replacement.webSocket!.close();
+    host.close();
   });
   it("does not forward relay requests into a host with no reply socket", async () => {
     const h = await register(true),
@@ -209,10 +308,13 @@ describe("device authorization and separated ingress", () => {
     data.accept();
     await message(data);
     const closed = new Promise<CloseEvent>((resolve) =>
-      host.addEventListener("close", resolve, { once: true }),
+      data.addEventListener("close", resolve, { once: true }),
     );
     data.send(JSON.stringify({ kind: "chunk", body: "opaque" }));
-    expect((await closed).code).toBe(1013);
+    expect((await closed).code).toBe(1008);
+    expect(host.readyState).toBe(WebSocket.OPEN);
+    expect(client.readyState).toBe(WebSocket.OPEN);
+    host.close();
     client.close();
     data.close();
   });

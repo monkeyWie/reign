@@ -63,7 +63,7 @@ func (s *State) connectionProblem(id string) bool {
 		}
 	}
 	h := s.connection(id)
-	if len(h.issues) > 0 || h.reconnecting || id != "" && len(s.connection("").issues) > 0 {
+	if len(h.issues) > 0 || h.reconnecting || id != "" && s.connection("").issues["presence"] != "" {
 		return true
 	}
 	for _, d := range s.devices {
@@ -149,7 +149,7 @@ func (s *State) connectionDetails(id string) string {
 		unique[value] = true
 	}
 	if id != "" {
-		for _, value := range s.connection("").issues {
+		if value := s.connection("").issues["presence"]; value != "" {
 			unique[value] = true
 		}
 	}
@@ -160,6 +160,25 @@ func (s *State) connectionDetails(id string) string {
 	sort.Strings(lines)
 	return strings.Join(lines, "\n\n")
 }
+
+// A verified handshake starts a fresh state epoch. Late local-state/catalogue
+// results from the previous transport must not overwrite the successful result.
+func (s *State) acceptConnection(id string, devices []Object) {
+	s.presenceGeneration++
+	s.presencePolling = false
+	if s.pollCancel != nil {
+		s.pollCancel()
+		s.pollCancel = nil
+	}
+	s.pollGeneration++
+	s.polling = false
+	s.devices = devices
+	h := s.connection(id)
+	h.established = true
+	h.issues = map[string]string{}
+	delete(s.connection("").issues, "presence")
+}
+
 func (s *State) reconnectDevice(id string) { s.reconnect(id, false) }
 
 func (s *State) reconnect(id string, automatic bool) {
@@ -232,8 +251,7 @@ func (s *State) reconnect(id string, automatic bool) {
 			h.reconnecting = false
 			s.setConnectionIssue(id, "reconnect", err)
 			if err == nil {
-				h.established = true
-				s.devices = objects(v)
+				s.acceptConnection(id, objects(v))
 				if id == s.target {
 					s.startSessionWatch()
 				}
@@ -262,6 +280,9 @@ func (s *State) setBackground(background bool) {
 	}
 	s.suspended = background
 	if background {
+		if s.directoryCancel != nil {
+			s.directoryCancel()
+		}
 		if s.pollCancel != nil {
 			s.pollCancel()
 			s.pollCancel = nil
@@ -282,6 +303,7 @@ func (s *State) setBackground(background bool) {
 		delete(s.retrying, id)
 	}
 	s.refreshTimezone()
+	s.directoryChecked = time.Time{}
 	// A socket can look open after the OS suspended its network. Probe each
 	// previously connected device immediately instead of waiting for a heartbeat.
 	for _, d := range s.devices {

@@ -59,6 +59,10 @@ type State struct {
 	pollGeneration                                          uint64
 	presencePolling                                         bool
 	presenceGeneration                                      uint64
+	devicePresence                                          map[string]Object
+	directoryChecking                                       bool
+	directoryChecked                                        time.Time
+	directoryCancel                                         context.CancelFunc
 	timezone                                                *time.Location
 	timeline                                                *core.Ref
 	pendingSends                                            map[string]string
@@ -265,6 +269,7 @@ func (s *State) pollPresence() {
 			s.setConnectionIssue("", "presence", err)
 			if err == nil {
 				s.devices = objects(v)
+				s.refreshDevicePresence()
 			}
 			s.changed()
 			s.autoReconnect()

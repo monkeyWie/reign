@@ -238,3 +238,51 @@ func TestReconnectStatusShowsAnimatedIndicator(t *testing.T) {
 	app.Find("role:button 正在重新连接")
 	app.Screenshot("phone-connection-retrying")
 }
+
+type stalePresenceAPI struct {
+	*connectionFixture
+	started, release chan struct{}
+}
+
+func (f *stalePresenceAPI) Call(ctx context.Context, method string, p Object, target string, r Object) (any, error) {
+	if method == "client.list" {
+		close(f.started)
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-f.release:
+		}
+		return []Object{{"id": "demo-device", "connected": false}}, nil
+	}
+	return f.connectionFixture.Call(ctx, method, p, target, r)
+}
+
+func TestVerifiedConnectionImmediatelyUpdatesIconAndIgnoresStalePresence(t *testing.T) {
+	f := &stalePresenceAPI{connectionFixture: &connectionFixture{demoAPI: newDemoAPI()}, started: make(chan struct{}), release: make(chan struct{})}
+	app, s := conversationFixture(t, f, 390, Object{}, false)
+	app.Post(func() {
+		s.cx.Post(func() {
+			s.setConnectionIssue("demo-device", "watch", errors.New("relay 已断开"))
+			s.setConnectionIssue("", "catalogue", errors.New("local provider unavailable"))
+			s.pollPresence()
+		})
+	})
+	app.WaitUntil(time.Second, func() bool {
+		select {
+		case <-f.started:
+			return true
+		default:
+			return false
+		}
+	})
+	app.Post(func() {
+		s.cx.Post(func() {
+			s.acceptConnection("demo-device", []Object{{"id": "demo-device", "connected": true, "path": "P2P · WebRTC"}})
+			s.changed()
+		})
+	})
+	app.WaitFor("role:button 连接正常", time.Second)
+	close(f.release)
+	app.WaitUntil(time.Second, func() bool { return !s.presencePolling })
+	app.Find("role:button 连接正常")
+}
