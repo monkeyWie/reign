@@ -68,7 +68,7 @@ final class QrCamera implements NsgoComponent, TextureView.SurfaceTextureListene
     }
     void permissionResult() {
         if (activity.checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) resume();
-        else fail("相机权限未开启，请在系统设置中允许 RAS 使用相机；也可从相册识别或手动输入设备 ID。");
+        else fail("相机权限未开启，请在系统设置中允许 ReignHub 使用相机；也可从相册识别或手动输入设备 ID。");
     }
     void resume() {
         if (destroyed || !active || !activity.resumed || delivered.get()) return;

@@ -221,7 +221,7 @@ func (p *Provider) attachmentInput(session, message string, ids []string) ([]any
 		}
 	}
 	if len(files) > 0 {
-		input = append(input, map[string]string{"type": "text", "text": "\nAgent Hub 上传的附件（已保存在本机，可按需读取）：\n" + strings.Join(files, "\n")})
+		input = append(input, map[string]string{"type": "text", "text": "\nReignHub 上传的附件（已保存在本机，可按需读取）：\n" + strings.Join(files, "\n")})
 	}
 	if len(input) == 0 {
 		return nil, fmt.Errorf("消息不能为空")

@@ -40,7 +40,7 @@ func Run(c config.Config, key string, local control.Caller) error {
 	a := &window{cfg: c, key: key, local: local, providerID: "codex", relayURL: c.RelayURL, relayToken: c.RelayToken, stun: strings.Join(c.STUN, ",")}
 	a.updatePairing()
 	mygo.App.WhenReady(func() {
-		a.win = mygo.NewWindow(mygo.WindowOptions{Title: "Agent Hub · 主机", Width: 1040, Height: 800, Content: ui.View(a.view)})
+		a.win = mygo.NewWindow(mygo.WindowOptions{Title: "ReignHub · 主机", Width: 1040, Height: 800, Content: ui.View(a.view)})
 		a.refresh()
 		go func() {
 			ticker := time.NewTicker(2 * time.Second)

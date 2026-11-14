@@ -187,15 +187,20 @@ func displayText(m Message) string {
 			body = strings.TrimSpace(body[i+len(marker):])
 		}
 	}
-	const upload = "RAS 上传的附件（已保存在本机，可按需读取）："
-	if i := strings.Index(body, upload); i >= 0 {
-		entries := attachmentLink.FindAllStringSubmatch(body[i:], -1)
-		valid := len(entries) > 0
-		for _, e := range entries {
-			valid = valid && sources[e[1]]
-		}
-		if valid {
-			body = strings.TrimSpace(body[:i])
+	for _, upload := range []string{
+		"ReignHub 上传的附件（已保存在本机，可按需读取）：",
+		"Agent Hub 上传的附件（已保存在本机，可按需读取）：",
+		"RAS 上传的附件（已保存在本机，可按需读取）：",
+	} {
+		if i := strings.Index(body, upload); i >= 0 {
+			entries := attachmentLink.FindAllStringSubmatch(body[i:], -1)
+			valid := len(entries) > 0
+			for _, e := range entries {
+				valid = valid && sources[e[1]]
+			}
+			if valid {
+				body = strings.TrimSpace(body[:i])
+			}
 		}
 	}
 	return body

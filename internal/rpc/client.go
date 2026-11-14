@@ -68,7 +68,7 @@ func Dial(ctx context.Context, endpoint string, observer Observer) (*Client, err
 	c := &Client{conn: conn, pending: make(map[string]chan Message), ctx: life, cancel: cancel, done: make(chan struct{}), observer: observer}
 	go c.readLoop()
 	var initialized json.RawMessage
-	err = c.Call(ctx, "initialize", map[string]any{"clientInfo": map[string]string{"name": "agenthub", "title": "Agent Hub", "version": "0.1.0"}, "capabilities": map[string]bool{"experimentalApi": true}}, &initialized)
+	err = c.Call(ctx, "initialize", map[string]any{"clientInfo": map[string]string{"name": "reignhub", "title": "ReignHub", "version": "0.1.0"}, "capabilities": map[string]bool{"experimentalApi": true}}, &initialized)
 	if err == nil {
 		err = c.Notify(ctx, "initialized", map[string]any{})
 	}

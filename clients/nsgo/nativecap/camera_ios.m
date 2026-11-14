@@ -45,10 +45,10 @@ extern void rasQrEvent(uint64_t token, char *name, char *value);
     AVAuthorizationStatus status=[AVCaptureDevice authorizationStatusForMediaType:AVMediaTypeVideo];
     if (status==AVAuthorizationStatusNotDetermined) {
         [AVCaptureDevice requestAccessForMediaType:AVMediaTypeVideo completionHandler:^(BOOL granted){
-            dispatch_async(dispatch_get_main_queue(), ^{ if(granted) [self start]; else [self emit:@"error" text:@"相机权限未开启，请在系统设置中允许 RAS 使用相机；也可从相册识别或手动输入设备 ID。"]; });
+            dispatch_async(dispatch_get_main_queue(), ^{ if(granted) [self start]; else [self emit:@"error" text:@"相机权限未开启，请在系统设置中允许 ReignHub 使用相机；也可从相册识别或手动输入设备 ID。"]; });
         }]; return;
     }
-    if (status!=AVAuthorizationStatusAuthorized) { [self emit:@"error" text:@"相机权限未开启，请在系统设置中允许 RAS 使用相机。"]; return; }
+    if (status!=AVAuthorizationStatusAuthorized) { [self emit:@"error" text:@"相机权限未开启，请在系统设置中允许 ReignHub 使用相机。"]; return; }
     if (_configuring) return;
     _configuring=YES;
     dispatch_async(_queue, ^{

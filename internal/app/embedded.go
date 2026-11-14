@@ -86,7 +86,7 @@ func (r *Embedded) Call(ctx context.Context, req control.Request, out any) error
 	r.calls.RLock()
 	defer r.calls.RUnlock()
 	if r.closed || r.ctx.Err() != nil {
-		return fmt.Errorf("Agent Hub 已退出")
+		return fmt.Errorf("ReignHub 已退出")
 	}
 	callCtx, cancel := context.WithCancel(ctx)
 	stop := context.AfterFunc(r.ctx, cancel)
