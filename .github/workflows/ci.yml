@@ -261,6 +261,19 @@ jobs:
             sleep 1
           done
           pnpm exec tsx scripts/platform/smoke-worker.mts http://127.0.0.1:8787
+      - name: Configure isolated headless Chrome
+        run: |
+          browser_bin=$(command -v google-chrome || command -v google-chrome-stable || command -v chromium)
+          test -n "$browser_bin"
+          echo "REIGNHUB_TEST_CHROME=$browser_bin" >> "$GITHUB_ENV"
+          cat > "$RUNNER_TEMP/nsgo-chrome" <<'EOF'
+          #!/usr/bin/env bash
+          # CI has no user profile or credentials. Its restricted Linux sandbox
+          # cannot always create Chromium's nested user namespace.
+          exec "$REIGNHUB_TEST_CHROME" --no-sandbox --disable-dev-shm-usage "$@" 2>> "$RUNNER_TEMP/nsgo-chrome.log"
+          EOF
+          chmod +x "$RUNNER_TEMP/nsgo-chrome"
+          echo "NSGO_BROWSER=$RUNNER_TEMP/nsgo-chrome" >> "$GITHUB_ENV"
       - name: Verify shared NSGo browser UI and real WebRTC/relay transport
         working-directory: clients/nsgo
         run: |
@@ -268,14 +281,21 @@ jobs:
           fixture_pid=$!
           trap 'kill "$fixture_pid" 2>/dev/null || true' EXIT
           for attempt in $(seq 1 60); do
-            if head -1 /tmp/reignhub-browser-fixture.log | rg -q '^http://127.0.0.1:'; then break; fi
+            if IFS= read -r fixture_url < /tmp/reignhub-browser-fixture.log && [[ "$fixture_url" == http://127.0.0.1:* ]]; then break; fi
             sleep 1
           done
-          fixture_url=$(head -1 /tmp/reignhub-browser-fixture.log)
+          if [[ "$fixture_url" != http://127.0.0.1:* ]]; then
+            cat /tmp/reignhub-browser-fixture.log
+            exit 1
+          fi
           go tool nsgo test -target web -env "AGENTHUB_NSGO_TEST_FIXTURE=$fixture_url" \
             -run 'TestBrowserP2PAndRelayWithExistingHost|TestBrowserDirectWithoutRelay' ./browserclient
           go tool nsgo test -target web \
-            -run 'TestDesktopNavigationAndDrafts|TestPhoneNavigation|TestComposerSubmit|TestWebNativePresentationParity' ./hubui
+            -run 'TestDesktopNavigationAndDrafts|TestPhoneNavigation|TestComposerSubmit|TestWebNativePresentationParity|TestReconnectStatusShowsAnimatedIndicator|TestImageMarkersAreNotUserMessageText|TestMessageTimesUseControllerTimezone' ./hubui
+      - name: Browser diagnostics
+        if: failure()
+        run: |
+          tail -80 "$RUNNER_TEMP/nsgo-chrome.log" /tmp/reignhub-browser-fixture.log 2>/dev/null || true
       - run: pnpm exec wrangler deploy --dry-run --outdir build/worker
       - name: Package deployable Worker and NSGo assets
         run: python3 scripts/platform/package-worker.py --version "$VERSION" --output dist/release
