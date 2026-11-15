@@ -38,6 +38,10 @@ func checkUnsupportedApp(t *testing.T, width, height core.Points, name string) {
 		app.Press("id:home")
 	}
 	app.WaitFor("text:已安装 · Windows 已支持 Codex App 检测，暂不支持接入远控", 3*time.Second)
+	status := app.Find("text:已安装 · Windows 已支持 Codex App 检测，暂不支持接入远控")
+	if status.Frame.Size.Width > width {
+		t.Fatalf("provider status overflows viewport: %v > %v", status.Frame.Size.Width, width)
+	}
 	if app.Exists("id:enable-codex-app") {
 		t.Fatal("unsupported App offered activation")
 	}

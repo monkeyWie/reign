@@ -4,7 +4,7 @@
 
 - Windows amd64，Go 1.27.3：`go test ./internal/system ./internal/codex ./internal/provider` 与 `go vet ./internal/system ./internal/codex` 通过。
 - 显式设置 `REIGNHUB_TEST_INSTALLED_CODEX=1` 后运行 `TestInstalledCodexReadOnly`，识别 `OpenAI.Codex` 26.1027.3384.0、清单入口 `app/ChatGPT.exe`、包内 `app/resources/codex.exe`，仅计 1 个桌面主实例。没有启动或重启真实 App / Agent，也没有发送模型请求。
-- NSGo 的 `TestInstalledUnsupportedAppDoesNotOfferEnable` 与 `TestDesktopNavigationAndDrafts` 通过：已安装但不支持接入的 App 显示原因并隐藏启用按钮，CLI 启用入口保留。
+- NSGo 的 `TestInstalledUnsupportedAppDoesNotOfferEnable`、窄屏变体与 `TestDesktopNavigationAndDrafts` 通过：已安装但不支持接入的 App 显示原因并隐藏启用按钮，CLI 启用入口保留。真实浏览器回归通过并检查桌面、窄屏截图；状态文字在窄屏自动换行。
 - `internal/system` 测试程序的 macOS / Linux / Windows arm64 交叉编译，以及 `internal/codex` 的 macOS / Linux arm64 交叉编译通过；用 `go list` 核对 Windows、macOS、Linux、Android、iOS 的编译文件集合。iOS 显式排除 macOS 桌面实现。
 - 扩大运行 `internal/app` / `internal/host` 时，4 个测试在 Windows 清理临时 `devices.json` / `devices.db` / `registry.json` 时因文件占用失败。在独立导出的未修改 HEAD 上运行同样 4 个测试，复现相同失败。此次未修改该问题。
 
