@@ -214,7 +214,7 @@ func TestRelayAndP2P(t *testing.T) {
 				t.Fatalf("executed %d times", fake.sends.Load())
 			}
 			if relayOnly {
-				_ = client.wire.dataWS.CloseNow()
+				_ = client.wire.relaySocket().CloseNow()
 				waitFor(t, func() bool { return client.Path() == "Disconnected" })
 				probeCtx, stop := context.WithTimeout(ctx, time.Second)
 				defer stop()
@@ -243,7 +243,7 @@ func TestRelayAndP2P(t *testing.T) {
 				}
 				if tc.directOnly {
 					waitFor(t, func() bool { return client.Path() == "Disconnected" })
-					if client.wire.dataWS != nil {
+					if client.wire.relaySocket() != nil {
 						t.Fatal("free connection opened relay")
 					}
 					short, stop := context.WithTimeout(ctx, 100*time.Millisecond)

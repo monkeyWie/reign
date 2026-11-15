@@ -61,14 +61,13 @@ type Client struct {
 	ctx          context.Context
 	cancel       context.CancelFunc
 	ws           *websocket.Conn
-	dataWS       *websocket.Conn
+	dataWS       atomic.Pointer[websocket.Conn]
 	p            Pairing
 	id, nonce    string
 	base, crypto *cryptor
 	ready        chan struct{}
 	readyOnce    sync.Once
 	closeOnce    sync.Once
-	relayDone    chan struct{}
 	heartbeat    atomic.Int64
 	relayBeat    atomic.Int64
 	signalLost   atomic.Bool
@@ -107,7 +106,7 @@ func Connect(ctx context.Context, p Pairing) (*Client, error) {
 	connectivity.Note(ctx, "signal", "signal", "信令连接已建立", u.Host, "success")
 	// Connection lifetime outlives pairing and all ordinary business requests.
 	life, cancel := context.WithCancel(context.Background())
-	c := &Client{ctx: life, cancel: cancel, ws: ws, p: p, id: welcome.Peer, nonce: id() + id(), ready: make(chan struct{}), relayDone: make(chan struct{}), pending: map[string]chan Object{}, chunks: map[string]*assembly{}, cache: map[string]cached{}, progress: connectivity.Observer(ctx)}
+	c := &Client{ctx: life, cancel: cancel, ws: ws, p: p, id: welcome.Peer, nonce: id() + id(), ready: make(chan struct{}), pending: map[string]chan Object{}, chunks: map[string]*assembly{}, cache: map[string]cached{}, progress: connectivity.Observer(ctx)}
 	c.heartbeat.Store(time.Now().UnixNano())
 	c.base, e = newCryptor(sum("reign/p2p/peer/" + c.id + "/" + p.Key))
 	if e != nil {
@@ -116,51 +115,27 @@ func Connect(ctx context.Context, p Pairing) (*Client, error) {
 	}
 	c.base.random = true
 	if welcome.AllowRelay {
-		connectivity.Report(ctx, "relay-ready", "准备备用中继通道", connectivity.StageTimeout)
 		u.Path = "/p2p/relay"
 		q := u.Query()
 		q.Set("peer", c.id)
 		u.RawQuery = q.Encode()
 		connectivity.Note(ctx, "relay-endpoint", "relay", "中继服务地址", u.Scheme+"://"+u.Host+u.Path, "info")
-		relayCtx, stop := context.WithTimeout(ctx, connectivity.StageTimeout)
-		data, f, err := openSocket(relayCtx, u.String(), p.Token)
-		stop()
-		if err == nil && f.Peer != c.id {
-			closeSocket(data)
-			err = errors.New("中继设备身份不匹配")
-		}
-		if err != nil {
-			if p.RelayOnly || ctx.Err() != nil {
+		if p.RelayOnly {
+			relayCtx, stop := context.WithTimeout(ctx, connectivity.StageTimeout)
+			data, err := c.openRelay(relayCtx, u.String())
+			stop()
+			if err != nil {
 				c.Close()
 				return nil, fmt.Errorf("建立备用中继连接失败: %w", err)
 			}
-			connectivity.Note(ctx, "relay-ready", "relay", "备用中继暂不可用，继续尝试 P2P 直连", err.Error(), "warning")
-		} else {
-			c.dataWS = data
-			c.relayBeat.Store(time.Now().UnixNano())
-			connectivity.Note(ctx, "relay-ready", "relay", "备用中继通道已就绪", u.Host+" · 优先直连", "success")
+			c.dataWS.Store(data)
 		}
+		// Optional relay setup follows the connection, not the pairing RPC.
+		go c.runRelay(u.String())
 	}
-	go func() {
-		defer close(c.relayDone)
-		if c.dataWS == nil {
-			return
-		}
-		defer closeSocket(c.dataWS)
-		for {
-			if _, _, err := c.dataWS.Read(life); err != nil {
-				c.note("relay-lost", "relay", "备用中继连接已断开", err.Error(), "warning")
-				return
-			}
-			c.relayBeat.Store(time.Now().UnixNano())
-		}
-	}()
 	go c.readLoop()
 	go c.keepAlive()
-	if c.dataWS != nil {
-		go c.keepRelayAlive()
-	}
-	if p.RelayOnly && c.dataWS == nil {
+	if p.RelayOnly && c.dataWS.Load() == nil {
 		c.Close()
 		return nil, errors.New("当前服务未提供中继权限，请尝试直连")
 	}
@@ -235,7 +210,7 @@ func Connect(ctx context.Context, p Pairing) (*Client, error) {
 	connectivity.Report(ctx, "verify", "正在验证设备响应", connectivity.StageTimeout)
 	go c.watchPaths()
 	verify, stop := context.WithTimeout(ctx, connectivity.StageTimeout)
-	_, e = c.Call(verify, Object{"method": "providers"})
+	_, e = c.Call(verify, Object{"method": "network"})
 	stop()
 	if e != nil {
 		c.Close()
@@ -245,15 +220,69 @@ func Connect(ctx context.Context, p Pairing) (*Client, error) {
 	return c, nil
 }
 
-func (c *Client) keepRelayAlive() {
+func (c *Client) openRelay(ctx context.Context, endpoint string) (*websocket.Conn, error) {
+	data, f, err := openSocket(ctx, endpoint, c.p.Token)
+	if err == nil && f.Peer != c.id {
+		_ = closeSocket(data)
+		err = errors.New("中继设备身份不匹配")
+	}
+	return data, err
+}
+
+func (c *Client) runRelay(endpoint string) {
+	for attempt := 0; c.ctx.Err() == nil && !c.signalLost.Load(); attempt++ {
+		if attempt > 0 {
+			timer := time.NewTimer(time.Duration(min(attempt, 10)) * time.Second)
+			select {
+			case <-c.ctx.Done():
+				timer.Stop()
+				return
+			case <-timer.C:
+			}
+		}
+		socket := c.dataWS.Load()
+		if socket == nil {
+			c.note("relay-ready", "relay", "后台准备备用中继通道", "与直连协商并行", "running")
+			setup, stop := context.WithTimeout(c.ctx, connectivity.StageTimeout)
+			data, err := c.openRelay(setup, endpoint)
+			stop()
+			if err != nil {
+				c.note("relay-ready", "relay", "备用中继暂不可用，继续尝试直连", err.Error(), "warning")
+				continue
+			}
+			socket = data
+			c.dataWS.Store(socket)
+		}
+		if c.ctx.Err() != nil {
+			c.dataWS.CompareAndSwap(socket, nil)
+			_ = closeSocket(socket)
+			return
+		}
+		c.relayBeat.Store(time.Now().UnixNano())
+		c.note("relay-ready", "relay", "备用中继通道已就绪", "直连优先，备用通道独立维护", "success")
+		life, cancel := context.WithCancel(c.ctx)
+		go c.keepRelayAlive(life, socket)
+		for {
+			if _, _, err := socket.Read(life); err != nil {
+				c.note("relay-lost", "relay", "备用中继连接已断开", err.Error(), "warning")
+				break
+			}
+			c.relayBeat.Store(time.Now().UnixNano())
+		}
+		cancel()
+		c.dataWS.CompareAndSwap(socket, nil)
+		_ = closeSocket(socket)
+		return
+	}
+}
+
+func (c *Client) keepRelayAlive(life context.Context, socket *websocket.Conn) {
 	tick := time.NewTicker(25 * time.Second)
 	defer tick.Stop()
 	lastTick := time.Now()
 	for {
 		select {
-		case <-c.ctx.Done():
-			return
-		case <-c.relayDone:
+		case <-life.Done():
 			return
 		case <-tick.C:
 			if time.Since(lastTick) > 45*time.Second {
@@ -262,15 +291,15 @@ func (c *Client) keepRelayAlive() {
 			lastTick = time.Now()
 			if time.Since(time.Unix(0, c.relayBeat.Load())) > 85*time.Second {
 				c.note("relay-heartbeat", "relay", "中继心跳未收到响应", "85s 内未收到中继控制帧", "warning")
-				closeSocket(c.dataWS)
+				closeSocket(socket)
 				return
 			}
-			ctx, stop := context.WithTimeout(c.ctx, 10*time.Second)
-			confirmed, err := pingSocket(ctx, c.dataWS)
+			ctx, stop := context.WithTimeout(life, 10*time.Second)
+			confirmed, err := pingSocket(ctx, socket)
 			stop()
 			if err != nil {
 				c.note("relay-heartbeat", "relay", "中继心跳发送失败", err.Error(), "warning")
-				closeSocket(c.dataWS)
+				closeSocket(socket)
 				return
 			}
 			if confirmed {
@@ -302,15 +331,7 @@ func (c *Client) note(id, stage, message, detail, state string) {
 	}
 }
 func (c *Client) relayAvailable() bool {
-	if c.signalLost.Load() || c.dataWS == nil {
-		return false
-	}
-	select {
-	case <-c.relayDone:
-		return false
-	default:
-		return true
-	}
+	return !c.signalLost.Load() && c.dataWS.Load() != nil
 }
 
 func (c *Client) recoveringICE() bool {
@@ -434,8 +455,8 @@ func (c *Client) relaySend(kind string, b []byte) error {
 	defer cancel()
 	socket := c.ws
 	if kind == "chunk" || kind == "data" {
-		socket = c.dataWS
-		if !c.relayAvailable() {
+		socket = c.dataWS.Load()
+		if socket == nil || c.signalLost.Load() {
 			return errors.New("直连失败，服务未提供中继权限")
 		}
 	}
@@ -730,8 +751,8 @@ func (c *Client) Close() {
 		if c.ws != nil {
 			closeSocket(c.ws)
 		}
-		if c.dataWS != nil {
-			closeSocket(c.dataWS)
+		if socket := c.dataWS.Swap(nil); socket != nil {
+			closeSocket(socket)
 		}
 		c.mu.Lock()
 		pc := c.pc

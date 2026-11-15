@@ -13,6 +13,46 @@ import (
 	"time"
 )
 
+func browserConnectLatency(t *testing.T) {
+	url := os.Getenv("AGENTHUB_NSGO_TEST_FIXTURE")
+	if url == "" {
+		t.Skip("requires isolated browser fixture")
+	}
+	r, err := http.Get(url + "/fixture-slow")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var p Pairing
+	err = json.NewDecoder(r.Body).Decode(&p)
+	r.Body.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	setup, stop := context.WithTimeout(context.Background(), 4*time.Second)
+	c, err := Connect(setup, p)
+	stop()
+	if err != nil {
+		t.Fatal("optional services blocked direct connection:", err)
+	}
+	defer c.Close()
+	if c.Path() != "P2P · WebRTC" || c.relayAvailable() {
+		t.Fatal("stalled relay was required before establishing P2P", c.Path())
+	}
+	deadline := time.After(8 * time.Second)
+	for !c.relayAvailable() {
+		select {
+		case <-deadline:
+			t.Fatal("ending the pairing RPC canceled the background relay")
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if _, err := c.Call(ctx, Object{"method": "network"}); err != nil {
+		t.Fatal("verified data path unavailable after background relay attached:", err)
+	}
+}
+
 func browserInterop(t *testing.T) {
 	url := os.Getenv("AGENTHUB_NSGO_TEST_FIXTURE")
 	if url == "" {
@@ -86,7 +126,7 @@ func browserDirectInterop(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer c.Close()
-	if c.dataWS != nil || !strings.HasPrefix(c.Path(), "P2P") {
+	if c.dataWS.Load() != nil || !strings.HasPrefix(c.Path(), "P2P") {
 		t.Fatal("free connection did not select direct-only path", c.Path())
 	}
 	// Simulate browser connection-state events without changing the underlying

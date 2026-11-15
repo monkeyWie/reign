@@ -39,9 +39,8 @@ type wire struct {
 	progressMu        sync.Mutex
 	progressLast      map[string]connectivity.Progress
 	ws                *websocket.Conn
-	dataWS            *websocket.Conn
 	signalLost        atomic.Bool
-	hostRelay         *hostRelayLink
+	relayLink         *relayLink
 	grantMu           sync.RWMutex
 	grant             string
 	crypto            *cryptor
@@ -93,8 +92,37 @@ func dialWithTimeout(ctx context.Context, p Pairing, role string, timeout time.D
 }
 
 func dialWithRelayPolicy(ctx context.Context, p Pairing, role string, timeout time.Duration, requireRelay bool) (*websocket.Conn, *websocket.Conn, string, error) {
-	if err := p.Validate(); err != nil {
+	ws, peer, allowRelay, err := dialSignal(ctx, p, role, timeout)
+	if err != nil {
 		return nil, nil, "", err
+	}
+	u, _ := url.Parse(relayEndpoint(p, role, peer))
+	var data *websocket.Conn
+	if allowRelay {
+		connectivity.Report(ctx, "relay-ready", "准备备用中继通道", timeout)
+		connectivity.Note(ctx, "relay-endpoint", "relay", "中继服务地址", u.Scheme+"://"+u.Host+"/p2p/relay", "info")
+		relayCtx, stopRelay := context.WithTimeout(ctx, timeout)
+		defer stopRelay()
+		u.Path = "/p2p/relay"
+		data, err = openRelaySocket(relayCtx, u.String(), p.RelayToken, peer)
+		if err != nil {
+			if requireRelay || ctx.Err() != nil {
+				ws.CloseNow()
+				return nil, nil, "", err
+			}
+			connectivity.Note(ctx, "relay-ready", "relay", "备用中继暂不可用，继续尝试 P2P 直连", err.Error(), "warning")
+		}
+	}
+	if data != nil {
+		connectivity.Note(ctx, "relay-ready", "relay", "备用中继通道已就绪", u.Host+"/p2p/relay · 优先直连", "success")
+	} else if !allowRelay {
+		connectivity.Note(ctx, "relay-ready", "relay", "此服务未授予中继权限", u.Host, "warning")
+	}
+	return ws, data, peer, nil
+}
+func dialSignal(ctx context.Context, p Pairing, role string, timeout time.Duration) (*websocket.Conn, string, bool, error) {
+	if err := p.Validate(); err != nil {
+		return nil, "", false, err
 	}
 	u, _ := url.Parse(p.Relay)
 	u.Path = "/p2p/signal"
@@ -107,50 +135,39 @@ func dialWithRelayPolicy(ctx context.Context, p Pairing, role string, timeout ti
 	defer stopSignal()
 	ws, resp, err := dialWebSocket(signalCtx, u.String(), p.RelayToken, "signal")
 	if err != nil {
-		return nil, nil, "", websocketDialFailure("建立信令连接", resp, err)
+		return nil, "", false, websocketDialFailure("建立信令连接", resp, err)
 	}
 	ws.SetReadLimit(2 << 20)
 	_, raw, err := ws.Read(signalCtx)
 	if err != nil {
 		ws.CloseNow()
-		return nil, nil, "", fmt.Errorf("等待信令服务响应失败: %w", err)
+		return nil, "", false, fmt.Errorf("等待信令服务响应失败: %w", err)
 	}
 	stopSignal()
 	var f relay.Frame
 	if json.Unmarshal(raw, &f) != nil || f.Kind != "welcome" || f.Peer == "" {
 		ws.CloseNow()
-		return nil, nil, "", errors.New("invalid relay handshake")
+		return nil, "", false, errors.New("invalid relay handshake")
 	}
 	if f.Protocol != 1 {
 		ws.CloseNow()
-		return nil, nil, "", errors.New("unsupported service protocol")
+		return nil, "", false, errors.New("unsupported service protocol")
 	}
 	connectivity.Note(ctx, "signal", "signal", "信令连接已建立", u.Scheme+"://"+u.Host+"/p2p/signal", "success")
-	var data *websocket.Conn
-	if f.AllowRelay {
-		connectivity.Report(ctx, "relay-ready", "准备备用中继通道", timeout)
-		connectivity.Note(ctx, "relay-endpoint", "relay", "中继服务地址", u.Scheme+"://"+u.Host+"/p2p/relay", "info")
-		relayCtx, stopRelay := context.WithTimeout(ctx, timeout)
-		defer stopRelay()
-		u.Path = "/p2p/relay"
-		q.Set("peer", f.Peer)
-		u.RawQuery = q.Encode()
-		data, err = openRelaySocket(relayCtx, u.String(), p.RelayToken, f.Peer)
-		if err != nil {
-			if requireRelay || ctx.Err() != nil {
-				ws.CloseNow()
-				return nil, nil, "", err
-			}
-			connectivity.Note(ctx, "relay-ready", "relay", "备用中继暂不可用，继续尝试 P2P 直连", err.Error(), "warning")
-		}
-	}
-	if data != nil {
-		connectivity.Note(ctx, "relay-ready", "relay", "备用中继通道已就绪", u.Host+"/p2p/relay · 优先直连", "success")
-	} else if !f.AllowRelay {
-		connectivity.Note(ctx, "relay-ready", "relay", "此服务未授予中继权限", u.Host, "warning")
-	}
-	return ws, data, f.Peer, nil
+	return ws, f.Peer, f.AllowRelay, nil
 }
+
+func relayEndpoint(p Pairing, role, peer string) string {
+	u, _ := url.Parse(p.Relay)
+	u.Path = "/p2p/relay"
+	q := u.Query()
+	q.Set("id", p.Host)
+	q.Set("role", role)
+	q.Set("peer", peer)
+	u.RawQuery = q.Encode()
+	return u.String()
+}
+
 func newWire(ctx context.Context, ws *websocket.Conn, peer, key string, host bool, opts Options, onData func([]byte)) (*wire, error) {
 	derived := sha256.Sum256([]byte("reign/p2p/peer/" + peer + "/" + key))
 	crypto, err := newCryptor(hex.EncodeToString(derived[:]))
@@ -218,10 +235,10 @@ func (w *wire) receive(f relay.Frame) {
 	}
 }
 func (w *wire) relaySocket() *websocket.Conn {
-	if w.hostRelay != nil {
-		return w.hostRelay.socket.Load()
+	if w.relayLink != nil {
+		return w.relayLink.socket.Load()
 	}
-	return w.dataWS
+	return nil
 }
 
 func (w *wire) path() string {

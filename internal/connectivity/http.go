@@ -1,6 +1,7 @@
 package connectivity
 
 import (
+	"context"
 	"net"
 	"net/http"
 	"runtime"
@@ -17,6 +18,9 @@ var ConnectionHTTPClient = func() *http.Client {
 		transport.DialContext = nil
 	} else {
 		transport.DialContext = (&net.Dialer{Timeout: StageTimeout, KeepAlive: 30 * time.Second}).DialContext
+		transport.DialTLSContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+			return dialTLSWithFallback(ctx, network, address, transport.TLSClientConfig)
+		}
 	}
 	transport.TLSHandshakeTimeout = StageTimeout
 	return &http.Client{Timeout: StageTimeout, Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}

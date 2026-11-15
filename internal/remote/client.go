@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/coder/websocket"
 	"github.com/monkeyWie/reignhub/internal/connectivity"
 	"github.com/monkeyWie/reignhub/internal/control"
 	"github.com/monkeyWie/reignhub/internal/relay"
@@ -20,7 +21,6 @@ type Client struct {
 	mu         sync.Mutex
 	pending    map[string]chan control.Response
 	done       chan struct{}
-	relayDone  chan struct{}
 	cache      map[string]snapshot
 	cacheBytes int
 }
@@ -31,11 +31,20 @@ func Connect(ctx context.Context, p Pairing, opts Options) (*Client, error) {
 	} else {
 		ctx = connectivity.WithProgress(ctx, opts.Progress)
 	}
-	ws, dataWS, peer, err := dialWithRelayPolicy(ctx, p, "client", connectivity.StageTimeout, opts.RelayOnly)
+	var ws, dataWS *websocket.Conn
+	var peer string
+	var allowRelay bool
+	var err error
+	if opts.RelayOnly {
+		ws, dataWS, peer, err = dialWithRelayPolicy(ctx, p, "client", connectivity.StageTimeout, true)
+		allowRelay = dataWS != nil
+	} else {
+		ws, peer, allowRelay, err = dialSignal(ctx, p, "client", connectivity.StageTimeout)
+	}
 	if err != nil {
 		return nil, err
 	}
-	c := &Client{pending: make(map[string]chan control.Response), done: make(chan struct{}), relayDone: make(chan struct{})}
+	c := &Client{pending: make(map[string]chan control.Response), done: make(chan struct{})}
 	w, err := newWire(context.Background(), ws, peer, p.Key, false, opts, func(data []byte) {
 		var r control.Response
 		if json.Unmarshal(data, &r) != nil {
@@ -56,21 +65,19 @@ func Connect(ctx context.Context, p Pairing, opts Options) (*Client, error) {
 		return nil, err
 	}
 	c.wire = w
-	w.dataWS = dataWS
+	w.relayLink = &relayLink{}
+	w.relayLink.socket.Store(dataWS)
 	go func() {
 		<-w.ctx.Done()
 		_ = ws.CloseNow()
 		close(c.done)
 	}()
-	go func() {
-		defer close(c.relayDone)
-		if err := drainRelay(w.ctx, dataWS); err != nil {
-			w.progress("relay-lost", "relay", "备用中继连接已断开", err.Error(), "warning")
-		}
-	}()
 	go keepAlive(w.ctx, ws)
-	if dataWS != nil {
-		go keepSocketAlive(w.ctx, dataWS, false)
+	if allowRelay {
+		// The pairing RPC's context ends after Connect returns. Optional relay
+		// setup belongs to the live wire and must not gate handshake or ICE.
+		relayCtx := connectivity.WithProgress(w.ctx, opts.Progress)
+		go w.relayLink.run(relayCtx, p, "client", peer, nil)
 	}
 	go func() {
 		defer ws.CloseNow()
@@ -100,7 +107,7 @@ func Connect(ctx context.Context, p Pairing, opts Options) (*Client, error) {
 	}
 	connectivity.Note(ctx, "handshake", "handshake", "端到端加密握手完成", "已验证设备配对密钥", "success")
 	message := "正在尝试 P2P 直连；暂无可用的备用中继通道"
-	if dataWS != nil {
+	if allowRelay {
 		message = "优先尝试 P2P 直连，必要时自动使用中继"
 	}
 	if opts.RelayOnly {
@@ -127,7 +134,7 @@ func Connect(ctx context.Context, p Pairing, opts Options) (*Client, error) {
 	defer stopVerify()
 	// Prove possession of the pairing key before presenting a connected UI.
 	var statuses json.RawMessage
-	if err = c.Call(verifyCtx, control.Request{Method: "providers"}, &statuses); err != nil {
+	if err = c.Call(verifyCtx, control.Request{Method: "network"}, &statuses); err != nil {
 		c.Close()
 		return nil, fmt.Errorf("配对验证失败: %w", err)
 	}
@@ -202,18 +209,14 @@ func (c *Client) Path() string {
 	if strings.HasPrefix(path, "P2P") {
 		return path
 	}
-	select {
-	case <-c.relayDone:
+	if c.wire.relaySocket() == nil {
 		return "Disconnected"
-	default:
-		return path
 	}
+	return path
 }
 func (c *Client) Close() error {
-	if c.wire.dataWS != nil {
-		c.wire.dataWS.CloseNow()
-	}
 	c.wire.close()
+	c.wire.relayLink.close()
 	return c.wire.ws.CloseNow()
 }
 func (c *Client) Call(ctx context.Context, r control.Request, out any) error {

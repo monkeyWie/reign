@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/coder/websocket"
 	"github.com/monkeyWie/reignhub/internal/connectivity"
 	"github.com/monkeyWie/reignhub/internal/control"
 	"github.com/monkeyWie/reignhub/internal/relay"
@@ -37,7 +38,16 @@ func serveHost(ctx context.Context, p Pairing, opts Options, d *control.Dispatch
 	return serveHostObserved(ctx, p, opts, d, nil)
 }
 func serveHostObserved(ctx context.Context, p Pairing, opts Options, d *control.Dispatcher, status *HostStatus) error {
-	ws, dataWS, hostPeer, err := dialWithRelayPolicy(ctx, p, "host", connectivity.StageTimeout, opts.RelayOnly)
+	var ws, dataWS *websocket.Conn
+	var hostPeer string
+	var allowRelay bool
+	var err error
+	if opts.RelayOnly {
+		ws, dataWS, hostPeer, err = dialWithRelayPolicy(ctx, p, "host", connectivity.StageTimeout, true)
+		allowRelay = dataWS != nil
+	} else {
+		ws, hostPeer, allowRelay, err = dialSignal(ctx, p, "host", connectivity.StageTimeout)
+	}
 	if err != nil {
 		return err
 	}
@@ -47,18 +57,20 @@ func serveHostObserved(ctx context.Context, p Pairing, opts Options, d *control.
 	}
 	if dataWS != nil {
 		status.set("connected", "信令与备用中继已连接，等待控制端配对")
+	} else if allowRelay {
+		status.set("connected", "信令已连接，直连可用，备用中继在后台准备")
 	} else {
 		status.set("connected", "信令已连接，可尝试 P2P 直连；暂无可用中继")
 	}
 	life, cancel := context.WithCancel(ctx)
 	defer cancel()
 	go keepAlive(life, ws)
-	var replyRelay *hostRelayLink
-	if dataWS != nil {
-		replyRelay = &hostRelayLink{}
+	var replyRelay *relayLink
+	if allowRelay {
+		replyRelay = &relayLink{}
 		replyRelay.socket.Store(dataWS)
 		defer replyRelay.close()
-		go replyRelay.run(life, p, hostPeer, status)
+		go replyRelay.run(life, p, "host", hostPeer, status)
 	}
 	peers := map[string]*wire{}
 	defer func() {
@@ -181,8 +193,7 @@ func serveHostObserved(ctx context.Context, p Pairing, opts Options, d *control.
 				continue
 			}
 			peer.device = deviceID
-			peer.dataWS = dataWS
-			peer.hostRelay = replyRelay
+			peer.relayLink = replyRelay
 			peer.grant = f.Grant
 			w = peer
 			peers[f.Peer] = w

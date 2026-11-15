@@ -74,7 +74,7 @@ func TestBusinessRequestFollowsConnectionLifetime(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("second request not dispatched")
 	}
-	_ = c.wire.dataWS.CloseNow()
+	_ = c.wire.relaySocket().CloseNow()
 	select {
 	case err := <-result:
 		if err == nil {
