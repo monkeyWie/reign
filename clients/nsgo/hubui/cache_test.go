@@ -97,7 +97,7 @@ func TestSavedDeviceOpensCachedMessagesWhileConnectingAndAfterFailure(t *testing
 		t.Fatal("connection gated editing or initiated reads before connecting")
 	}
 	f.connectResult <- errors.New("设备离线")
-	app.WaitFor("role:button 连接异常，点击查看详情", time.Second)
+	app.WaitFor("role:button 尚未连接，点击重试", time.Second)
 	app.Find("text:本地保存的完整消息")
 	if app.Exists("text:设备离线，显示本地缓存；连接恢复后同步最新消息。") {
 		t.Fatal("connection status must stay in the header, not below messages")

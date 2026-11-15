@@ -66,12 +66,13 @@ func TestAutomaticConnectionErrorsUseStatusInsteadOfOverlay(t *testing.T) {
 	openDemoChat(t, app)
 	app.Type("id:chat-input", "保留草稿")
 	f.broken.Store(true)
-	app.WaitFor("role:button 连接异常，点击查看详情", 4*time.Second)
+	app.Find("role:button 连接正常")
 	if app.Exists("id:error-banner") {
 		t.Fatal("automatic read failure showed an operation error")
 	}
 	app.Press("id:connection-status-demo-device")
 	app.WaitFor("id:connection-error-raw", time.Second)
+	app.Find("role:button 连接正常")
 	if raw := app.Find("id:connection-error-raw").Text; strings.Count(raw, "context deadline exceeded") != 1 {
 		t.Fatalf("duplicate details: %q", raw)
 	}

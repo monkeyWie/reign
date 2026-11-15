@@ -20,6 +20,7 @@ type connectionStep struct {
 
 type connectAttempt struct {
 	steps                          []connectionStep
+	events                         []connectionStep
 	target                         string
 	complete                       bool
 	savedPairing                   bool
@@ -49,6 +50,11 @@ func (s *State) connect(p Object) {
 	s.changed()
 	ctx = connectivity.WithProgress(ctx, func(p connectivity.Progress) {
 		s.cx.Post(func() {
+			if s.ctx.Err() == nil && a.complete && a.target != "" && s.connection(a.target).attempt != a {
+				s.logConnection(a.target, p.Stage, p.Message, p.Detail, p.State)
+				s.changed()
+				return
+			}
 			if s.ctx.Err() != nil || (s.connectAttempt != a && (a.target == "" || s.connection(a.target).attempt != a)) || !a.active && !a.complete {
 				return
 			}
@@ -144,6 +150,7 @@ func (a *connectAttempt) inherit(previous *connectAttempt) {
 	if previous == nil {
 		return
 	}
+	a.events = append(a.events, previous.events...)
 	for _, step := range previous.steps {
 		if !strings.HasPrefix(step.ID, "history:") {
 			step.ID = fmt.Sprintf("history:%d:%s", previous.started.UnixNano(), step.ID)
@@ -163,6 +170,8 @@ func (a *connectAttempt) inherit(previous *connectAttempt) {
 }
 
 func (a *connectAttempt) record(p connectivity.Progress) {
+	// Timeline rows update in place; the diagnostic history preserves transitions.
+	a.events = appendDiagnostic(a.events, p)
 	if p.ID == "" {
 		p.ID = p.Stage
 	}
@@ -237,7 +246,7 @@ func (s *State) connectionPanel(cx *core.Scope, id string, a *connectAttempt, in
 	}
 
 	header := []core.Node{}
-	if a != nil && a.active {
+	if a != nil && a.active || s.connectionRecovering(id) {
 		header = append(header, ui.Spinner{TestID: "connection-loading", Label: "正在连接", Variant: ui.SpinnerSpokes, Size: 16})
 	}
 	header = append(header, dynamicText(cx, func() string {
@@ -245,12 +254,12 @@ func (s *State) connectionPanel(cx *core.Scope, id string, a *connectAttempt, in
 		if a != nil && a.active {
 			return "正在连接"
 		}
-		if a != nil && a.err != "" {
+		if a != nil && a.err != "" && !s.connectionRecovering(id) {
 			summary, _ := connectionFailure(a)
 			return summary
 		}
 		if s.connectionProblem(id) {
-			return "连接暂时不可用"
+			return s.connectionTitle(id)
 		}
 		return "连接正常，消息会持续同步。"
 	}, 13, false), spacer())
@@ -325,6 +334,7 @@ func (s *State) connectionPanel(cx *core.Scope, id string, a *connectAttempt, in
 			d.Footer = append(d.Footer, button(cx, "connection-retry", "重试", lucide.RefreshCw, "primary", func() { s.reconnectDevice(id) }))
 		}
 	}
+	d.Footer = append([]core.Node{s.copyButton(cx, "copy-connection-log", "复制日志", "outline", func() string { return s.connectionLog(id, a) })}, d.Footer...)
 	return d
 }
 

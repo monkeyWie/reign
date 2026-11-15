@@ -148,6 +148,11 @@ func TestRetryKeepsStatusPanelAndShowsActualTransportSteps(t *testing.T) {
 	app.WaitFor("text:wss://reignhub.app/p2p/relay", time.Second)
 	app.Find("text:stun:stun.cloudflare.com:3478 · 并行探测")
 	app.Find("text:stun:probe.example.com:26330 · 并行探测")
+	app.Press("id:copy-connection-log")
+	app.WaitFor("role:button 已复制", time.Second)
+	if !strings.Contains(app.Clipboard, "stun:probe.example.com:26330") || !strings.Contains(app.Clipboard, "ReignHub connection diagnostics") {
+		t.Fatalf("incomplete connection report: %s", app.Clipboard)
+	}
 	if app.Find("id:connection-loading").ID != spinner {
 		t.Fatal("progress remounted the status panel")
 	}

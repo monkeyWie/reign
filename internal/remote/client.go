@@ -57,7 +57,12 @@ func Connect(ctx context.Context, p Pairing, opts Options) (*Client, error) {
 	}
 	c.wire = w
 	w.dataWS = dataWS
-	go func() { defer close(c.relayDone); drainRelay(w.ctx, dataWS) }()
+	go func() {
+		defer close(c.relayDone)
+		if err := drainRelay(w.ctx, dataWS); err != nil {
+			w.progress("relay-lost", "relay", "备用中继连接已断开", err.Error(), "warning")
+		}
+	}()
 	go keepAlive(w.ctx, ws)
 	if dataWS != nil {
 		go keepSocketAlive(w.ctx, dataWS, false)
@@ -167,6 +172,7 @@ func (c *Client) watchPaths() {
 			// ICE disconnected is transient: allow the existing DTLS/SCTP
 			// channel to recover before destroying it and its encryption state.
 			if !c.recoveringICE() || time.Since(lost) >= 20*time.Second {
+				c.wire.progress("paths-lost", "transport", "所有数据路径不可用，开始恢复连接", fmt.Sprintf("recoveringICE=%t elapsed=%s", c.recoveringICE(), time.Since(lost).Round(time.Millisecond)), "warning")
 				_ = c.Close()
 				return
 			}

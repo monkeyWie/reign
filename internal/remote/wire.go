@@ -718,14 +718,14 @@ func keepSocketAlive(ctx context.Context, ws *websocket.Conn, renew bool) {
 }
 
 // Relay is a write-only business ingress; its reader consumes control frames.
-func drainRelay(ctx context.Context, ws *websocket.Conn) {
+func drainRelay(ctx context.Context, ws *websocket.Conn) error {
 	if ws == nil {
-		return
+		return nil
 	}
 	defer ws.CloseNow()
 	for {
 		if _, _, err := ws.Read(ctx); err != nil {
-			return
+			return err
 		}
 	}
 }

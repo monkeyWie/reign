@@ -105,8 +105,14 @@ func newPeer(c *Client, urls []string) (result peer, err error) {
 		p.direct.Store(true)
 		c.note("path:webrtc", "direct", "已建立 WebRTC 直连", "端到端加密数据通道", "success")
 	})
-	p.bind(p.dc, "onclose", func(js.Value) { p.direct.Store(false) })
-	p.bind(p.dc, "onerror", func(js.Value) { p.direct.Store(false) })
+	p.bind(p.dc, "onclose", func(js.Value) {
+		p.direct.Store(false)
+		c.note("datachannel-lost", "udp", "WebRTC 数据通道关闭或异常", "connectionState="+p.pc.Get("connectionState").String()+" · dataChannel="+p.dc.Get("readyState").String(), "warning")
+	})
+	p.bind(p.dc, "onerror", func(js.Value) {
+		p.direct.Store(false)
+		c.note("datachannel-lost", "udp", "WebRTC 数据通道关闭或异常", "connectionState="+p.pc.Get("connectionState").String()+" · dataChannel="+p.dc.Get("readyState").String(), "warning")
+	})
 	p.bind(p.dc, "onmessage", func(e js.Value) {
 		raw := js.Global().Get("Uint8Array").New(e.Get("data"))
 		if raw.Get("byteLength").Int() > 65536 {

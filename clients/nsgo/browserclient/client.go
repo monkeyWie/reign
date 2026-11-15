@@ -148,6 +148,7 @@ func Connect(ctx context.Context, p Pairing) (*Client, error) {
 		defer c.dataWS.CloseNow()
 		for {
 			if _, _, err := c.dataWS.Read(life); err != nil {
+				c.note("relay-lost", "relay", "备用中继连接已断开", err.Error(), "warning")
 				return
 			}
 			c.relayBeat.Store(time.Now().UnixNano())
@@ -259,6 +260,7 @@ func (c *Client) keepRelayAlive() {
 			}
 			lastTick = time.Now()
 			if time.Since(time.Unix(0, c.relayBeat.Load())) > 85*time.Second {
+				c.note("relay-heartbeat", "relay", "中继心跳未收到响应", "85s 内未收到中继控制帧", "warning")
 				c.dataWS.CloseNow()
 				return
 			}
@@ -266,6 +268,7 @@ func (c *Client) keepRelayAlive() {
 			confirmed, err := pingSocket(ctx, c.dataWS)
 			stop()
 			if err != nil {
+				c.note("relay-heartbeat", "relay", "中继心跳发送失败", err.Error(), "warning")
 				c.dataWS.CloseNow()
 				return
 			}
@@ -357,6 +360,7 @@ func (c *Client) watchPaths() {
 			// ICE disconnected is transient: allow the existing DTLS/SCTP
 			// channel to recover before destroying it and its encryption state.
 			if !c.recoveringICE() || time.Since(lost) >= 20*time.Second {
+				c.note("paths-lost", "transport", "所有数据路径不可用，开始恢复连接", fmt.Sprintf("recoveringICE=%t elapsed=%s", c.recoveringICE(), time.Since(lost).Round(time.Millisecond)), "warning")
 				c.Close()
 				return
 			}
@@ -379,6 +383,7 @@ func (c *Client) keepAlive() {
 			}
 			lastTick = time.Now()
 			if time.Since(time.Unix(0, c.heartbeat.Load())) > 85*time.Second {
+				c.note("signal-heartbeat", "signal", "信令心跳未收到响应", "85s 内未收到信令控制帧", "warning")
 				c.Close()
 				return
 			}
@@ -393,6 +398,7 @@ func (c *Client) keepAlive() {
 			}
 			stop()
 			if err != nil {
+				c.note("signal-heartbeat", "signal", "信令心跳发送失败", err.Error(), "warning")
 				c.Close()
 				return
 			}

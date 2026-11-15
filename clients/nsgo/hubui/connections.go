@@ -3,6 +3,7 @@ package hubui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -13,14 +14,16 @@ import (
 	"github.com/nsgo-dev/nsgo/ui"
 )
 
-// Connection health belongs to a device, not to the last user operation. Keep
-// independent read failures until that read succeeds; a heartbeat must not
-// hide a failed catalogue or transcript refresh.
+// Transport readiness is independent of provider read failures. Keep those
+// failures for diagnostics without declaring a healthy socket disconnected.
 type connectionHealth struct {
-	attempt      *connectAttempt
-	issues       map[string]string
-	reconnecting bool
-	established  bool
+	attempt       *connectAttempt
+	issues        map[string]string
+	reconnecting  bool
+	established   bool
+	diagnostics   []connectionStep
+	observed      bool
+	lastTransport string
 }
 
 func (s *State) connection(id string) *connectionHealth {
@@ -50,41 +53,63 @@ func transportError(err error) bool {
 func (s *State) setConnectionIssue(id, source string, err error) {
 	h := s.connection(id)
 	if err == nil {
+		if h.issues[source] != "" {
+			s.logConnection(id, "read:"+source, "操作恢复", source, "success")
+		}
 		delete(h.issues, source)
 	} else if !errors.Is(err, context.Canceled) {
+		if h.issues[source] != err.Error() {
+			s.logConnection(id, "read:"+source, "操作异常", source+": "+err.Error(), "warning")
+		}
 		h.issues[source] = err.Error()
 	}
 }
-func (s *State) connectionProblem(id string) bool {
+
+// Every connection indicator and command gate uses this same predicate. A stale
+// presence snapshot cannot enable commands while a replacement is being verified.
+func (s *State) connectionReady(id string) bool {
+	h := s.connection(id)
+	if h.reconnecting || h.attempt != nil && !h.attempt.complete {
+		return false
+	}
+	if id == "" && !s.api.CanHost() {
+		return h.issues["presence"] == ""
+	}
 	if id == "" && s.api.CanHost() {
 		network := object(s.host["network"])
-		if state := str(network, "state"); state != "" && state != "connected" {
-			return true
+		return str(network, "state") == "" || str(network, "state") == "connected"
+	}
+	for _, d := range s.devices {
+		if str(d, "id") == id {
+			return flag(d, "connected")
 		}
 	}
+	return false
+}
+func (s *State) connectionProblem(id string) bool { return !s.connectionReady(id) }
+func (s *State) connectionRecovering(id string) bool {
 	h := s.connection(id)
-	if len(h.issues) > 0 || h.reconnecting || id != "" && s.connection("").issues["presence"] != "" {
+	if h.reconnecting {
 		return true
 	}
 	for _, d := range s.devices {
 		if str(d, "id") == id {
-			return !flag(d, "connected")
+			return h.established && !flag(d, "connected") && flag(d, "autoReconnect")
 		}
 	}
 	return false
 }
 func (s *State) connectionTitle(id string) string {
-	h := s.connection(id)
-	if h.reconnecting {
-		if !h.established {
-			return "正在连接"
+	if s.connectionReady(id) {
+		return "连接正常"
+	}
+	if s.connectionRecovering(id) {
+		if s.connection(id).established {
+			return "正在重新连接"
 		}
-		return "正在重新连接"
+		return "正在连接"
 	}
-	if s.connectionProblem(id) {
-		return "连接异常，点击查看详情"
-	}
-	return "连接正常"
+	return "尚未连接，点击重试"
 }
 func (s *State) connectionIndicator(cx *core.Scope, target func() string) core.Node {
 	status := core.NewMemo(cx, func() [2]string { s.read(); id := target(); return [2]string{id, s.connectionTitle(id)} })
@@ -100,7 +125,7 @@ func (s *State) connectionIndicator(cx *core.Scope, target func() string) core.N
 			s.connectionDetailTarget = id
 			s.dialog.Set("connection-status")
 		}).(core.View)
-		if s.connection(id).reconnecting {
+		if s.connectionRecovering(id) {
 			node.Children = []core.Node{reconnectingGlyph(cx)}
 		}
 		node.Label = value[1]
@@ -108,7 +133,7 @@ func (s *State) connectionIndicator(cx *core.Scope, target func() string) core.N
 		baseStyle := node.StyleFunc
 		node.StyleFunc = func() core.Style {
 			st := baseStyle()
-			if s.connectionProblem(id) && !s.connection(id).reconnecting {
+			if s.connectionProblem(id) && !s.connectionRecovering(id) {
 				st.Color = core.RGB(0xd97706)
 			}
 			return st
@@ -176,6 +201,7 @@ func (s *State) acceptConnection(id string, devices []Object) {
 	s.pollGeneration++
 	s.polling = false
 	s.devices = devices
+	s.observeTransports()
 	h := s.connection(id)
 	h.established = true
 	h.issues = map[string]string{}
@@ -218,7 +244,16 @@ func (s *State) connectDevice(id string, automatic, pair bool) {
 	h.attempt = a
 	ctx = connectivity.WithProgress(ctx, func(p connectivity.Progress) {
 		s.cx.Post(func() {
-			if s.ctx.Err() == nil && h.attempt == a && (a.active || a.complete) {
+			if s.ctx.Err() == nil && (a.active || a.complete) {
+				if h.attempt != a {
+					// Resume can reuse a wire whose observer belongs to the
+					// preceding successful attempt. Preserve its live events.
+					if a.complete {
+						s.logConnection(id, p.Stage, p.Message, p.Detail, p.State)
+						s.changed()
+					}
+					return
+				}
 				a.record(p)
 				s.changed()
 			}
@@ -262,6 +297,9 @@ func (s *State) connectDevice(id string, automatic, pair bool) {
 			}
 			h.reconnecting = false
 			s.setConnectionIssue(id, "reconnect", err)
+			if err != nil {
+				s.logConnection(id, "retry-result", "本轮连接结束", err.Error(), "warning")
+			}
 			if err == nil {
 				s.acceptConnection(id, objects(v))
 				if id == s.target {
@@ -289,6 +327,11 @@ func (s *State) observeLifecycle() {
 func (s *State) setBackground(background bool) {
 	wasBackground := s.backgrounded
 	s.backgrounded = background
+	if wasBackground != background {
+		for _, d := range s.devices {
+			s.logConnection(str(d, "id"), "lifecycle", "应用生命周期变化", fmt.Sprintf("background=%t keepAlive=%t", background, s.keepAlive), "info")
+		}
+	}
 	if wasBackground && !background && !s.keepAlive {
 		// A denied/failed service start may be tried again while Android
 		// permits starting an FGS, rather than looping in the background.

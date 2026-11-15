@@ -295,6 +295,7 @@ func (s *State) pollPresence() {
 			s.setConnectionIssue("", "presence", err)
 			if err == nil {
 				s.devices = objects(v)
+				s.observeTransports()
 				s.openNativeSession()
 				s.refreshDevicePresence()
 			}
@@ -323,7 +324,7 @@ func (s *State) device() Object {
 	}
 	return Object{}
 }
-func (s *State) connected() bool { s.read(); return flag(s.device(), "connected") }
+func (s *State) connected() bool { s.read(); return s.connectionReady(s.target) }
 func (s *State) key() string {
 	return s.target + "|" + str(s.selected, "providerId") + "|" + str(s.selected, "id")
 }
