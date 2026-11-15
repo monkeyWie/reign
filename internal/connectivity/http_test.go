@@ -2,6 +2,7 @@ package connectivity
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"io"
 	"net/http"
@@ -41,7 +42,12 @@ func TestWebSocketUpgradeWithHTTP2EnabledServer(t *testing.T) {
 	for _, upgrade := range []bool{false, true} {
 		client := newConnectionHTTPClient(upgrade)
 		transport := client.Transport.(*http.Transport)
-		transport.TLSClientConfig = server.Client().Transport.(*http.Transport).TLSClientConfig.Clone()
+		if transport.TLSClientConfig == nil {
+			transport.TLSClientConfig = &tls.Config{}
+		}
+		// Preserve inherited ALPN preferences: DefaultTransport.Clone may have
+		// already populated h2 before this client is constructed.
+		transport.TLSClientConfig.RootCAs = server.Client().Transport.(*http.Transport).TLSClientConfig.RootCAs
 		defer transport.CloseIdleConnections()
 		// Prime the pool before upgrading: a reusable HTTP/2 connection must never
 		// capture the HTTP/1.1 WebSocket request.

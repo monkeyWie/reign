@@ -2,6 +2,7 @@ package connectivity
 
 import (
 	"context"
+	"crypto/tls"
 	"net"
 	"net/http"
 	"runtime"
@@ -23,6 +24,12 @@ func newConnectionHTTPClient(websocket bool) *http.Client {
 		transport.Protocols = new(http.Protocols)
 		transport.Protocols.SetHTTP1(true)
 		transport.ForceAttemptHTTP2 = false
+		// Clone can inherit h2 ALPN from an initialized DefaultTransport.
+		// A custom TLS dialer bypasses net/http's per-request ALPN filtering.
+		if transport.TLSClientConfig == nil {
+			transport.TLSClientConfig = &tls.Config{}
+		}
+		transport.TLSClientConfig.NextProtos = []string{"http/1.1"}
 	}
 	if runtime.GOOS == "js" {
 		// WebAssembly must use the browser Fetch transport, not a TCP dialer.
