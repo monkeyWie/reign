@@ -17,12 +17,21 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- The runtime tells the app the network's DNS servers. -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <application
         android:label="NSGo"
         android:theme="@android:style/Theme.DeviceDefault.NoActionBar"
         android:extractNativeLibs="true"
         android:enableOnBackInvokedCallback="true">
+        <service android:name="dev.agenthub.ras.ConnectionService"
+            android:exported="false" android:stopWithTask="true"
+            android:foregroundServiceType="connectedDevice" />
         <activity
             android:name="dev.agenthub.ras.RasActivity"
             android:exported="true"

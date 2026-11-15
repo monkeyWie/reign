@@ -10,7 +10,7 @@ build:
   jobs: 1
   targets: [macos_arm64, windows_x64, linux_x64, ios, android_arm64, web]
 android:
-  permissions: [android.permission.INTERNET, android.permission.CAMERA]
+  permissions: [android.permission.INTERNET, android.permission.CAMERA, android.permission.POST_NOTIFICATIONS]
 linux:
   maintainer: "liwei <liwei2633@gmail.com>"
   summary: Remote access to your AI agents

@@ -140,6 +140,7 @@ func RootWithAPI(cx *core.Scope, api API, start bool) core.Node {
 	cx.SetTheme(theme)
 	s := newState(cx, api)
 	s.installWorkspaceNavigation()
+	s.observeNativeBackground()
 	if appearance, ok := cx.Storage().GetItem("appearance"); ok && appearance == "true" {
 		s.dark = true
 		cx.SetAppearance(core.AppearanceDark)

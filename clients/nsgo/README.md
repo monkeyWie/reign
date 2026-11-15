@@ -70,6 +70,14 @@ Android 构建中，现有 Pion 依赖 `anet` 引用 Go 私有 zone cache，和�
 
 - Android APK 支持通过 CI Secret `ANDROID_SIGNING_PEM_BASE64` 配置固定 PEM 签名身份；未配置时使用临时调试签名。详见 [CI 与 Release](../../docs/ci-and-releases.md)。
 - iOS IPA 已构建但未签名；安装到真机、TestFlight 或发布需要 Apple 签名配置。
+
+### Android 后台连接与通知
+
+Android 通过 NSGo 的公开 Host API 调用 `ConnectionService`。有连接或用户发起的连接尝试时启用 `connectedDevice` 前台服务，通知栏显示连接状态；没有连接时停止服务。切后台时，确认服务已启动才保留 Go 订阅和网络连接；没有服务保护则使用暂停、恢复及补同步流程。回到前台不会重建仍健康的连接。
+
+实时观察到的任务按设备、Provider、会话和 turn 隔离通知；运行中显示进度，完成、失败或停止会更新通知。切到其他会话后，独立的 watch 继续跟踪已观察到的运行任务；历史缓存不会触发通知。点击任务通知重新打开对应会话。活动任务在线时持有带超时、定期续期的 partial WakeLock，结束、离线或服务停止时释放。
+
+构建原生 Host 需要 Android SDK 的 `aapt2`、`d8`、`zipalign`、`apksigner` 和 OpenSSL；manifest 交给 SDK 编译，保留服务类型及权限。CI 仍使用已有签名身份。服务不会在用户移除应用任务后自行复活。Android 厂商省电和强制停止仍可能结束进程，iOS 和浏览器不采用 Android 的常驻服务方案。
 - Windows、Linux 包已交叉构建，尚未在对应真机运行。
 
 开发用 `reignhub-server` 可内嵌 ReignHub Web，执行 `./reignhub-server` 即可使用。`--no-web` 可关闭页面。以下外部目录方式仅用于开发时覆盖内嵌资源：

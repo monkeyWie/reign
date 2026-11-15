@@ -31,6 +31,7 @@ func main() {
 	keyFile := flag.String("key", ".nsgo/android/debug.pem", "existing APK signing key")
 	version := flag.String("version", "", "override application version")
 	buildNumber := flag.Int("build-number", 0, "override application build number")
+	sdkManifest := flag.String("sdk-manifest", "", "prepare XML for the Android SDK manifest compiler")
 	flag.Parse()
 	var cfg struct {
 		Name, ID, Version string
@@ -47,6 +48,15 @@ func main() {
 	}
 	if *buildNumber > 0 {
 		cfg.BuildNumber = *buildNumber
+	}
+	if cfg.BuildNumber == 0 {
+		cfg.BuildNumber = apk.VersionCode(cfg.Version)
+	}
+	if *sdkManifest != "" {
+		prepared, err := prepareSDKManifest(read(*manifest), apk.Manifest{Package: cfg.ID, Label: cfg.Name, VersionName: cfg.Version, VersionCode: cfg.BuildNumber, TargetSDK: cfg.Android.TargetSDK, Permissions: cfg.Android.Permissions})
+		must(err)
+		must(os.WriteFile(*sdkManifest, prepared, 0600))
+		return
 	}
 	if cfg.Sign.Keystore != "" {
 		panic("native Android host packaging requires production keystore support before release signing; refusing to replace a release signature with the debug key")

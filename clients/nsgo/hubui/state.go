@@ -77,6 +77,12 @@ type State struct {
 	deviceGeneration                                        uint64
 	transcriptSyncing, snapshotScheduled                    bool
 	snapshots                                               *snapshotWriter
+	backgrounded, keepAlive, notificationAsked              bool
+	nativeBackgroundState                                   string
+	lastTask                                                Object
+	pendingNativeSession                                    Object
+	nativeTasks                                             map[string]Object
+	nativeTaskMonitors                                      map[string]*nativeTaskMonitor
 }
 
 func newState(cx *core.Scope, api API) *State {
@@ -289,6 +295,7 @@ func (s *State) pollPresence() {
 			s.setConnectionIssue("", "presence", err)
 			if err == nil {
 				s.devices = objects(v)
+				s.openNativeSession()
 				s.refreshDevicePresence()
 			}
 			s.changed()
@@ -440,6 +447,7 @@ func (s *State) watch(ctx context.Context, target, p, id, key, epoch string, cur
 				s.setConnectionIssue(target, "transcript", e)
 				if e == nil {
 					s.setTranscript(object(v))
+					s.trackNativeTask(target, p, id, object(v))
 				} else {
 					s.changed()
 				}
@@ -490,6 +498,7 @@ func (s *State) watch(ctx context.Context, target, p, id, key, epoch string, cur
 				}
 				next, reset := applyEvents(s.transcript, events)
 				s.transcript = next
+				s.trackNativeTask(target, p, id, next)
 				s.scheduleSnapshot()
 				s.messageRows = messages(next)
 				s.changed()

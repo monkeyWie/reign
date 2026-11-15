@@ -203,6 +203,11 @@ jobs:
           assert "versionName='" + os.environ['VERSION'] + "'" in badging
           assert "versionCode='" + os.environ['BUILD_NUMBER'] + "'" in badging
           assert "name='dev.agenthub.ras.RasActivity'" in badging
+          manifest = subprocess.check_output([str(tools / 'aapt'), 'dump', 'xmltree', str(apk), 'AndroidManifest.xml'], text=True)
+          assert 'dev.agenthub.ras.ConnectionService' in manifest
+          assert 'foregroundServiceType' in manifest and '(type 0x11)0x10' in manifest
+          assert 'android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE' in manifest
+          assert 'android.permission.POST_NOTIFICATIONS' in manifest
           signature = subprocess.check_output([str(tools / 'apksigner'), 'verify', '--print-certs', str(apk)], text=True)
           print(signature)
           if os.environ.get('REIGNHUB_ANDROID_STABLE_SIGNING'):

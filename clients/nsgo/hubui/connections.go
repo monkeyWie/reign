@@ -287,11 +287,21 @@ func (s *State) observeLifecycle() {
 	})
 }
 func (s *State) setBackground(background bool) {
-	if background == s.suspended || s.ctx.Err() != nil {
+	wasBackground := s.backgrounded
+	s.backgrounded = background
+	if wasBackground && !background && !s.keepAlive {
+		// A denied/failed service start may be tried again while Android
+		// permits starting an FGS, rather than looping in the background.
+		s.nativeBackgroundState = ""
+		s.changed()
+	}
+	suspend := background && !s.keepAlive
+	if suspend == s.suspended || s.ctx.Err() != nil {
 		return
 	}
-	s.suspended = background
-	if background {
+	s.suspended = suspend
+	s.changed()
+	if suspend {
 		if s.directoryCancel != nil {
 			s.directoryCancel()
 		}
