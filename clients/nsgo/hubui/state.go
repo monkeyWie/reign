@@ -233,44 +233,11 @@ func (s *State) poll() {
 	ctx, cancel := context.WithCancel(s.ctx)
 	s.pollCancel = cancel
 	s.changed()
-	go func() {
-		defer cancel()
-		v, err := rpc(ctx, s.api, target, "", "", "providers", nil)
-		providers := visibleProviders(objects(v))
-		sessions := []Object{}
-		if err == nil {
-			for _, p := range providers {
-				// History remains browsable even when this provider cannot accept writes.
-				if !providerReady(p) && !flag(object(p["capabilities"]), "history") {
-					continue
-				}
-				var list any
-				list, err = s.api.Call(ctx, "client.sync", Object{"provider": p["id"]}, target, nil)
-				if err != nil {
-					break
-				}
-				sessions = append(sessions, objects(list)...)
-			}
-		}
-		s.cx.Post(func() {
-			if generation != s.pollGeneration {
-				return
-			}
-			s.polling = false
-			s.pollCancel = nil
-			if s.ctx.Err() != nil || s.target != target {
-				return
-			}
-			s.setConnectionIssue(target, "catalogue", err)
-			if err == nil {
-				s.catalogueVersion++
-				s.providers, s.sessions = providers, sessions
-				s.rememberWorkspace()
-			}
-			s.changed()
-			s.autoReconnect()
-		})
-	}()
+	known := map[string]bool{}
+	for _, session := range s.sessions {
+		known[str(session, "providerId")] = true
+	}
+	go s.loadCatalogue(ctx, cancel, generation, target, known)
 }
 
 // Presence is local transport state. Never block reconnect detection behind a

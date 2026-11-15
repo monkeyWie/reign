@@ -10,7 +10,7 @@
     <meta name="color-scheme" content="light dark" />
     <title>ReignHub — Workspace</title>
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/console/__LOADING_CSS__" />
+    <link rel="stylesheet" href="/assets/chat/__LOADING_CSS__" />
     <style>
       :root {
         --bg: #fff;
@@ -131,8 +131,8 @@
         // Compress the Go module for fast delivery and CF's per-asset size limit.
         // The official NSGo loader accepts a precompiled WebAssembly.Module.
         phase.textContent = text("Downloading workspace", "正在下载工作区");
-        const { downloadWasm } = await import("/console/__DOWNLOADER__");
-        const bytes = await downloadWasm("/console/" + config.wasm, {
+        const { downloadWasm } = await import("/assets/chat/__DOWNLOADER__");
+        const bytes = await downloadWasm("/assets/chat/" + config.wasm, {
           size: config.wasmSize,
           onProgress(loaded, total) {
             phase.textContent = text("Downloading workspace", "正在下载工作区");
@@ -157,14 +157,14 @@
         phase.textContent = text("Preparing workspace", "正在初始化工作区");
         progress.textContent = text("Download complete", "下载完成");
         progress.setAttribute("aria-valuenow", "100");
-        const { mount } = await import("/console/__LOADER__");
+        const { mount } = await import("/assets/chat/__LOADER__");
         const module = WebAssembly.compileStreaming(
           new Response(
             bytes.stream().pipeThrough(new DecompressionStream("gzip")),
             { headers: { "Content-Type": "application/wasm" } },
           ),
         );
-        await mount(root, new URL("/console/nsgo.json", location.origin).href, {
+        await mount(root, new URL("/assets/chat/nsgo.json", location.origin).href, {
           config,
           module,
         });

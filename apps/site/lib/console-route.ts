@@ -12,7 +12,7 @@ export async function handleConsole(
     });
   if (!env.ASSETS)
     return new Response("Workspace assets unavailable", { status: 503 });
-  url.pathname = "/console/index.html";
+  url.pathname = "/assets/chat/index.html";
   url.search = "";
   const asset = await env.ASSETS.fetch(
     new Request(url, { method: request.method }),

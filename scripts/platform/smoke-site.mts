@@ -219,7 +219,7 @@ export async function smokeSite(origin: string) {
   const config = JSON.parse(
     consoleHTML.match(/const config = (\{[^;]+\});/)![1],
   );
-  const moduleResponse = await fetch(origin + "/console/" + config.wasm);
+  const moduleResponse = await fetch(origin + "/assets/chat/" + config.wasm);
   assert.equal(moduleResponse.status, 200);
   assert.match(moduleResponse.headers.get("Cache-Control") || "", /immutable/);
   const moduleBytes = gunzipSync(

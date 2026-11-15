@@ -119,3 +119,29 @@ func TestCachedCatalogueAndStreamedSnapshotWithoutConnection(t *testing.T) {
 		t.Fatal("other device's snapshot removed", v, err)
 	}
 }
+
+func TestFirstPageMetadataSurvivesBeforeDirectorySync(t *testing.T) {
+	s := &memoryStore{v: map[string][]byte{}}
+	a := New(s)
+	defer a.Close()
+	put := func(command Object, v any) {
+		t.Helper()
+		raw, _ := json.Marshal(command)
+		if err := s.Put("rpc:one:"+string(raw), v); err != nil {
+			t.Fatal(err)
+		}
+	}
+	put(Object{"method": "providers", "provider": "", "session": ""}, []Object{{"id": "codex-app"}})
+	put(Object{"method": "sessions", "provider": "codex-app", "session": ""}, Object{"sessions": []Object{{"id": "preview", "providerId": "codex-app"}}})
+	v, err := a.Call(context.Background(), "client.cached", nil, "one", nil)
+	if err != nil || len(arr(obj(v)["sessions"])) != 1 {
+		t.Fatal("metadata page not cached", v, err)
+	}
+	if err = s.Put("directory:one:codex-app", Object{"items": Object{}}); err != nil {
+		t.Fatal(err)
+	}
+	v, err = a.Call(context.Background(), "client.cached", nil, "one", nil)
+	if err != nil || len(arr(obj(v)["sessions"])) != 0 {
+		t.Fatal("preview resurrected deleted session", v, err)
+	}
+}

@@ -24,6 +24,20 @@ export interface ReleaseCatalog {
   stale: boolean;
 }
 
+// GitHub reports exact bytes. Use binary units explicitly, matching the
+// numerical sizes users see on Releases rather than decimal MB.
+export function formatAssetSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KiB", "MiB", "GiB", "TiB"];
+  let value = bytes / 1024;
+  let index = 0;
+  while (value >= 1024 && index < units.length - 1) {
+    value /= 1024;
+    index++;
+  }
+  return `${value.toFixed(2)} ${units[index]}`;
+}
+
 function record(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)

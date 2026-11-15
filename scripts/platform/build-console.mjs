@@ -16,7 +16,7 @@ import { gzipSync } from "node:zlib";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const output = join(root, "build/nsgo-console");
-const assets = join(root, "apps/site/public/console");
+const assets = join(root, "apps/site/public/assets/chat");
 const version = process.env.VERSION || "0.1.0";
 mkdirSync(output, { recursive: true });
 const result = spawnSync(
@@ -73,13 +73,13 @@ const headers = readdirSync(assets)
   .filter((file) => /\.[0-9a-f]{10}\./.test(file))
   .map(
     (file) =>
-      `/console/${file}\n  Cache-Control: public, max-age=31536000, immutable\n`,
+      `/assets/chat/${file}\n  Cache-Control: public, max-age=31536000, immutable\n`,
   )
   .join("\n");
 writeFileSync(
   join(root, "apps/site/public/_headers"),
   headers +
-    "\n/console/nsgo.json\n  Cache-Control: no-cache\n\n/console/index.html\n  Cache-Control: no-cache\n",
+    "\n/assets/chat/nsgo.json\n  Cache-Control: no-cache\n\n/assets/chat/index.html\n  Cache-Control: no-cache\n",
 );
 for (const file of readdirSync(assets)) {
   if (statSync(join(assets, file)).size > 25 * 1024 * 1024)

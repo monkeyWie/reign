@@ -36,6 +36,7 @@ func (a *API) cached(target string, command Object) (any, error) {
 		return nil, err
 	}
 	sessions := []Object{}
+	directories := map[string]bool{}
 	for _, key := range keys {
 		if !strings.HasPrefix(key, "directory:"+target+":") {
 			continue
@@ -44,9 +45,20 @@ func (a *API) cached(target string, command Object) (any, error) {
 		if err != nil {
 			return nil, err
 		}
+		directories[key] = true
 		for _, session := range obj(obj(v)["items"]) {
 			sessions = append(sessions, obj(session))
 		}
+	}
+	for _, p := range arr(providers) {
+		if directories["directory:"+target+":"+str(p, "id")] {
+			continue
+		}
+		page, err := a.cached(target, Object{"method": "sessions", "provider": str(p, "id"), "session": ""})
+		if err != nil {
+			return nil, err
+		}
+		sessions = append(sessions, arr(obj(page)["sessions"])...)
 	}
 	return Object{"providers": providers, "sessions": sessions}, nil
 }

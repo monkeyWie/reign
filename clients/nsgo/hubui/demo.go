@@ -72,6 +72,14 @@ func (d *demoAPI) Call(ctx context.Context, method string, p Object, target stri
 		switch str(r, "method") {
 		case "providers":
 			return demoProviders(), nil
+		case "sessions":
+			out := []Object{}
+			for _, session := range d.sessions {
+				if str(session, "providerId") == str(r, "provider") {
+					out = append(out, session)
+				}
+			}
+			return Object{"sessions": out}, nil
 		case "transcript":
 			return d.transcript, nil
 		case "models":

@@ -46,14 +46,51 @@ func (h *Hub) Cached(id string, r control.Request) (any, error) {
 		return nil, err
 	}
 	sessions := []map[string]any{}
+	directories := map[string]bool{}
 	for _, key := range keys {
 		var directory struct{ Items map[string]map[string]any }
 		if err = h.DB.Get(key, &directory); err != nil {
 			return nil, err
 		}
+		directories[key] = true
 		for _, session := range directory.Items {
 			sessions = append(sessions, session)
 		}
+	}
+	// A first metadata page is already persisted by Call. Use it while the
+	// authoritative directory scan is still in flight, including after restart.
+	var statuses []struct {
+		ID string `json:"id"`
+	}
+	raw, err := json.Marshal(providers)
+	if err != nil {
+		return nil, err
+	}
+	if err = json.Unmarshal(raw, &statuses); err != nil {
+		return nil, err
+	}
+	for _, p := range statuses {
+		if directories["directory:"+id+":"+p.ID] {
+			continue
+		}
+		page, err := h.Cached(id, control.Request{Method: "sessions", Provider: p.ID})
+		if err != nil {
+			return nil, err
+		}
+		if page == nil {
+			continue
+		}
+		raw, err := json.Marshal(page)
+		if err != nil {
+			return nil, err
+		}
+		var data struct {
+			Sessions []map[string]any `json:"sessions"`
+		}
+		if err = json.Unmarshal(raw, &data); err != nil {
+			return nil, err
+		}
+		sessions = append(sessions, data.Sessions...)
 	}
 	return map[string]any{"providers": providers, "sessions": sessions}, nil
 }

@@ -58,3 +58,32 @@ func TestLocalSnapshotsAndDirectoriesAreIndependentOfConnection(t *testing.T) {
 		t.Fatal("forget removed other device", v, err)
 	}
 }
+
+func TestFirstPageIsCachedBeforeDirectoryScanCompletes(t *testing.T) {
+	h, err := New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close()
+	put := func(r control.Request, v any) {
+		t.Helper()
+		raw, _ := json.Marshal(r)
+		if err := h.DB.Put("rpc:one:"+string(raw), v); err != nil {
+			t.Fatal(err)
+		}
+	}
+	put(control.Request{Method: "providers"}, []map[string]any{{"id": "codex-app"}})
+	put(control.Request{Method: "sessions", Provider: "codex-app"}, map[string]any{"sessions": []map[string]any{{"id": "preview", "providerId": "codex-app"}}})
+	v, err := h.Cached("one", control.Request{})
+	if err != nil || len(v.(map[string]any)["sessions"].([]map[string]any)) != 1 {
+		t.Fatal("metadata page not cached", v, err)
+	}
+	// Once a complete empty directory arrives, stale preview entries stay deleted.
+	if err = h.DB.Put("directory:one:codex-app", map[string]any{"items": map[string]any{}}); err != nil {
+		t.Fatal(err)
+	}
+	v, err = h.Cached("one", control.Request{})
+	if err != nil || len(v.(map[string]any)["sessions"].([]map[string]any)) != 0 {
+		t.Fatal("preview resurrected deleted session", v, err)
+	}
+}

@@ -9,7 +9,7 @@ test("console uses the static NSGo shell at both entry paths, with no SSR or loc
       {
         ASSETS: {
           async fetch(r) {
-            assert.equal(r.url, "https://example.com/console/index.html");
+            assert.equal(r.url, "https://example.com/assets/chat/index.html");
             return new Response("NSGo workspace", {
               headers: {
                 "Content-Type": "text/html",

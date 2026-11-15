@@ -48,6 +48,9 @@ test("English and Chinese download HTML includes every native link before JavaSc
       createElement(ReleaseDownloads, { lang, catalog }),
     );
     assert.ok(html.includes("ReignHub 1.2.3"));
+    assert.ok(html.includes("9.00 MiB"));
+    assert.ok(html.includes('title="9,437,184 bytes"'));
+    assert.doesNotMatch(html, /9\.4 MB/);
     for (const name of filenames)
       assert.ok(html.includes(`href="${releasesURL}/download/${tag}/${name}"`));
     assert.doesNotMatch(html, /正在获取|正在加载|Loading|Fetching|aria-busy/);

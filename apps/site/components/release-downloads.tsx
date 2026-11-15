@@ -10,6 +10,7 @@ import {
 import { translate, type Locale } from "../lib/i18n";
 import {
   releasesURL,
+  formatAssetSize,
   type Platform,
   type ReleaseCatalog,
 } from "../lib/releases";
@@ -151,8 +152,11 @@ export function ReleaseDownloads({
                               : "DEB"}
                         </span>
                       )}
-                      <span className="download-size">
-                        {(asset.size / 1_000_000).toFixed(1)} MB
+                      <span
+                        className="download-size"
+                        title={`${asset.size.toLocaleString(lang)} bytes`}
+                      >
+                        {formatAssetSize(asset.size)}
                       </span>
                     </a>
                   ))}
