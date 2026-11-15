@@ -172,6 +172,12 @@ func (s *State) message(cx *core.Scope, get func() Message) core.Node {
 	}
 	hover := core.NewSignal(cx, false)
 	user := m.Role == "user"
+	// User bubbles use their intrinsic content width; the parent provides the
+	// available width for wrapping. Assistant articles fill the message column.
+	bodyWidth := core.Pct(100)
+	if user {
+		bodyWidth = core.Length{}
+	}
 	content := []core.Node{}
 	content = append(content, core.Each(func() []Object {
 		out := []Object{}
@@ -194,7 +200,7 @@ func (s *State) message(cx *core.Scope, get func() Message) core.Node {
 			}
 		}
 		return label(cx, choose(im.Alt != "", im.Alt, "图片不可用"), 13, true)
-	}, Selectable: true, OpenLinks: false, OnLinkPress: func(e textview.LinkPressEvent) { s.openLink(cx, get(), e.URL) }, CodeBlockActions: []textview.CodeAction{{ID: textview.CopyAction, Label: "复制"}}, Styles: textview.Styles{textview.PartRoot: core.Style{FontSize: 14, LineHeight: 23, MinWidth: core.Pt(0), Width: core.Pct(100)}}, StyleOf: func(p textview.Part) core.Style {
+	}, Selectable: true, OpenLinks: false, OnLinkPress: func(e textview.LinkPressEvent) { s.openLink(cx, get(), e.URL) }, CodeBlockActions: []textview.CodeAction{{ID: textview.CopyAction, Label: "复制"}}, Styles: textview.Styles{textview.PartRoot: core.Style{FontSize: 14, LineHeight: 23, MinWidth: core.Pt(0), Width: bodyWidth}}, StyleOf: func(p textview.Part) core.Style {
 		if p == textview.PartRoot || p == textview.PartParagraph {
 			return core.Style{Color: palette(cx).foreground}
 		}
@@ -214,10 +220,10 @@ func (s *State) message(cx *core.Scope, get func() Message) core.Node {
 					children = append(children, view)
 				}
 			}
-			return core.View{Style: core.Style{Gap: 12, Width: core.Pct(100), MinWidth: core.Pt(0)}, Children: children}
+			return core.View{Style: core.Style{Gap: 12, MinWidth: core.Pt(0)}, Children: children}
 		})
 	}
-	bubble := core.View{TestID: "message-body-" + m.ID, Selectable: true, Style: core.Style{Width: core.Pct(100), FlexShrink: 1, MinWidth: core.Pt(0), MaxWidth: core.Pt(choose(user, core.Points(680), core.Points(820)))}, StyleFunc: func() core.Style {
+	bubble := core.View{TestID: "message-body-" + m.ID, Selectable: true, Style: core.Style{Width: bodyWidth, FlexShrink: 1, MinWidth: core.Pt(0), MaxWidth: core.Pt(choose(user, core.Points(680), core.Points(820)))}, StyleFunc: func() core.Style {
 		if user {
 			return core.Style{Background: palette(cx).muted, CornerRadius: 20, Padding: core.All(16)}
 		}
@@ -231,6 +237,10 @@ func (s *State) message(cx *core.Scope, get func() Message) core.Node {
 		}
 		return out
 	}, func(a Object) string { return str(a, "id") }, func(cx *core.Scope, a func() Object, _ func() int) core.Node { return s.fileTile(cx, a()) })}}
+	var bubbleContent core.Node = bubble
+	if user {
+		bubbleContent = core.View{Style: core.Style{Direction: core.Row, Width: core.Pct(100), MinWidth: core.Pt(0), JustifyContent: core.JustifyEnd}, Children: []core.Node{bubble}}
+	}
 	// Images are a compact horizontal gallery above the bubble, not path text.
 	gallery := core.View{Style: core.Style{Direction: core.Row, Wrap: core.Wrap, Gap: 8, JustifyContent: choose(user, core.JustifyEnd, core.JustifyStart)}, Children: content}
 	content = []core.Node{core.Show{When: func() bool {
@@ -252,7 +262,7 @@ func (s *State) message(cx *core.Scope, get func() Message) core.Node {
 			}
 		}
 		return false
-	}, Then: func(*core.Scope) core.Node { return bubble }}}
+	}, Then: func(*core.Scope) core.Node { return bubbleContent }}}
 	content = append(content, core.Show{When: func() bool { return !get().Live }, Then: func(cx *core.Scope) core.Node {
 		return core.View{TestID: "message-actions-" + m.ID, Style: core.Style{Height: core.Pt(32), Direction: core.Row, AlignItems: core.AlignCenter, Gap: 8}, StyleFunc: func() core.Style {
 			visible := hover.Get() || s.narrowLayout()

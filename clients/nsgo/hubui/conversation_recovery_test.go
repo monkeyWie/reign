@@ -42,7 +42,7 @@ func testMobileMultilineMessage(t *testing.T, width core.Points) {
 	t.Helper()
 	text := "发现的问题\n\n1. 网站页脚没有公示任何有效的客服联系方式（如联系邮箱、联系电话或在线客服），用户在其他页面也难以直接找到官方客服渠道。\n\n修改建议\n\n1. 请在网站全站页脚公示至少一种有效的联系方式，例如联系邮箱、联系电话或在线客服入口，方便用户随时联系。\n\n" + "https://example.com/" + strings.Repeat("long-path-", 30) + "\n\n```text\n" + strings.Repeat("long-code-", 30) + "\n```"
 	transcript := Object{"turns": []Object{{"id": "layout", "status": "completed", "items": []Object{{"id": "user", "role": "user", "text": text}}}}}
-	app, _ := conversationFixture(t, newDemoAPI(), width, transcript, true)
+	app, state := conversationFixture(t, newDemoAPI(), width, transcript, true)
 	// Phone simulators use their device's real viewport rather than Size.
 	viewport := globalBounds(app.Find("id:conversation"))
 	for _, id := range []string{"message-layout|user", "message-body-layout|user", "composer-card"} {
@@ -52,6 +52,20 @@ func testMobileMultilineMessage(t *testing.T, width core.Points) {
 		}
 	}
 	app.Screenshot("mobile-multiline-message")
+	// A short follow-up must shrink back from the preceding wrapped message.
+	app.Post(func() {
+		state.cx.Post(func() {
+			state.setTranscript(Object{"turns": []Object{{"id": "layout", "status": "completed", "items": []Object{{"id": "user", "role": "user", "text": "收到"}}}}})
+			state.changed()
+		})
+	})
+	app.WaitFor("text:收到", time.Second)
+	bubble := globalBounds(app.Find("id:message-body-layout|user"))
+	message := globalBounds(app.Find("id:message-layout|user"))
+	if bubble.Size.Width < 40 || bubble.Size.Width > 120 || bubble.Origin.X+bubble.Size.Width < message.Origin.X+message.Size.Width-.5 {
+		t.Fatalf("short bubble must hug its text and remain right aligned: bubble=%v message=%v", bubble, message)
+	}
+	app.Screenshot("short-message-bubble")
 }
 
 type delayedSendAPI struct {
