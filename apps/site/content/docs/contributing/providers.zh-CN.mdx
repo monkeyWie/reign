@@ -3,6 +3,10 @@ title: 添加 Agent Provider
 description: 复用连接核心，只实现 Agent 自己的适配层。
 ---
 
+## 优先复用 ACP
+
+Agent 已兼容 ACP 时，在 `internal/agents/catalog.go` 添加启动预设，或配置本机实例即可。复用 SDK、会话引擎与控制端 UI，无需重新编写 Provider。Pi 原生 RPC 可作为独立协议适配器的参考。
+
 ## 接入边界
 
 Provider 位于 Go 应用层，接口在 `internal/provider/provider.go`。它只处理 Agent 安装／就绪状态、原生协议、会话与命令；不自行实现一套配对、账号或中继。

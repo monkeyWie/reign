@@ -1,0 +1,55 @@
+---
+title: ACP Agent
+description: 接入 Claude Code、Cursor、DeepSeek Harness 与更多 ACP Agent。
+---
+
+[Agent Client Protocol](https://agentclientprotocol.com/) 为本机 Agent 提供统一会话接口。ReignHub 通过 [Go ACP SDK](https://github.com/coder/acp-go-sdk) 使用标准输入／输出通信，协商 ACP v1。
+
+## 安装与登录
+
+在被控电脑上安装 Agent，并通过其 CLI 完成登录。在 ReignHub 的**本机 → Agent** 面板启用对应预设。ReignHub 不会自动安装 Agent，也不包含模型订阅。
+
+| Agent            | 可执行程序         | 参数                                      | 环境变量                             |
+| ---------------- | ------------------ | ----------------------------------------- | ------------------------------------ |
+| Claude Code      | `claude-agent-acp` | 无                                        | `CLAUDE_AGENT_ACP_EXPERIMENTAL_V2=0` |
+| Cursor           | `cursor-agent`     | `acp`                                     | 沿用 Agent 默认值                    |
+| OpenCode         | `opencode`         | `acp`                                     | 沿用 Agent 默认值                    |
+| Grok Build       | `grok`             | `--permission-mode default agent stdio`   | 沿用 Agent 默认值                    |
+| Antigravity      | `agy`              | `acp`                                     | 沿用 Agent 默认值                    |
+| Kiro             | `kiro-cli`         | `acp --agent-engine=v3 --auth-method=cli` | 沿用 Agent 默认值                    |
+| Muse Code        | `muse`             | `acp`                                     | `MUSE_EXPERIMENTAL_ACP=on`           |
+| fx               | `fx`               | `acp`                                     | 沿用 Agent 默认值                    |
+| DeepSeek Harness | `dsh`              | `--profile acp`                           | 沿用 Agent 默认值                    |
+| Gemini CLI       | `gemini`           | `--acp`                                   | 沿用 Agent 默认值                    |
+
+Claude Code 使用 [Claude Agent ACP 适配器](https://github.com/agentclientprotocol/claude-agent-acp)。没有独立可执行程序时，可用 `npm install -g @agentclientprotocol/claude-agent-acp` 安装。预设会显式选择 ACP v1。
+
+使用提供上述入口的近期 Agent 版本。Muse 的 ACP 入口为实验功能，需要设置表中的环境变量。官方启动命令与分发信息也可以在 [ACP Registry](https://agentclientprotocol.com/get-started/registry) 查询。
+
+## 自定义 Agent
+
+在被控电脑的 Agent 面板选择**添加 ACP Agent**，填写唯一实例 ID 和配置：
+
+```json
+{
+  "name": "My Agent",
+  "protocol": "acp",
+  "command": "/absolute/path/to/my-agent",
+  "args": ["acp"],
+  "env": {}
+}
+```
+
+保存并重启 ReignHub，然后启用该实例。现有预设可通过**配置**修改程序路径、参数与环境变量。不同 ID 可以使用同一种 Agent 和不同配置；账号隔离遵循 Agent 自身的配置能力。
+
+每个参数都是数组中的独立元素，按原样传递，不进行 shell 展开。请使用可执行程序路径、参数数组与 `env`，不要填写整条 shell 命令。Windows 上使用 `.exe`；npm Agent 也可配置 `node.exe`，在 `args` 中填写 JavaScript 入口。凭证优先保存在 Agent 的登录存储或被控电脑的环境变量中。启动配置仅保存在本机，远程控制端不能编辑。
+
+## 会话、模型与审批
+
+Agent 同时声明会话列表和加载能力时，会显示原生会话。ReignHub 使用稳定会话 ID，消息按需加载；自己的会话与历史快照持久保存在本机 SQLite 中。不支持加载的 Agent 仍可新建会话，重启 ReignHub 后也能阅读已缓存消息。
+
+模型从当前会话的 ACP 模型配置读取，支持分组列表；未提供模型配置时使用 Agent 默认模型。图片与内嵌文件输入按 Agent 的输入能力启用。
+
+授权弹窗保留 Agent 提供的原始选项，区分一次性与长期授权。设备配对不会自动批准工具操作。工具遵循 Agent 自身的权限与沙箱；ReignHub 不声明客户端文件系统和终端服务。
+
+ACP 没有通用的生成中追加消息命令，请等待回复完成或先停止生成。控制端断线时，被控电脑上的 Agent 任务会继续运行。

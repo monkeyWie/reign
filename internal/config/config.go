@@ -18,20 +18,32 @@ type Config struct {
 	ServiceURL string `json:"serviceUrl,omitempty"`
 	DeviceName string `json:"deviceName,omitempty"`
 	// ManagedAgents remembers explicit backend setup; it is not an access permission.
-	ManagedAgents map[string]bool `json:"managedAgents,omitempty"`
-	DataDir       string          `json:"-"`
-	Listen        string          `json:"listen"`
-	RemoteListen  string          `json:"remoteListen"`
-	RemoteEnabled bool            `json:"remoteEnabled"`
-	DesktopListen string          `json:"desktopListen"`
-	CodexCLI      string          `json:"codexCli"`
-	CodexApp      string          `json:"codexApp"`
-	TLSCert       string          `json:"tlsCert,omitempty"`
-	TLSKey        string          `json:"tlsKey,omitempty"`
-	RelayURL      string          `json:"relayUrl,omitempty"`
-	RelayToken    string          `json:"relayToken,omitempty"`
-	HostID        string          `json:"hostId,omitempty"`
-	STUN          []string        `json:"stun,omitempty"`
+	ManagedAgents map[string]bool  `json:"managedAgents,omitempty"`
+	Agents        map[string]Agent `json:"agents,omitempty"`
+	DataDir       string           `json:"-"`
+	Listen        string           `json:"listen"`
+	RemoteListen  string           `json:"remoteListen"`
+	RemoteEnabled bool             `json:"remoteEnabled"`
+	DesktopListen string           `json:"desktopListen"`
+	CodexCLI      string           `json:"codexCli"`
+	CodexApp      string           `json:"codexApp"`
+	TLSCert       string           `json:"tlsCert,omitempty"`
+	TLSKey        string           `json:"tlsKey,omitempty"`
+	RelayURL      string           `json:"relayUrl,omitempty"`
+	RelayToken    string           `json:"relayToken,omitempty"`
+	HostID        string           `json:"hostId,omitempty"`
+	STUN          []string         `json:"stun,omitempty"`
+}
+
+// Agent launch settings are local configuration. Remote peers cannot supply
+// executables, shell commands, or environment overrides through the RPC API.
+type Agent struct {
+	Name     string            `json:"name,omitempty"`
+	Protocol string            `json:"protocol"`
+	Command  string            `json:"command"`
+	Args     []string          `json:"args,omitempty"`
+	Env      map[string]string `json:"env,omitempty"`
+	Disabled bool              `json:"disabled,omitempty"`
 }
 
 func DefaultDir() string {

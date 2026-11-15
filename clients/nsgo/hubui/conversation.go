@@ -348,11 +348,13 @@ func (s *State) composer(cx *core.Scope) core.Node {
 			c := palette(cx)
 			return core.Style{Height: core.Pt(inputHeight.Get()), Color: c.foreground, PlaceholderColor: c.mutedText}
 		}},
-		core.View{Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 10}, Children: []core.Node{button(cx, "attach-files", "", lucide.Plus, "ghost", func() {
-			if !disabled() {
-				s.chooseFiles(cx)
-			}
-		}), spacer(), core.Dynamic(func(cx *core.Scope) core.Node {
+		core.View{Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 10}, Children: []core.Node{core.Show{When: func() bool { return s.agentCapability("imageInput") || s.agentCapability("fileInput") }, Then: func(cx *core.Scope) core.Node {
+			return button(cx, "attach-files", "", lucide.Plus, "ghost", func() {
+				if !disabled() {
+					s.chooseFiles(cx)
+				}
+			})
+		}}, spacer(), core.Dynamic(func(cx *core.Scope) core.Node {
 			_ = modelCatalog.Get()
 			options := []chat.Option{}
 			found := false
@@ -364,7 +366,17 @@ func (s *State) composer(cx *core.Scope) core.Node {
 				options = append([]chat.Option{{ID: s.model, Label: s.model}}, options...)
 			}
 			if core.Untracked(cx, running) {
-				return label(cx, s.model, 12, true)
+				name := s.model
+				for _, m := range s.models {
+					if str(m, "id") == s.model {
+						name = str(m, "name")
+						break
+					}
+				}
+				if name == "" {
+					name = "Agent 默认模型"
+				}
+				return label(cx, name, 12, true)
 			}
 			return core.View{Style: core.Style{MaxWidth: core.Pt(220), FlexShrink: 1, MinWidth: core.Pt(0)}, Children: []core.Node{chat.Picker{TestID: "model-selector", Label: func() string {
 				s.read()
@@ -376,9 +388,9 @@ func (s *State) composer(cx *core.Scope) core.Node {
 				if s.model != "" {
 					return s.model
 				}
-				return "模型未知"
+				return "Agent 默认模型"
 			}, Options: options, Selected: func() string { s.read(); return s.model }, OnChange: func(id string) { s.model = id; s.changed() }, Width: 300, SearchLabel: "搜索模型"}}}
-		}), core.Show{When: running, Then: func(cx *core.Scope) core.Node {
+		}), core.Show{When: func() bool { return running() && s.agentCapability("interrupt") }, Then: func(cx *core.Scope) core.Node {
 			return core.View{TestID: "interrupt-generation", Role: core.RoleButton, Label: "停止生成", Tooltip: label(cx, "停止生成", 12, false), OnPress: func(core.PressEvent) { s.send("interrupt") }, Style: core.Style{Width: core.Pt(36), Height: core.Pt(36), CornerRadius: 18, FlexShrink: 0, AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter}, StyleFunc: func() core.Style {
 				return core.Style{Background: palette(cx).foreground}
 			}, Children: []core.Node{core.View{Style: core.Style{Width: core.Pt(11), Height: core.Pt(11), CornerRadius: 2}, StyleFunc: func() core.Style { return core.Style{Background: palette(cx).background} }}}}
@@ -439,7 +451,29 @@ func (s *State) messageNavigation(cx *core.Scope, rows *core.Memo[[]Message], re
 	})}}
 }
 func (s *State) approvalCard(cx *core.Scope, a Object) core.Node {
-	return s.messageInset(cx, card(cx, label(cx, "Agent 请求授权", 14, false), label(cx, str(a, "method"), 12, true), row(button(cx, "approve-"+str(a, "id"), "允许", nil, "primary", func() { s.decision(a, "accept") }), button(cx, "deny-"+str(a, "id"), "拒绝", nil, "outline", func() { s.decision(a, "decline") }))))
+	params := object(a["params"])
+	options := objects(params["options"])
+	buttons := []core.Node{}
+	for _, option := range options {
+		o := option
+		style := "outline"
+		if str(o, "kind") == "allow_once" {
+			style = "primary"
+		}
+		buttons = append(buttons, button(cx, "approval-option-"+str(a, "id")+"-"+str(o, "id"), str(o, "name"), nil, style, func() { s.decision(a, str(o, "id")) }))
+	}
+	if flag(params, "input") {
+		value := core.NewSignal(cx, str(params, "value"))
+		buttons = append(buttons, core.Input{TestID: "approval-input-" + str(a, "id"), Label: "Agent 请求的内容", Value: value.Get, OnChange: value.Set, Multiline: true, Style: core.Style{MinHeight: core.Pt(72), MaxHeight: core.Pt(180)}}, button(cx, "approval-submit-"+str(a, "id"), "提交", nil, "primary", func() { s.answerApproval(a, value.Get()) }))
+	}
+	if len(buttons) == 0 {
+		buttons = []core.Node{button(cx, "approve-"+str(a, "id"), "允许", nil, "primary", func() { s.decision(a, "accept") }), button(cx, "deny-"+str(a, "id"), "拒绝", nil, "outline", func() { s.decision(a, "decline") })}
+	}
+	title := str(params, "title")
+	if title == "" {
+		title = str(a, "method")
+	}
+	return s.messageInset(cx, card(cx, label(cx, "Agent 请求授权", 14, false), label(cx, title, 12, true), core.View{Style: core.Style{Gap: 8}, Children: buttons}))
 }
 func (s *State) openLink(cx *core.Scope, m Message, url string) {
 	for _, a := range m.Attachments {

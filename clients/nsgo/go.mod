@@ -13,6 +13,7 @@ require (
 
 require (
 	github.com/andybalholm/brotli v1.2.6 // indirect
+	github.com/coder/acp-go-sdk v0.13.5 // indirect
 	github.com/dop251/goja v0.0.0-20261027234916-5f913d1693d9 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/ebitengine/purego v0.11.2 // indirect

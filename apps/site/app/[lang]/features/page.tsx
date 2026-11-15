@@ -176,6 +176,18 @@ export default async function Features({
               ],
               [
                 Layers3,
+                "Claude Code · ACP",
+                t("成熟 Agent，统一远程体验"),
+                "/docs/agents/acp",
+              ],
+              [
+                Code2,
+                "Pi",
+                t("原生 RPC，实时消息与工具审批"),
+                "/docs/agents/pi",
+              ],
+              [
+                Layers3,
                 t("开放 Provider 架构"),
                 t("统一接入、会话与连接能力，为扩展更多 Agent 工作流而设计。"),
                 "/docs/contributing/providers",

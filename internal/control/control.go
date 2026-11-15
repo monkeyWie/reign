@@ -191,6 +191,9 @@ func (d *Dispatcher) dispatch(ctx context.Context, r Request) (any, error) {
 		}
 		return nil, p.Send(ctx, r.Session, r.Text)
 	case "models":
+		if models, ok := p.(provider.SessionModelProvider); ok && r.Session != "" {
+			return models.SessionModels(ctx, r.Session)
+		}
 		if models, ok := p.(provider.ModelProvider); ok {
 			return models.Models(ctx)
 		}

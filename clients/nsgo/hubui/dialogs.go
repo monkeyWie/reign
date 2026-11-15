@@ -60,6 +60,29 @@ func (s *State) dialogView(cx *core.Scope, kind string) core.Node {
 		}
 	}, Style: core.Style{Width: core.Pt(448), MaxWidth: core.Pct(96)}}
 	switch {
+	case kind == "agent-config" || strings.HasPrefix(kind, "agent-config:"):
+		title = "Agent 接入配置"
+		idValue := ""
+		if strings.HasPrefix(kind, "agent-config:") {
+			idValue = strings.TrimPrefix(kind, "agent-config:")
+		}
+		def := object(s.agentDefinitions[idValue])
+		if def == nil {
+			def = Object{"name": "My ACP Agent", "protocol": "acp", "command": "", "args": []string{}, "env": Object{}}
+		}
+		initial, _ := json.MarshalIndent(def, "", "  ")
+		id := core.NewSignal(cx, idValue)
+		settings := core.NewSignal(cx, string(initial))
+		children = append(children, label(cx, "Agent 在这台电脑上运行。先安装并登录对应 CLI；参数为 JSON 数组，每个元素是一个原样参数。", 13, true), field("agent-id", "Agent ID（如 my-agent）", id, false), core.Input{TestID: "agent-settings", Label: "Agent 配置 JSON", Value: settings.Get, OnChange: settings.Set, Multiline: true, Style: core.Style{Height: core.Pt(230), FontSize: 12}}, label(cx, "支持 acp 和 pi。保存后重启 ReignHub 生效。环境变量只保存在本机，不会同步给控制端。", 12, true))
+		footer = append(footer, button(cx, "save-agent", "保存配置", nil, "primary", func() {
+			var value Object
+			if err := json.Unmarshal([]byte(settings.Get()), &value); err != nil {
+				s.error = "配置 JSON 无效：" + err.Error()
+				s.changed()
+				return
+			}
+			s.call("host.agent.save", Object{"id": id.Get(), "agent": value}, func(any) { close(); s.notice = "Agent 配置已保存，重启 ReignHub 后生效"; s.changed() })
+		}))
 	case kind == "account":
 		title = "账号与设备同步"
 		prefix := "client.account."

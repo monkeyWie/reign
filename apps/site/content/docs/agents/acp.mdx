@@ -1,0 +1,55 @@
+---
+title: ACP agents
+description: Connect Claude Code, Cursor, DeepSeek Harness and other ACP agents.
+---
+
+[Agent Client Protocol](https://agentclientprotocol.com/) gives local agents a shared conversation interface. ReignHub uses the [Go ACP SDK](https://github.com/coder/acp-go-sdk) over standard input/output and negotiates ACP v1.
+
+## Install and sign in
+
+Install the agent on the host computer and complete its own CLI sign-in. Open **Local host → Agents** in ReignHub and enable its preset. Installing ReignHub does not install agents or model subscriptions.
+
+| Agent            | Executable         | Arguments                                 | Environment                          |
+| ---------------- | ------------------ | ----------------------------------------- | ------------------------------------ |
+| Claude Code      | `claude-agent-acp` | None                                      | `CLAUDE_AGENT_ACP_EXPERIMENTAL_V2=0` |
+| Cursor           | `cursor-agent`     | `acp`                                     | Agent defaults                       |
+| OpenCode         | `opencode`         | `acp`                                     | Agent defaults                       |
+| Grok Build       | `grok`             | `--permission-mode default agent stdio`   | Agent defaults                       |
+| Antigravity      | `agy`              | `acp`                                     | Agent defaults                       |
+| Kiro             | `kiro-cli`         | `acp --agent-engine=v3 --auth-method=cli` | Agent defaults                       |
+| Muse Code        | `muse`             | `acp`                                     | `MUSE_EXPERIMENTAL_ACP=on`           |
+| fx               | `fx`               | `acp`                                     | Agent defaults                       |
+| DeepSeek Harness | `dsh`              | `--profile acp`                           | Agent defaults                       |
+| Gemini CLI       | `gemini`           | `--acp`                                   | Agent defaults                       |
+
+Claude Code uses the [Claude Agent ACP adapter](https://github.com/agentclientprotocol/claude-agent-acp). Install it with `npm install -g @agentclientprotocol/claude-agent-acp` if you do not have its standalone executable. The preset selects ACP v1 explicitly.
+
+Use a current agent version that provides the listed entry point. Muse's ACP entry point is experimental and requires the environment flag shown above. Official commands and distribution details are also listed in the [ACP Registry](https://agentclientprotocol.com/get-started/registry).
+
+## Custom agents
+
+Choose **Add ACP Agent** in the host's Agent panel. Enter a unique instance ID and a configuration:
+
+```json
+{
+  "name": "My Agent",
+  "protocol": "acp",
+  "command": "/absolute/path/to/my-agent",
+  "args": ["acp"],
+  "env": {}
+}
+```
+
+Save and restart ReignHub, then enable the instance. Existing presets have a **Configure** action for changing executable paths, arguments and environment variables. Multiple IDs can launch the same agent with different settings. Account isolation follows the agent's own configuration.
+
+Arguments are literal array elements. There is no shell expansion: use an executable path, separate arguments and the `env` map, rather than a shell command string. On Windows, use an `.exe`, or `node.exe` with the JavaScript entry point in `args`, for npm-based agents. Keep credentials in the agent's own login store or host environment. Agent launch settings stay on the host and cannot be edited by remote controllers.
+
+## Sessions, models and approvals
+
+Native sessions appear when the agent advertises both session listing and loading. ReignHub keeps stable session IDs and loads messages on demand. Its own conversations and history snapshots persist locally in SQLite. Agents without load support can still start new conversations; cached messages remain readable after restarting ReignHub.
+
+Models are read from each session's ACP model configuration, including grouped model lists. Agents without a model configuration use their own default. Image and embedded file input follow the agent's prompt capabilities.
+
+Permission prompts show the exact choices offered by the agent, including one-time and persistent choices. ReignHub does not turn pairing permission into automatic tool approval. Agent tools run under the agent's own permissions and sandbox; client-side filesystem and terminal services are not advertised.
+
+ACP does not provide a portable steering command. Stop the current response or wait for completion before sending another message. An agent task continues on the host if the remote controller disconnects.

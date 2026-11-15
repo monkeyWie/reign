@@ -1,21 +1,29 @@
 ---
 title: Connect your agents
-description: Connect Codex App and CLI to manage projects and sessions together.
+description: Codex, Claude Code, Pi and ACP agents, together across your devices.
 ---
 
-## Supported agents
+## Choose your agent
 
-| Agent     | Workflow                                                                      | Setup                                       |
-| --------- | ----------------------------------------------------------------------------- | ------------------------------------------- |
-| Codex App | Share sessions and live output between the desktop App and remote controllers | [Connect Codex App](/docs/agents/codex-app) |
-| Codex CLI | Connect the CLI backend to manage projects and sessions                       | [Connect Codex CLI](/docs/agents/codex-cli) |
+| Agent                            | Integration                    | Setup                                              |
+| -------------------------------- | ------------------------------ | -------------------------------------------------- |
+| Codex App                        | Shared desktop backend         | [Codex App](/docs/agents/codex-app)                |
+| Codex CLI                        | Native app-server              | [Codex CLI](/docs/agents/codex-cli)                |
+| Claude Code                      | Claude Agent ACP adapter       | [ACP setup](/docs/agents/acp)                      |
+| Cursor, OpenCode, Grok Build     | Official ACP entry points      | [ACP setup](/docs/agents/acp)                      |
+| Antigravity, Kiro, Muse Code, fx | ACP                            | [ACP setup](/docs/agents/acp)                      |
+| DeepSeek Harness, Gemini CLI     | ACP                            | [ACP setup](/docs/agents/acp)                      |
+| Pi                               | Native RPC with tool approvals | [Pi setup](/docs/agents/pi)                        |
+| Your own ACP agent               | Configurable local executable  | [Add an ACP agent](/docs/agents/acp#custom-agents) |
 
-Install and sign in to your agent on the host computer. Open the ReignHub local dashboard and enable its provider. Once it shows Ready, you can send instructions from other devices. Model accounts and usage are supplied by your agent service.
+Install and authenticate the agent on your host computer, then enable it in ReignHub's local dashboard. Controllers use the same session and message interface on desktop, Android and the Web. Model access and usage are supplied by your agent service.
 
-## One session experience
+## Shared experience
 
-Providers map agent interfaces to shared capabilities: session lists, history, creation, messages, live output, approvals, models and attachments. Sessions share project groups, with icons identifying their sources.
+All integrations use ReignHub's pairing, encrypted transport, project groups, history cache and live messages. Model selection, image/file input and native history recovery depend on capabilities reported by the agent. ReignHub only enables supported operations.
 
-## Extend to more agents
+ACP and Pi launch local agent processes for ReignHub conversations. They use the agent's credentials and project environment; they do not attach to an arbitrary already-running terminal conversation. ACP native sessions are discovered when the agent supports both listing and loading. Message histories load when you open a session.
 
-The provider architecture separates agent adaptation from device connectivity. Contributors reuse pairing, encryption, relay and synchronization while implementing the agent interface. [Add an agent provider](/docs/contributing/providers).
+## Extend ReignHub
+
+Use a custom ACP command for compatible agents. A new protocol can implement the shared [provider interface](/docs/contributing/providers) without changing connectivity or writing a second controller UI.

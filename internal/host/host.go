@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/monkeyWie/reignhub/internal/agents"
 	"github.com/monkeyWie/reignhub/internal/config"
 	"github.com/monkeyWie/reignhub/internal/control"
 	"github.com/monkeyWie/reignhub/internal/device"
@@ -354,6 +355,28 @@ func (m *Manager) Local(ctx context.Context, r control.Request) (any, error) {
 		}
 	}
 	switch r.Method {
+	case "host.agents":
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		return agents.Catalog(m.cfg.Agents), nil
+	case "host.agent.save":
+		var edit struct {
+			ID    string       `json:"id"`
+			Agent config.Agent `json:"agent"`
+		}
+		if err := json.Unmarshal(r.Params, &edit); err != nil {
+			return nil, err
+		}
+		if err := agents.Validate(edit.ID, edit.Agent); err != nil {
+			return nil, err
+		}
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		if m.cfg.Agents == nil {
+			m.cfg.Agents = map[string]config.Agent{}
+		}
+		m.cfg.Agents[edit.ID] = edit.Agent
+		return map[string]bool{"restartRequired": true}, m.cfg.Save()
 	case "host.account.start", "host.account.poll", "host.account.status", "host.account.devices":
 		m.mu.Lock()
 		i := m.state.Identity
@@ -451,7 +474,8 @@ func (m *Manager) Local(ctx context.Context, r control.Request) (any, error) {
 		}
 		// Remember backend setup for providers that own a managed backend.
 		// CLI attachment is discovered automatically and needs no saved switch.
-		if p.Status(ctx).Capabilities.Desktop {
+		managed, ownsRuntime := p.(provider.ManagedProvider)
+		if p.Status(ctx).Capabilities.Desktop || ownsRuntime && managed.Managed() {
 			m.mu.Lock()
 			if m.cfg.ManagedAgents == nil {
 				m.cfg.ManagedAgents = map[string]bool{}

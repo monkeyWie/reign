@@ -3,6 +3,10 @@ title: Add an agent provider
 description: Reuse the connection core and implement only agent-specific adaptation.
 ---
 
+## Start with ACP
+
+If an agent already speaks ACP, add a launch preset in `internal/agents/catalog.go` or configure a local instance. Reuse the SDK, session engine and controller UI instead of creating another provider. Pi's native RPC is the example for a separate protocol adapter.
+
 ## Integration boundary
 
 Providers live in the Go application layer; the interface is in `internal/provider/provider.go`. Handle installation/readiness, native protocols, sessions and commands. Do not build another pairing, account or relay system.

@@ -12,16 +12,17 @@ import (
 var ErrUnavailable = errors.New("provider unavailable")
 
 type Capabilities struct {
-	Streaming  bool `json:"streaming,omitempty"`
-	History    bool `json:"history"`
-	Create     bool `json:"create"`
-	Send       bool `json:"send"`
-	Steer      bool `json:"steer"`
-	Interrupt  bool `json:"interrupt"`
-	Approvals  bool `json:"approvals"`
-	Desktop    bool `json:"desktop"`
-	ImageInput bool `json:"imageInput"`
-	FileInput  bool `json:"fileInput"`
+	MaxAttachmentBytes int64 `json:"maxAttachmentBytes,omitempty"`
+	Streaming          bool  `json:"streaming,omitempty"`
+	History            bool  `json:"history"`
+	Create             bool  `json:"create"`
+	Send               bool  `json:"send"`
+	Steer              bool  `json:"steer"`
+	Interrupt          bool  `json:"interrupt"`
+	Approvals          bool  `json:"approvals"`
+	Desktop            bool  `json:"desktop"`
+	ImageInput         bool  `json:"imageInput"`
+	FileInput          bool  `json:"fileInput"`
 }
 
 type Instance struct {
@@ -148,6 +149,16 @@ type Model struct {
 	Name    string `json:"name"`
 	Default bool   `json:"default"`
 }
+
+// SessionModelProvider discovers models in the selected workspace/session.
+// Agents may advertise different choices per session; do not borrow another
+// session's list when composing a prompt.
+type SessionModelProvider interface {
+	SessionModels(context.Context, string) ([]Model, error)
+}
+
+// ManagedProvider owns a subprocess runtime and remembers explicit enablement.
+type ManagedProvider interface{ Managed() bool }
 
 // ModelProvider is optional: providers without model selection retain Send.
 type ModelProvider interface {

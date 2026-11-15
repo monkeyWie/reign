@@ -311,11 +311,15 @@ func (s *State) local(cx *core.Scope) core.Node {
 		}}), core.Each(func() []Object { s.read(); return objects(s.host["grants"]) }, func(g Object) string { return str(g, "client") }, func(cx *core.Scope, g func() Object, _ func() int) core.Node {
 			return row(dynamicText(cx, func() string { return str(g(), "name") }, 13, false), spacer(), button(cx, "revoke-"+str(g(), "client"), "撤销授权", nil, "ghost", func() { s.call("host.revoke", Object{"client": g()["client"]}, nil) }))
 		})),
-		core.View{Style: core.Style{Margin: core.Edges{Top: 12}}, Children: []core.Node{heading(cx, "本机 Agent", "已就绪的 Agent 可供已授权设备远控；需要接入时点击启用。")}},
+		core.View{Style: core.Style{Margin: core.Edges{Top: 12}}, Children: []core.Node{row(heading(cx, "本机 Agent", "已就绪的 Agent 可供已授权设备远控；需要接入时点击启用。"), spacer(), button(cx, "add-agent", "添加 ACP Agent", nil, "outline", func() { s.dialog.Set("agent-config") }))}},
 		core.Each(func() []Object { s.read(); return s.localProviders }, func(p Object) string { return str(p, "id") }, func(cx *core.Scope, p func() Object, _ func() int) core.Node {
 			return card(cx, row(glyph(cx, lucide.Bot, 24), core.View{Style: core.Style{FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0), Gap: 6}, Children: []core.Node{dynamicText(cx, func() string { return str(p(), "name") }, 14, false), dynamicText(cx, func() string {
 				return choose(flag(p(), "installed"), "已安装", "未安装") + " · " + str(p(), "detail")
-			}, 12, true)}}, core.Show{When: func() bool {
+			}, 12, true)}}, core.Show{When: func() bool { return str(p(), "id") != "codex-app" && str(p(), "id") != "codex-cli" }, Then: func(cx *core.Scope) core.Node {
+				return button(cx, "configure-agent-"+str(p(), "id"), "配置", nil, "ghost", func() {
+					s.call("host.agents", nil, func(v any) { s.agentDefinitions = object(v); s.dialog.Set("agent-config:" + str(p(), "id")) })
+				})
+			}}, core.Show{When: func() bool {
 				return flag(p(), "installed") && str(p(), "state") != "unsupported" && !providerReady(p())
 			}, Then: func(cx *core.Scope) core.Node {
 				return button(cx, "enable-"+str(p(), "id"), "启用", nil, "outline", func() {

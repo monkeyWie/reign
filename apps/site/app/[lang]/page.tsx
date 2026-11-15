@@ -142,7 +142,7 @@ export default async function Home({
                 Terminal,
                 t("真实 Agent，真实会话"),
                 t(
-                  "接入 Codex App 与 CLI，管理原有会话、创建新任务。开放 Provider 架构，连接更多 Agent 工作流。",
+                  "接入 Codex、Claude Code、Pi 与 ACP Agent，统一管理项目、会话与实时消息。",
                 ),
               ],
               [
@@ -209,6 +209,20 @@ export default async function Home({
               </div>
               <span className="site-tag available">{t("已接入")}</span>
             </div>
+            {[
+              ["Claude Code", t("成熟 Agent，统一远程体验")],
+              ["Pi", t("原生 RPC，实时消息与工具审批")],
+              ["ACP", "Cursor · OpenCode · Gemini · DeepSeek Harness"],
+            ].map(([name, detail]) => (
+              <div className="agent-row" key={name}>
+                <Layers3 size={25} />
+                <div>
+                  <strong>{name}</strong>
+                  <p>{detail}</p>
+                </div>
+                <span className="site-tag available">{t("已接入")}</span>
+              </div>
+            ))}
             <div className="agent-architecture">
               <Layers3 size={18} />
               <p>

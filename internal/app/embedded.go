@@ -8,7 +8,9 @@ import (
 	"log"
 	"path/filepath"
 	"sync"
+	"time"
 
+	"github.com/monkeyWie/reignhub/internal/agents"
 	"github.com/monkeyWie/reignhub/internal/assets"
 	"github.com/monkeyWie/reignhub/internal/codex"
 	"github.com/monkeyWie/reignhub/internal/config"
@@ -49,13 +51,42 @@ func StartEmbedded(ctx context.Context, c config.Config) (*Embedded, error) {
 			log.Printf("Codex provider: %v", err)
 		}
 	}
-	r, err := startEmbedded(ctx, c, map[string]provider.Provider{"codex-app": backend, "codex-cli": cli}, attachments)
+	providers := map[string]provider.Provider{"codex-app": backend, "codex-cli": cli}
+	closers := []func() error{backend.Close, cli.Close}
+	for id, def := range agents.Catalog(c.Agents) {
+		if def.Disabled {
+			continue
+		}
+		if err := agents.Validate(id, def); err != nil {
+			log.Printf("Agent %s: %v", id, err)
+			continue
+		}
+		p := agents.New(ctx, id, def, c.DataDir, attachments)
+		providers[id] = p
+		closers = append(closers, p.Close)
+	}
+	r, err := startEmbedded(ctx, c, providers, attachments)
 	if err != nil {
-		_ = backend.Close()
-		_ = cli.Close()
+		for _, close := range closers {
+			_ = close()
+		}
 		return nil, err
 	}
-	r.closers = []func() error{backend.Close, cli.Close}
+	r.closers = closers
+	// Each Agent owns its startup deadline. Slow third-party initialization cannot
+	// hold up the host service or the local-first controller UI.
+	for id, p := range providers {
+		if id == "codex-app" || !c.ManagedAgents[id] {
+			continue
+		}
+		go func(id string, p provider.Provider) {
+			setup, cancel := context.WithTimeout(r.ctx, 2*time.Minute)
+			defer cancel()
+			if err := p.Start(setup); err != nil {
+				log.Printf("Agent %s initialization: %v", id, err)
+			}
+		}(id, p)
+	}
 	return r, nil
 }
 

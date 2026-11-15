@@ -31,6 +31,7 @@ type State struct {
 	width                                                   *core.Signal[core.Points]
 	dialog                                                  *core.Signal[string]
 	devices, localProviders, providers, sessions, approvals []Object
+	agentDefinitions                                        Object
 	host, selected, transcript, scanned                     Object
 	accountLogin, accountStatus                             Object
 	accountDevices                                          []Object
@@ -468,6 +469,9 @@ func (s *State) canSend() bool {
 	if s.selected == nil || s.busy || !s.connected() || s.pendingSend() != "" {
 		return false
 	}
+	if activeTurn(s.transcript) != nil && !s.agentCapability("steer") {
+		return false
+	}
 	for _, u := range s.uploads {
 		if u.Status != "ready" {
 			return false
@@ -477,6 +481,9 @@ func (s *State) canSend() bool {
 }
 func (s *State) send(method string) {
 	if s.selected == nil || s.busy || !s.connected() || s.pendingSend() != "" {
+		return
+	}
+	if method == "interrupt" && !s.agentCapability("interrupt") {
 		return
 	}
 	if method != "interrupt" && !s.canSend() {
@@ -623,3 +630,22 @@ func (s *State) toggleTheme() {
 	s.changed()
 }
 func pairingCode(v Object) string { b, _ := json.Marshal(v); return "agenthub2:" + base64URL(b) }
+
+func (s *State) agentCapabilities() Object {
+	s.read()
+	id := str(s.selected, "providerId")
+	for _, p := range s.providers {
+		if str(p, "id") == id {
+			return object(p["capabilities"])
+		}
+	}
+	return nil
+}
+func (s *State) agentCapability(name string) bool { return flag(s.agentCapabilities(), name) }
+func (s *State) answerApproval(a Object, value string) {
+	target, p, id := s.target, str(s.selected, "providerId"), str(s.selected, "id")
+	s.busy = true
+	s.async(func(ctx context.Context) (any, error) {
+		return rpc(ctx, s.api, target, p, id, "decide", Object{"approval": a["id"], "decision": Object{"decision": "input", "answers": Object{"value": Object{"answers": []string{value}}}}})
+	}, func(any) { s.approvals = nil })
+}

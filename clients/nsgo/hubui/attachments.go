@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"mime"
+	"net/http"
 	"path"
 	"strings"
 	"sync/atomic"
@@ -90,6 +91,20 @@ func (s *State) drop(cx *core.Scope, uris []string) {
 func (s *State) addUpload(name, mime string, data []byte) {
 	if s.selected == nil || !s.connected() {
 		return
+	}
+	capabilities := s.agentCapabilities()
+	if capabilities != nil {
+		image := strings.HasPrefix(mime, "image/") || strings.HasPrefix(http.DetectContentType(data), "image/")
+		if image && !flag(capabilities, "imageInput") || !image && !flag(capabilities, "fileInput") {
+			s.error = "此 Agent 不支持这种附件类型"
+			s.changed()
+			return
+		}
+		if limit := number(capabilities, "maxAttachmentBytes"); limit > 0 && int64(len(data)) > limit {
+			s.error = fmt.Sprintf("此 Agent 的单个附件上限为 %d MiB", limit/(1<<20))
+			s.changed()
+			return
+		}
 	}
 	total := 0
 	for _, u := range s.uploads {

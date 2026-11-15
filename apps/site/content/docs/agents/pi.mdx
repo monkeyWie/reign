@@ -1,0 +1,28 @@
+---
+title: Pi
+description: Use Pi's native RPC, streaming output and local session files.
+---
+
+## Setup
+
+Install [Pi](https://pi.dev) on the host computer, then run `pi` and complete `/login`. For the current npm distribution:
+
+```sh
+npm install -g --ignore-scripts @earendil-works/pi-coding-agent
+```
+
+Use Pi 0.84.3 or newer and the Node.js version required by Pi. Enable **Pi** in ReignHub's local Agent panel. Use **Configure** if `pi` is not on your executable search path. Restart ReignHub after changing launch settings.
+
+## Native sessions and models
+
+ReignHub launches `pi --mode rpc` and gives each conversation a persistent Pi session file. The working directory remains your selected project. Session files and ReignHub's SQLite history remain on the host, with messages streamed to paired controllers.
+
+Pi reports available models through its own RPC. ReignHub retains both the provider and model ID, including names containing slashes. Your Pi authentication, project configuration and extensions still apply.
+
+## Messages and tools
+
+Pi supports live text, image input, interruption and steering while a response runs. ReignHub adds a blocking tool hook: file writes, commands and other non-read-only tools ask for approval through Pi's extension UI. Read, grep, find and ls continue without an approval dialog. This hook is not an operating-system sandbox.
+
+Confirmation, selection and text-input dialogs from extensions appear in the conversation. You can answer these without leaving the controller.
+
+You can leave a remote controller or temporarily lose its connection without cancelling a running Pi task. Reopening a session restores its local history and resumes the native session when needed.

@@ -306,5 +306,8 @@
   "提供 x64 与 arm64 安装程序，包含快捷方式和卸载功能。": "Native x64 and arm64 installers with shortcuts and an uninstaller.",
   "选择适合发行版的安装包，或使用 AppImage。运行需要 GTK 4。": "Choose a package for your distribution, or use AppImage. GTK 4 is required.",
   "打开 DMG，将 ReignHub 拖入 Applications。当前预览尚未完成 Apple 公证。": "Open the DMG and drag ReignHub into Applications. This preview has not been Apple-notarized.",
-  "NSGo 将同一套 Go 界面编译为 WebAssembly，浏览器控制台与原生端共用布局和交互。Next.js 与 Fumadocs 提供官网文档，OpenNext 统一部署到 Cloudflare。": "NSGo compiles the shared Go UI to WebAssembly, keeping browser layouts and interactions aligned with native apps. Next.js and Fumadocs power the website and docs, deployed together through OpenNext on Cloudflare."
+  "NSGo 将同一套 Go 界面编译为 WebAssembly，浏览器控制台与原生端共用布局和交互。Next.js 与 Fumadocs 提供官网文档，OpenNext 统一部署到 Cloudflare。": "NSGo compiles the shared Go UI to WebAssembly, keeping browser layouts and interactions aligned with native apps. Next.js and Fumadocs power the website and docs, deployed together through OpenNext on Cloudflare.",
+  "成熟 Agent，统一远程体验": "Established agents, one remote experience",
+  "原生 RPC，实时消息与工具审批": "Native RPC, live messages and tool approvals",
+  "接入 Codex、Claude Code、Pi 与 ACP Agent，统一管理项目、会话与实时消息。": "Connect Codex, Claude Code, Pi and ACP agents. Manage projects, sessions and live messages together."
 }

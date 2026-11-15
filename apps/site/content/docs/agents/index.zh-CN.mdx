@@ -1,21 +1,29 @@
 ---
 title: 连接你的 Agent
-description: 接入 Codex App 与 CLI，统一管理项目与会话。
+description: 将 Codex、Claude Code、Pi 与 ACP Agent 带到你的每一台设备。
 ---
 
-## 支持的 Agent
+## 选择 Agent
 
-| Agent     | 使用方式                                | 接入指南                                 |
-| --------- | --------------------------------------- | ---------------------------------------- |
-| Codex App | 桌面 App 与远程控制端共享会话与实时输出 | [接入 Codex App](/docs/agents/codex-app) |
-| Codex CLI | 连接 CLI 后端，管理项目与会话           | [接入 Codex CLI](/docs/agents/codex-cli) |
+| Agent                            | 接入方式                | 接入指南                                        |
+| -------------------------------- | ----------------------- | ----------------------------------------------- |
+| Codex App                        | 共享桌面后端            | [Codex App](/docs/agents/codex-app)             |
+| Codex CLI                        | 原生 app-server         | [Codex CLI](/docs/agents/codex-cli)             |
+| Claude Code                      | Claude Agent ACP 适配器 | [ACP 配置](/docs/agents/acp)                    |
+| Cursor、OpenCode、Grok Build     | 官方 ACP 入口           | [ACP 配置](/docs/agents/acp)                    |
+| Antigravity、Kiro、Muse Code、fx | ACP                     | [ACP 配置](/docs/agents/acp)                    |
+| DeepSeek Harness、Gemini CLI     | ACP                     | [ACP 配置](/docs/agents/acp)                    |
+| Pi                               | 原生 RPC 与工具审批     | [Pi 配置](/docs/agents/pi)                      |
+| 自定义 ACP Agent                 | 可配置的本机可执行程序  | [添加 ACP Agent](/docs/agents/acp#自定义-agent) |
 
-在被控电脑上安装 Agent，并完成其账号登录。打开 ReignHub 本机面板，按提示启用对应 Provider；状态为“已就绪”后，即可从其他设备发送指令。模型账号和使用费用由你使用的 Agent 服务提供。
+在被控电脑上安装 Agent 并完成登录，然后在 ReignHub 本机面板启用。桌面、安卓和 Web 控制端共用同一套会话与消息界面。模型访问权限和使用费用由对应 Agent 服务提供。
 
-## 统一的会话体验
+## 统一体验
 
-Provider 将各 Agent 的接口映射为统一能力：会话列表、历史记录、新建、发送、实时输出、审批、模型与附件。同一项目中的会话统一分组，通过图标识别来源。
+所有接入方式共用 ReignHub 的设备配对、加密传输、项目分组、历史缓存与实时消息。模型选择、图片／文件输入和原生历史恢复取决于 Agent 声明的能力，ReignHub 仅启用实际支持的操作。
 
-## 扩展更多 Agent
+ACP 与 Pi 会为 ReignHub 会话启动本机 Agent 进程，沿用 Agent 的账号与项目环境，不直接接管任意正在运行的终端会话。ACP Agent 同时支持会话列表和加载时，会自动发现原生会话；消息历史在打开会话时按需加载。
 
-Provider 架构将 Agent 适配与设备连接分离，贡献者可以复用配对、加密、中继和同步能力，专注实现 Agent 接口。[添加 Agent Provider](/docs/contributing/providers)。
+## 扩展接入
+
+兼容 ACP 的 Agent 可直接配置本机启动命令。接入新协议时，实现统一的 [Provider 接口](/docs/contributing/providers)，即可复用连接能力与控制端界面。

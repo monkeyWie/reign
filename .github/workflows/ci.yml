@@ -92,7 +92,7 @@ jobs:
           retention-days: 7
 
   windows-provider:
-    name: Test Windows Codex detection
+    name: Test Windows agent providers
     needs: metadata
     runs-on: windows-latest
     timeout-minutes: 15
@@ -104,9 +104,9 @@ jobs:
           cache-dependency-path: go.sum
       - name: Vet and test Windows provider
         run: |
-          go vet ./internal/system ./internal/codex
+          go vet ./internal/system ./internal/codex ./internal/agents
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          go test -timeout 3m ./internal/system ./internal/codex
+          go test -timeout 3m ./internal/system ./internal/codex ./internal/agents
 
   clients:
     name: Build ${{ matrix.name }} clients

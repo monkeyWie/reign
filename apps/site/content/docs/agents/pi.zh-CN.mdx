@@ -1,0 +1,28 @@
+---
+title: Pi
+description: 使用 Pi 原生 RPC、流式输出和本机会话文件。
+---
+
+## 安装与启用
+
+在被控电脑上安装 [Pi](https://pi.dev)，运行 `pi` 并通过 `/login` 登录。当前 npm 分发方式：
+
+```sh
+npm install -g --ignore-scripts @earendil-works/pi-coding-agent
+```
+
+使用 Pi 0.84.3 或更新版本，并安装 Pi 要求的 Node.js 版本。在 ReignHub 本机 Agent 面板启用 **Pi**。如果搜索路径中没有 `pi`，通过**配置**设置可执行程序路径；修改启动配置后重启 ReignHub。
+
+## 原生会话与模型
+
+ReignHub 启动 `pi --mode rpc`，为每个会话指定持久化的 Pi 会话文件。工作目录是你选择的项目，Pi 会话文件与 ReignHub SQLite 历史均保留在被控电脑上，消息实时同步给已配对的控制端。
+
+模型列表通过 Pi RPC 获取，同时保留 provider 与 model ID，包括名称中含有斜线的情况。继续沿用 Pi 的账号、项目配置与扩展。
+
+## 消息与工具
+
+Pi 支持实时文本、图片输入、停止生成和生成中追加消息。ReignHub 会加载阻塞式工具钩子：文件修改、命令和其他非只读工具，通过 Pi 扩展界面请求批准；read、grep、find 和 ls 无需逐次确认。该钩子不等同于操作系统沙箱。
+
+扩展的确认、选择与文本输入请求会显示在会话中，可以直接在控制端回答。
+
+退出远程控制端或暂时断网不会取消 Pi 任务。再次打开会话时优先显示本地历史，需要继续操作时恢复原生会话。
