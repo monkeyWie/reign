@@ -51,6 +51,9 @@ func (f *cachedWorkspaceAPI) Call(ctx context.Context, method string, p Object, 
 		return nil, nil
 	case "client.call":
 		if str(r, "method") == "watch" {
+			if flag(r, "probe") {
+				return Object{"epoch": "cache", "cursor": number(r, "after"), "reset": str(r, "epoch") != "cache"}, nil
+			}
 			<-ctx.Done()
 			return nil, ctx.Err()
 		}

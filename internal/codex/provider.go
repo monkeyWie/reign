@@ -192,6 +192,8 @@ func (p *Provider) Sessions(ctx context.Context, cursor string) (provider.Sessio
 	return page, nil
 }
 func (p *Provider) Transcript(ctx context.Context, id, cursor string) (provider.Transcript, error) {
+	// Capture before reading: later events can safely replay over this snapshot.
+	epoch, boundary := p.stream().log.Position()
 	var metadata struct{ Thread thread }
 	if err := p.call(ctx, "thread/read", map[string]any{"threadId": id}, &metadata); err != nil {
 		return provider.Transcript{}, err
@@ -212,7 +214,7 @@ func (p *Provider) Transcript(ctx context.Context, id, cursor string) (provider.
 			return provider.Transcript{}, err
 		}
 	}
-	out := provider.Transcript{Session: p.session(metadata.Thread), Turns: []provider.Turn{}, NextCursor: turns.NextCursor}
+	out := provider.Transcript{StreamEpoch: epoch, StreamCursor: boundary, Session: p.session(metadata.Thread), Turns: []provider.Turn{}, NextCursor: turns.NextCursor}
 	for i := len(turns.Data) - 1; i >= 0; i-- {
 		normalized := normalizeTurn(turns.Data[i])
 		p.attachments(ctx, id, metadata.Thread.Cwd, &normalized, turns.Data[i])

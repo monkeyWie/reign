@@ -15,6 +15,7 @@ import (
 )
 
 type Request struct {
+	Probe          bool                   `json:"probe,omitempty"`
 	Fresh          bool                   `json:"fresh,omitempty"`
 	Params         json.RawMessage        `json:"params,omitempty"`
 	Epoch          string                 `json:"epoch,omitempty"`
@@ -134,6 +135,11 @@ func (d *Dispatcher) dispatch(ctx context.Context, r Request) (any, error) {
 		return nil, fmt.Errorf("unknown provider %q", r.Provider)
 	}
 	if r.Method == "watch" {
+		if r.Probe {
+			if stream, ok := p.(provider.StreamProber); ok {
+				return stream.Probe(ctx, r.Session, r.Epoch, r.After)
+			}
+		}
 		if stream, ok := p.(provider.StreamingProvider); ok {
 			return stream.Watch(ctx, r.Session, r.Epoch, r.After)
 		}

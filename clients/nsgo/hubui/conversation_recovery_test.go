@@ -186,7 +186,7 @@ func TestReconnectPreservesLiveReplyAndReplaysFromCursor(t *testing.T) {
 	f := &replayAPI{demoAPI: newDemoAPI()}
 	app, s := conversationFixture(t, f, 390, Object{}, true)
 	app.Post(func() { s.cx.Post(s.startSessionWatch) })
-	app.WaitFor("text:"+initialLiveText, time.Second)
+	waitAnimatedText(app, initialLiveText, time.Second)
 	app.WaitUntil(time.Second, func() bool { app.Settle(); return s.streamCursor == 11 })
 	f.offline.Store(true)
 	app.Post(func() { s.cx.Post(func() { s.devices[0]["connected"] = false; s.changed() }) })
@@ -196,9 +196,52 @@ func TestReconnectPreservesLiveReplyAndReplaysFromCursor(t *testing.T) {
 	app.Post(func() { s.cx.Post(s.startSessionWatch) })
 	app.WaitFor("text:"+initialLiveText, time.Second)
 	app.Post(func() { s.cx.Post(func() { s.reconnectDevice("demo-device") }) })
-	app.WaitFor("text:"+initialLiveText+"，重连后继续输出", 3*time.Second)
+	waitAnimatedText(app, initialLiveText+"，重连后继续输出", 3*time.Second)
 	if f.wrongCursor.Load() {
 		t.Fatal("reconnect discarded the replay cursor")
 	}
 	app.Screenshot("reconnected-live-reply")
+}
+
+// Counting serialization catches UI-thread work even with a fast fake disk.
+type marshalCounter struct{ calls atomic.Int32 }
+
+func (c *marshalCounter) MarshalJSON() ([]byte, error) {
+	c.calls.Add(1)
+	return []byte(`null`), nil
+}
+
+func TestSendFirstFrameDoesNotSerializeHistoryOrRehashUploads(t *testing.T) {
+	f := &delayedSendAPI{demoAPI: newDemoAPI(), release: make(chan struct{})}
+	app, s := conversationFixture(t, f, 390, Object{}, true)
+	counter := &marshalCounter{}
+	app.Post(func() {
+		s.cx.Post(func() {
+			s.transcript["serializationProbe"] = counter
+			s.uploads = []*Upload{{ID: "image", Name: "image.png", MIME: "image/png", Data: make([]byte, 1<<20), SHA256: "computed-during-upload", Status: "ready"}}
+			s.changed()
+		})
+	})
+	app.Type("id:chat-input", "立即反馈")
+	var synchronousWrites atomic.Int32
+	app.Post(func() {
+		s.cx.Post(func() {
+			before := counter.calls.Load()
+			s.send("send")
+			synchronousWrites.Store(counter.calls.Load() - before)
+		})
+	})
+	app.WaitFor("id:send-loading", time.Second)
+	app.Find("id:send-loading")
+	app.Find("text:立即反馈")
+	if synchronousWrites.Load() != 0 {
+		t.Fatal("send serialized full history before its first pending frame")
+	}
+	if str(s.outgoing[s.key()][0].Attachments[0], "sha256") != "computed-during-upload" {
+		t.Fatal("send recalculated the already uploaded attachment digest")
+	}
+	if !app.Find("id:send-message").Props.Disabled {
+		t.Fatal("first pending frame allowed a duplicate send")
+	}
+	close(f.release)
 }

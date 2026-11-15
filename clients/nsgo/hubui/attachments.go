@@ -19,6 +19,7 @@ import (
 
 type Upload struct {
 	Name, MIME, ID, Status, Error string
+	SHA256                        string
 	Data                          []byte
 	Sent                          int64
 	Target, Provider, Session     string
@@ -166,6 +167,7 @@ func (s *State) upload(u *Upload) {
 				u.Error = err.Error()
 			} else {
 				u.Status = "ready"
+				u.SHA256 = sum
 			}
 			s.changed()
 		})

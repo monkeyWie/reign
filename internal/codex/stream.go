@@ -35,21 +35,28 @@ func (p *Provider) stream() *liveStream {
 }
 
 func (p *Provider) Watch(ctx context.Context, session, epoch string, after int64) (provider.StreamBatch, error) {
+	return p.watch(ctx, session, epoch, after, false)
+}
+func (p *Provider) Probe(ctx context.Context, session, epoch string, after int64) (provider.StreamBatch, error) {
+	return p.watch(ctx, session, epoch, after, true)
+}
+func (p *Provider) watch(ctx context.Context, session, epoch string, after int64, probe bool) (provider.StreamBatch, error) {
 	log := p.stream().log
-	batch, err := log.Watch(ctx, session, epoch, after)
+	// Check the boundary without waiting before rejoining a replaced subscription.
+	batch, err := log.Probe(ctx, session, epoch, after)
 	if err != nil {
-		return provider.StreamBatch{}, err
+		return batch, err
 	}
 	if batch.Reset {
-		// Reading history does not subscribe this RPC client to live events.
-		// Rejoin the same thread without changing its model, permissions or
-		// instructions, and without starting a turn.
 		if _, err := p.threadClient(ctx, session); err != nil {
 			return provider.StreamBatch{}, err
 		}
-		return log.Watch(ctx, session, "", 0)
+		return log.Probe(ctx, session, "", 0)
 	}
-	return batch, nil
+	if probe {
+		return batch, nil
+	}
+	return log.Watch(ctx, session, epoch, after)
 }
 
 func utf16Length(s string) int {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestEventLogReplayIsolationAndRecovery(t *testing.T) {
@@ -40,5 +41,27 @@ func TestEventLogReplayIsolationAndRecovery(t *testing.T) {
 	cancel()
 	if _, err := log.Watch(ctx, "a", reset.Epoch, log.next); err != context.Canceled {
 		t.Fatal("watch must cancel without blocking shutdown", err)
+	}
+}
+
+func TestProbeReturnsCaughtUpBoundaryWithoutLongPolling(t *testing.T) {
+	log := NewEventLog()
+	epoch, cursor := log.Position()
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	batch, err := log.Probe(ctx, "a", epoch, cursor)
+	if err != nil || batch.Reset || batch.Heartbeat || batch.Cursor != cursor || len(batch.Events) != 0 {
+		t.Fatal("caught-up probe waited or invalidated history", batch, err)
+	}
+	log.Publish(StreamEvent{SessionID: "b", Kind: "text", Delta: "private"})
+	log.Publish(StreamEvent{SessionID: "a", Kind: "text", Delta: "visible"})
+	batch, err = log.Probe(ctx, "a", epoch, cursor)
+	if err != nil || batch.Cursor != 2 || len(batch.Events) != 1 || batch.Events[0].Delta != "visible" {
+		t.Fatal("probe failed to replay isolated events", batch, err)
+	}
+	log.Reset()
+	batch, err = log.Probe(ctx, "a", epoch, batch.Cursor)
+	if err != nil || !batch.Reset || batch.Epoch == epoch {
+		t.Fatal("probe accepted stale epoch", batch, err)
 	}
 }

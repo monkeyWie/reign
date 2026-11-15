@@ -38,6 +38,9 @@ func (f *lazyCatalogueAPI) Call(ctx context.Context, method string, p Object, ta
 		case "models":
 			f.models.Add(1)
 		case "watch":
+			if flag(r, "probe") {
+				return Object{"epoch": "catalogue", "cursor": number(r, "after"), "reset": str(r, "epoch") != "catalogue"}, nil
+			}
 			<-ctx.Done()
 			return nil, ctx.Err()
 		}

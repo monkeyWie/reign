@@ -131,9 +131,11 @@ type Turn struct {
 }
 
 type Transcript struct {
-	Session    Session `json:"session"`
-	Turns      []Turn  `json:"turns"`
-	NextCursor string  `json:"nextCursor,omitempty"`
+	StreamEpoch  string  `json:"streamEpoch,omitempty"`
+	StreamCursor int64   `json:"streamCursor,omitempty"`
+	Session      Session `json:"session"`
+	Turns        []Turn  `json:"turns"`
+	NextCursor   string  `json:"nextCursor,omitempty"`
 }
 
 type CreateOptions struct {

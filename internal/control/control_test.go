@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/monkeyWie/reignhub/internal/provider"
 )
@@ -90,5 +91,38 @@ func TestControlDependsOnLiveReadinessWithoutEnableSwitch(t *testing.T) {
 	}
 	if p.writes.Load() != 1 {
 		t.Fatal("unexpected write count")
+	}
+}
+
+type probingProvider struct {
+	provider.Provider
+	log *provider.EventLog
+}
+
+func (p *probingProvider) Probe(ctx context.Context, session, epoch string, after int64) (provider.StreamBatch, error) {
+	return p.log.Probe(ctx, session, epoch, after)
+}
+func (p *probingProvider) Watch(ctx context.Context, session, epoch string, after int64) (provider.StreamBatch, error) {
+	return p.log.Watch(ctx, session, epoch, after)
+}
+func TestWatchProbeDispatchesWithoutWaitingForNewText(t *testing.T) {
+	p := &probingProvider{log: provider.NewEventLog()}
+	epoch, cursor := p.log.Position()
+	d := &Dispatcher{Providers: map[string]provider.Provider{"test": p}}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	// A caught-up ordinary Watch would wait; a probe must return immediately.
+	result := make(chan Response, 1)
+	go func() {
+		result <- d.Handle(ctx, Request{Method: "watch", Provider: "test", Session: "chat", Epoch: epoch, After: cursor, Probe: true})
+	}()
+	select {
+	case response := <-result:
+		var batch provider.StreamBatch
+		if response.Error != "" || json.Unmarshal(response.Result, &batch) != nil || batch.Reset || batch.Epoch != epoch {
+			t.Fatal("invalid probe reply", response)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("probe dispatched as a long poll")
 	}
 }

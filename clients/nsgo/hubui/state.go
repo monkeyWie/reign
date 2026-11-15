@@ -77,6 +77,9 @@ type State struct {
 	catalogueVersion, sessionGeneration                     uint64
 	deviceGeneration                                        uint64
 	transcriptSyncing, snapshotScheduled                    bool
+	syncVisible                                             bool
+	stream                                                  *sessionStream
+	animateText                                             map[string]bool
 	snapshots                                               *snapshotWriter
 	backgrounded, keepAlive, notificationAsked              bool
 	nativeBackgroundState                                   string
@@ -375,7 +378,9 @@ func (s *State) startSessionWatch() {
 	if s.watchCancel != nil {
 		s.watchCancel()
 	}
-	s.transcriptSyncing = s.transcript == nil
+	s.transcriptSyncing = false
+	s.syncVisible = false
+	s.animateText = map[string]bool{}
 	target, p, id, key := s.target, str(s.selected, "providerId"), str(s.selected, "id"), s.key()
 	if s.streamKey != key {
 		s.streamKey, s.streamEpoch, s.streamCursor = key, "", 0
@@ -396,7 +401,12 @@ func (s *State) startSessionWatch() {
 			s.changed()
 		})
 	}()
-	go s.watch(ctx, target, p, id, key, epoch, cursor)
+	w := &sessionStream{s: s, ctx: ctx, target: target, provider: p, session: id, key: key, epoch: epoch, cursor: cursor, baseline: epoch != "", approvals: make(chan struct{}, 1)}
+	s.stream = w
+	if epoch == "" {
+		w.syncing(true)
+	}
+	go w.run(epoch, cursor)
 }
 func (s *State) setTranscript(t Object) {
 	s.transcriptLoading = false
@@ -409,110 +419,6 @@ func (s *State) setTranscript(t Object) {
 	}
 	s.scheduleSnapshot()
 	s.changed()
-}
-func (s *State) watch(ctx context.Context, target, p, id, key, epoch string, cursor int64) {
-	snapshot := func() error {
-		started := time.Now()
-		v, e := rpc(ctx, s.api, target, p, id, "transcript", Object{"fresh": true})
-		s.cx.Post(func() {
-			if ctx.Err() == nil && s.key() == key {
-				s.transcriptSyncing = false
-				s.setConnectionIssue(target, "transcript", e)
-				if e == nil {
-					s.setTranscript(object(v))
-					s.reconcileOutgoing(started)
-					s.rebuildMessages()
-					s.trackNativeTask(target, p, id, object(v))
-				} else {
-					s.changed()
-				}
-			}
-		})
-		return e
-	}
-	_ = snapshot()
-	for ctx.Err() == nil {
-		v, e := rpc(ctx, s.api, target, p, id, "watch", Object{"epoch": epoch, "after": cursor})
-		if ctx.Err() != nil {
-			return
-		}
-		watchErr := e
-		s.cx.Post(func() {
-			if ctx.Err() == nil && s.key() == key {
-				s.setConnectionIssue(target, "watch", watchErr)
-				s.changed()
-			}
-		})
-		if e != nil {
-			// Keep the rendered transcript and replay cursor. An offline cache is
-			// older than the deltas already on screen, not a replacement for them.
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(time.Second):
-			}
-			continue
-		}
-		b := object(v)
-		events := objects(b["events"])
-		if flag(b, "reset") || flag(b, "heartbeat") {
-			if snapshot() != nil {
-				select {
-				case <-ctx.Done():
-					return
-				case <-time.After(time.Second):
-				}
-				continue
-			}
-		} else if len(events) > 0 {
-			applied := make(chan bool, 1)
-			s.cx.Post(func() {
-				if ctx.Err() != nil || s.key() != key {
-					applied <- false
-					return
-				}
-				next, reset := applyEvents(s.transcript, events)
-				s.transcript = next
-				s.trackNativeTask(target, p, id, next)
-				s.scheduleSnapshot()
-				s.reconcileOutgoing(time.Time{})
-				s.rebuildMessages()
-				s.changed()
-				applied <- reset
-			})
-			select {
-			case reset := <-applied:
-				if reset {
-					if snapshot() != nil {
-						continue
-					}
-				}
-			case <-ctx.Done():
-				return
-			}
-		}
-		epoch, cursor = str(b, "epoch"), number(b, "cursor")
-		checkpointEpoch, checkpointCursor := epoch, cursor
-		s.cx.Post(func() {
-			if ctx.Err() == nil && s.key() == key {
-				s.streamKey, s.streamEpoch, s.streamCursor = key, checkpointEpoch, checkpointCursor
-			}
-		})
-		v, e = rpc(ctx, s.api, target, p, id, "approvals", nil)
-		if e == nil {
-			s.cx.Post(func() {
-				if ctx.Err() == nil && s.key() == key {
-					s.approvals = objects(v)
-					s.changed()
-				}
-			})
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(32 * time.Millisecond):
-		}
-	}
 }
 func (s *State) older() {
 	cursor := str(s.transcript, "nextCursor")
@@ -596,6 +502,7 @@ func (s *State) send(method string) {
 		s.pendingSends = map[string]string{}
 	}
 	s.pendingSends[key] = method
+	s.changed()
 	var outgoing *outgoingMessage
 	if method != "interrupt" {
 		outgoing = s.queueOutgoing(body, sent)

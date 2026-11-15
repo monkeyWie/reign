@@ -114,7 +114,7 @@ func (s *State) conversation(cx *core.Scope, narrow bool) core.Node {
 		timelineChildren = append(timelineChildren, s.compactConversationHeader(cx, narrow))
 	}
 	children = append(children, core.View{TestID: "timeline", Style: fill, Children: timelineChildren})
-	children = append(children, s.composer(cx))
+	children = append(children, s.syncIndicator(cx), s.composer(cx))
 	return core.View{TestID: "conversation", Style: fill, Children: children}
 }
 
@@ -188,12 +188,16 @@ func (s *State) message(cx *core.Scope, get func() Message) core.Node {
 		}
 		return out
 	}, func(a Object) string { return str(a, "id") }, func(cx *core.Scope, a func() Object, _ func() int) core.Node { return s.imageTile(cx, get, a) }))
-	body := ui.TextView{MarkdownFunc: func() string {
+	bodyText := smoothReply(cx, func() string {
 		if user {
 			return strings.TrimRight(displayText(get()), " \t\r\n")
 		}
 		return displayText(get())
-	}, Options: textview.Options{Streaming: m.Live}, RenderImage: func(cx *core.Scope, im textview.Image) core.Node {
+	}, func() bool {
+		s.read()
+		return !user && s.animateText[get().ID] && !s.transcriptSyncing && s.connected()
+	})
+	body := ui.TextView{MarkdownFunc: bodyText, Options: textview.Options{Streaming: m.Live}, RenderImage: func(cx *core.Scope, im textview.Image) core.Node {
 		for _, a := range get().Attachments {
 			if str(a, "source") == im.Src {
 				return s.imageTile(cx, get, func() Object { return a })

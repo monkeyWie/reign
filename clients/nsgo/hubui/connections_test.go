@@ -30,6 +30,10 @@ func (f *connectionFixture) Call(ctx context.Context, method string, p Object, t
 		case "send", "steer":
 			f.sends.Add(1)
 		case "watch":
+			if flag(r, "probe") && !f.broken.Load() && !f.offline.Load() {
+				epoch := choose(f.version.Load() > 0, "resumed", "initial")
+				return Object{"epoch": epoch, "cursor": 0, "reset": str(r, "epoch") != epoch}, nil
+			}
 			f.watchStarts.Add(1)
 			if f.blockWatch.Load() {
 				<-ctx.Done()

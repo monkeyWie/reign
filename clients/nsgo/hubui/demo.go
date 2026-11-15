@@ -24,6 +24,9 @@ func (*demoAPI) CanHost() bool { return true }
 func (*demoAPI) Close()        {}
 func (d *demoAPI) Call(ctx context.Context, method string, p Object, target string, r Object) (result any, err error) {
 	if method == "client.call" && str(r, "method") == "watch" {
+		if flag(r, "probe") {
+			return Object{"epoch": "demo", "cursor": number(r, "after"), "reset": str(r, "epoch") != "demo"}, nil
+		}
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()

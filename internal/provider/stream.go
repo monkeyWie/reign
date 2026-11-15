@@ -32,6 +32,10 @@ type StreamBatch struct {
 	Events    []StreamEvent `json:"events"`
 }
 
+type StreamProber interface {
+	Probe(context.Context, string, string, int64) (StreamBatch, error)
+}
+
 type StreamingProvider interface {
 	Watch(context.Context, string, string, int64) (StreamBatch, error)
 }
@@ -87,6 +91,21 @@ func (l *EventLog) Publish(event StreamEvent) {
 }
 
 func (l *EventLog) Watch(ctx context.Context, session, epoch string, after int64) (StreamBatch, error) {
+	return l.read(ctx, session, epoch, after, false)
+}
+
+// Probe returns a replay boundary immediately, even when already caught up.
+func (l *EventLog) Probe(ctx context.Context, session, epoch string, after int64) (StreamBatch, error) {
+	return l.read(ctx, session, epoch, after, true)
+}
+
+func (l *EventLog) Position() (string, int64) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.epoch, l.next
+}
+
+func (l *EventLog) read(ctx context.Context, session, epoch string, after int64, probe bool) (StreamBatch, error) {
 	timeout := time.NewTimer(15 * time.Second)
 	defer timeout.Stop()
 	for {
@@ -101,7 +120,7 @@ func (l *EventLog) Watch(ctx context.Context, session, epoch string, after int64
 			l.mu.Unlock()
 			return batch, nil
 		}
-		if after < l.next {
+		if after < l.next || probe {
 			for _, event := range l.history {
 				if event.ID > after && event.SessionID == session {
 					batch.Events = append(batch.Events, event)

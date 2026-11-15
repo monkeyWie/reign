@@ -8,6 +8,10 @@ import (
 )
 
 func (s *State) refreshAfterSend(key, target, provider, session string) {
+	if w := s.stream; w != nil && w.current() && w.key == key {
+		w.refreshSnapshot()
+		return
+	}
 	started, generation := time.Now(), s.sessionGeneration
 	go func() {
 		v, err := rpc(s.ctx, s.api, target, provider, session, "transcript", Object{"fresh": true})
@@ -68,7 +72,7 @@ func (s *State) queueOutgoing(body string, uploads []*Upload) *outgoingMessage {
 	s.restoreOutgoing(s.transcript)
 	now := time.Now()
 	m := &outgoingMessage{ID: fmt.Sprintf("local-%d", now.UnixNano()), Text: body, Status: "sending", Timestamp: now.UnixMilli(), Known: map[string]bool{}}
-	for _, row := range messages(s.transcript) {
+	for _, row := range s.messageRows {
 		if row.Role == "user" {
 			m.Known[row.ID] = true
 		}
@@ -78,15 +82,17 @@ func (s *State) queueOutgoing(body string, uploads []*Upload) *outgoingMessage {
 		if strings.HasPrefix(u.MIME, "image/") {
 			kind = "image"
 		}
-		a := Object{"id": u.ID, "name": u.Name, "mime": u.MIME, "kind": kind, "size": len(u.Data), "sha256": hashBytes(u.Data), "state": "ready"}
+		a := Object{"id": u.ID, "name": u.Name, "mime": u.MIME, "kind": kind, "size": len(u.Data), "sha256": u.SHA256, "state": "ready"}
 		m.Attachments = append(m.Attachments, a)
 		s.images[s.key()+"|"+u.ID+"|false"] = u.Data
 	}
 	s.outgoing[s.key()] = append(s.outgoing[s.key()], m)
 	s.draft.Set("")
 	s.uploads = nil
-	s.rebuildMessages()
-	s.persistSnapshot()
+	// Append the local row directly. Hashing and snapshot serialization must
+	// not delay the send button's first pending frame.
+	s.messageRows = append(s.messageRows, Message{ID: m.ID, Role: "user", Text: m.Text, Timestamp: m.Timestamp, Attachments: m.Attachments, Delivery: m.Status})
+	s.scheduleSnapshot()
 	s.timeline.ScrollToIndexAt(0, 1, 0, true)
 	return m
 }
@@ -152,6 +158,15 @@ func (s *State) reconcileOutgoing(freshSince time.Time) {
 
 func (s *State) rebuildMessages() {
 	s.messageRows = messages(s.transcript)
+	if len(s.animateText) > 0 {
+		live := map[string]bool{}
+		for _, row := range s.messageRows {
+			if row.Live && s.animateText[row.ID] {
+				live[row.ID] = true
+			}
+		}
+		s.animateText = live
+	}
 	for _, m := range s.outgoing[s.key()] {
 		s.messageRows = append(s.messageRows, Message{ID: m.ID, Role: "user", Text: m.Text, Timestamp: m.Timestamp, Attachments: m.Attachments, Delivery: m.Status, DeliveryError: m.Error})
 	}

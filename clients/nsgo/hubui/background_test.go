@@ -29,6 +29,9 @@ func (f *backgroundTaskFixture) Call(ctx context.Context, method string, p Objec
 			}
 			return Object{"session": f.sessions[0], "turns": []Object{{"id": "live", "status": status, "items": []Object{{"id": "answer", "role": "assistant", "text": "任务输出"}}}}}, nil
 		case "watch":
+			if flag(request, "probe") {
+				return Object{"epoch": "tasks", "cursor": number(request, "after"), "reset": str(request, "epoch") != "tasks"}, nil
+			}
 			select {
 			case <-ctx.Done():
 				return nil, ctx.Err()
