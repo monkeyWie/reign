@@ -32,6 +32,10 @@ func deployedBrowserStability(t *testing.T) {
 	}
 	device := arr(v)[0]
 	target := str(device, "id")
+	statuses, err := a.Call(ctx, "client.presence", nil, "", nil)
+	if err != nil || len(arr(statuses)) != 1 || arr(statuses)[0]["online"] != true {
+		t.Fatalf("server directory presence via browser Fetch: %v, %v", statuses, err)
+	}
 	for round := 0; round < 60; round++ {
 		if _, err = a.Call(ctx, "client.sync", Object{"provider": "codex-cli"}, target, nil); err != nil {
 			t.Fatalf("sync %d: %v", round, err)
