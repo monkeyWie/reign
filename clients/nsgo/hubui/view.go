@@ -139,6 +139,7 @@ func RootWithAPI(cx *core.Scope, api API, start bool) core.Node {
 	theme.Radius = 6
 	cx.SetTheme(theme)
 	s := newState(cx, api)
+	s.installWorkspaceNavigation()
 	if appearance, ok := cx.Storage().GetItem("appearance"); ok && appearance == "true" {
 		s.dark = true
 		cx.SetAppearance(core.AppearanceDark)
@@ -231,9 +232,7 @@ func (s *State) navigation(cx *core.Scope, compact bool) core.Node {
 	if compact {
 		nodes = append(nodes, button(cx, "home", "", lucide.Command, "ghost", func() { s.selectDevice("") }), button(cx, "connect-device", "", lucide.Plus, "ghost", openConnect))
 	} else {
-		title := label(cx, "ReignHub", 19, false)
-		title.Style.FontWeight = core.FontWeightBold
-		nodes = append(nodes, core.View{Style: core.Style{Padding: core.Symmetric(20, 8)}, Children: []core.Node{row(glyph(cx, lucide.Command, 22), title)}})
+		nodes = append(nodes, core.View{Style: core.Style{Padding: core.Symmetric(20, 8)}, Children: []core.Node{s.brand(cx, 19, true)}})
 		if s.api.CanHost() {
 			nodes = append(nodes, button(cx, "home", "本机", lucide.Monitor, "outline", func() { s.selectDevice("") }))
 		}

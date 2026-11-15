@@ -62,6 +62,18 @@ func (s *State) backSessions() {
 	s.narrowChat = false
 	if s.phoneNav != nil {
 		s.phoneNav.Pop(1)
+	} else if s.width.GetUntracked() >= wideBreakpoint {
+		// A wide workspace keeps the directory beside the chat; closing the
+		// chat therefore clears its selection while retaining the cached draft.
+		s.rememberSession()
+		if s.watchCancel != nil {
+			s.watchCancel()
+		}
+		s.sessionGeneration++
+		s.selected, s.transcript = nil, nil
+		s.messageRows, s.approvals, s.uploads = nil, nil, nil
+		s.transcriptSyncing, s.transcriptLoading = false, false
+		s.draft.Set("")
 	}
 	s.changed()
 }
@@ -101,7 +113,7 @@ func deviceStatus(d Object) string {
 func (s *State) phoneDevices(cx *core.Scope) core.Node {
 	nodes := []core.Node{
 		core.View{Style: core.Style{Padding: core.All(20), Gap: 16}, Children: []core.Node{
-			row(label(cx, "ReignHub", 24, false), spacer(), core.Show{When: func() bool { s.read(); return s.connectionProblem("") }, Then: func(cx *core.Scope) core.Node { return s.connectionIndicator(cx, func() string { return "" }) }}, button(cx, "mobile-account", "", lucide.User, "ghost", func() { s.dialog.Set("account") }), button(cx, "theme-toggle", "", lucide.SunMoon, "ghost", s.toggleTheme)),
+			row(s.brand(cx, 24, false), spacer(), core.Show{When: func() bool { s.read(); return s.connectionProblem("") }, Then: func(cx *core.Scope) core.Node { return s.connectionIndicator(cx, func() string { return "" }) }}, button(cx, "mobile-account", "", lucide.User, "ghost", func() { s.dialog.Set("account") }), button(cx, "theme-toggle", "", lucide.SunMoon, "ghost", s.toggleTheme)),
 			label(cx, "选择设备，查看与管理它的 Agent 会话", 13, true),
 			row(button(cx, "connect-device", "连接设备", lucide.Plus, "primary", func() { s.scanned = nil; s.dialog.Set("connect") }), core.Show{When: func() bool { return isMobile(cx) }, Then: func(cx *core.Scope) core.Node {
 				return button(cx, "scan-qr", "扫一扫", lucide.ScanLine, "outline", func() { s.scan(cx) })
