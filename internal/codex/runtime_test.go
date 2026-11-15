@@ -23,8 +23,10 @@ import (
 	"github.com/monkeyWie/reignhub/internal/rpc"
 )
 
-// The same test executable acts as a harmless official-server fixture. It never
-// reads Codex data, launches a real Agent, resumes a conversation or runs a model.
+// Runtime fixtures exercise startAppServer directly, independently of whether
+// the host OS supports desktop activation. The same test executable acts as a
+// harmless official-server fixture. It never reads Codex data, launches a real
+// Agent, resumes a conversation or runs a model.
 func TestMain(m *testing.M) {
 	if os.Getenv("AGENTHUB_FAKE_CODEX_RUNTIME") == "1" && len(os.Args) > 1 && os.Args[1] == "-c" {
 		u, err := url.Parse(os.Args[len(os.Args)-1])
@@ -79,7 +81,7 @@ func TestRuntimeLauncherProcess(t *testing.T) {
 	p := New(config.Config{DataDir: dir, CodexCLI: os.Args[0]}, "", events.New())
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
-	if err := p.Start(ctx); err != nil {
+	if err := p.startAppServer(ctx); err != nil {
 		t.Fatal(err)
 	}
 	defer p.Close()
@@ -153,7 +155,7 @@ func TestDirectSharedRuntimeSurvivesHubExitAndIsReused(t *testing.T) {
 	}
 	echo("after Hub process exited")
 	p := New(config.Config{DataDir: dir, CodexCLI: os.Args[0]}, "", events.New())
-	if err := p.Start(ctx); err != nil {
+	if err := p.startAppServer(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if p.shared.PID != state.PID || p.endpoint != state.Endpoint {
@@ -202,7 +204,7 @@ func TestStoppedRuntimeRestoresAddressAndDropsUnmatchedDesktop(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	first := New(cfg, "", events.New())
-	if err := first.Start(ctx); err != nil {
+	if err := first.startAppServer(ctx); err != nil {
 		t.Fatal(err)
 	}
 	before := first.shared
@@ -231,7 +233,7 @@ func TestStoppedRuntimeRestoresAddressAndDropsUnmatchedDesktop(t *testing.T) {
 		t.Fatal(err)
 	}
 	second := New(cfg, "", events.New())
-	if err := second.Start(ctx); err != nil {
+	if err := second.startAppServer(ctx); err != nil {
 		t.Fatal(err)
 	}
 	defer second.Close()
@@ -264,7 +266,7 @@ func TestStoppedRuntimeDoesNotMoveBehindAppWhenAddressOccupied(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := p.Start(context.Background()); err == nil || !strings.Contains(err.Error(), "未启动替代后端") {
+	if err := p.startAppServer(context.Background()); err == nil || !strings.Contains(err.Error(), "未启动替代后端") {
 		t.Fatalf("occupied address should fail without creating a different backend: %v", err)
 	}
 	if p.client != nil {

@@ -1084,6 +1084,7 @@ class _HubState extends State<HubPage> {
                   ),
                 ),
                 if (p['installed'] == true &&
+                    p['state'] != 'unsupported' &&
                     !['ready', 'connected'].contains(p['state']))
                   OutlineButton(
                     onPressed: acting

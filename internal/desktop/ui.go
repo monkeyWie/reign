@@ -129,7 +129,7 @@ func (a *window) agents(c *ui.Context) {
 			if p.LastError != "" {
 				ui.Text(c, p.LastError).TextColor(t.Danger).FontSize(12)
 			}
-			if p.Capabilities.Desktop && p.DesktopClients == 0 {
+			if p.Capabilities.Desktop && p.DesktopClients == 0 && p.State != "unsupported" {
 				if a.confirm && a.providerID == p.ID {
 					ui.Text(c, "接入会请求正在运行的 App 正常退出并重新打开。请先处理运行中的任务。").FontSize(13)
 					ui.Row(c).Gap(10).Children(func() {

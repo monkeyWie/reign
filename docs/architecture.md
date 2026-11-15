@@ -56,6 +56,12 @@ RPC JSON 以最多 12 KB 的明文片段传输，最多重组 16 MiB；WebRTC �
 
 ## Codex backend
 
+### 平台适配
+
+`internal/system` 用 Go 文件后缀和 build tags 在编译时选择实现：`*_darwin.go` 保留 macOS 的安装、进程、启动和连接检测；`*_windows.go` 查询当前用户的 `OpenAI.Codex` 应用包、解析清单入口，并用 Windows 原生进程 API 匹配完整路径和主进程。其它系统使用显式的兜底实现，不通过 `runtime.GOOS` 引入其它平台实现，也不打包 PowerShell 或新的运行时依赖。
+
+Windows 安装查询有 4 秒超时、隐藏控制台窗口，并短期缓存包位置；每次刷新仍校验文件和运行进程。Electron 子进程不计为独立 App，CLI / app-server 不冒充桌面实例。Windows 当前只支持安装和运行检测，Provider 返回 `state=unsupported`，同时保留真实的 `installed` / `running`；客户端隐藏启用入口，直接请求启用也在启动共享后端前失败。完整的 Windows App 启动和共享后端连接验证尚未实现。
+
 ### 生命周期约束
 
 当前桌面通过 C FFI 在 App 进程内运行 Go HostService / ClientService，不再启动 `agenthubd` 或通过本机 HTTP 调用自身。macOS 关闭窗口只隐藏，Flutter engine 与 Go goroutine 继续运行；菜单栏可重新打开窗口。明确退出时，原生入口调用 `AgentHubShutdown`，取消未完成请求、关闭连接并保存 SQLite，再退出进程。`internal/app/embedded_test.go` 和 `scripts/test-embedded-ffi.py` 验证直接调用、并发初始化、请求取消及重开后的设备身份持久化。

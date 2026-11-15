@@ -91,6 +91,23 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  windows-provider:
+    name: Test Windows Codex detection
+    needs: metadata
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-go@v7.0.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - name: Vet and test Windows provider
+        run: |
+          go vet ./internal/system ./internal/codex
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          go test -timeout 3m ./internal/system ./internal/codex
+
   clients:
     name: Build ${{ matrix.name }} clients
     needs: [metadata, test]
@@ -315,7 +332,15 @@ jobs:
           run_browser_test -env "AGENTHUB_NSGO_TEST_FIXTURE=$fixture_url" \
             -run 'TestBrowserP2PAndRelayWithExistingHost|TestBrowserDirectWithoutRelay' ./browserclient
           run_browser_test \
-            -run 'TestBrowserBackStaysInCompactWorkspace|TestBrowserBackStaysInWideWorkspace|TestDesktopNavigationAndDrafts|TestPhoneNavigation|TestComposerSubmit|TestWebNativePresentationParity|TestReconnectStatusShowsAnimatedIndicator|TestImageMarkersAreNotUserMessageText|TestMessageTimesUseControllerTimezone|TestResponsiveLayoutUsesWidthAcrossPlatforms|TestMobileHeaderOverlaysMessages|TestDeviceListShowsServerPresenceWithoutConnecting|TestVerifiedConnectionImmediatelyUpdatesIconAndIgnoresStalePresence|TestSavedDeviceOpensCachedMessagesWhileConnectingAndAfterFailure|TestConnectedSlowPeerShowsCacheBeforeLiveReadsComplete|TestNoCachedSessionsShowsLoadingAndStopsAfterConnectionFailure|TestLateDiskSnapshotCannotOverwriteNewerLiveMessages' ./hubui
+            -run 'TestBrowserBackStaysInCompactWorkspace|TestBrowserBackStaysInWideWorkspace|TestDesktopNavigationAndDrafts|TestPhoneNavigation|TestComposerSubmit|TestWebNativePresentationParity|TestReconnectStatusShowsAnimatedIndicator|TestImageMarkersAreNotUserMessageText|TestMessageTimesUseControllerTimezone|TestResponsiveLayoutUsesWidthAcrossPlatforms|TestMobileHeaderOverlaysMessages|TestDeviceListShowsServerPresenceWithoutConnecting|TestVerifiedConnectionImmediatelyUpdatesIconAndIgnoresStalePresence|TestSavedDeviceOpensCachedMessagesWhileConnectingAndAfterFailure|TestConnectedSlowPeerShowsCacheBeforeLiveReadsComplete|TestNoCachedSessionsShowsLoadingAndStopsAfterConnectionFailure|TestLateDiskSnapshotCannotOverwriteNewerLiveMessages|TestInstalledUnsupportedAppDoesNotOfferEnable' ./hubui
+      - name: Upload provider support screenshots
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: provider-support-ui
+          path: clients/nsgo/hubui/.nsgo/test/screenshots/web/unsupported-codex-app-*.png
+          if-no-files-found: ignore
+          retention-days: 14
       - name: Browser diagnostics
         if: failure()
         run: |
@@ -363,7 +388,7 @@ jobs:
 
   assemble:
     name: Verify complete release bundle
-    needs: [metadata, test, clients, android, probe, web]
+    needs: [metadata, test, windows-provider, clients, android, probe, web]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     env:

@@ -62,6 +62,9 @@ func (p *Provider) Start(ctx context.Context) error {
 	if p.kind == "cli" {
 		return p.startCLI(ctx, true)
 	}
+	if !system.DesktopSupported {
+		return errors.New(system.DesktopUnsupportedReason)
+	}
 	return p.startAppServer(ctx)
 }
 
@@ -83,7 +86,7 @@ func (p *Provider) Status(ctx context.Context) provider.Status {
 	if p.kind == "cli" {
 		return p.cliStatus(ctx)
 	}
-	app := system.FindApp(p.cfg.CodexApp)
+	app, appErr := system.FindAppContext(ctx, p.cfg.CodexApp)
 	instances, err := system.Discover(ctx, app)
 	connections, connectionErr := p.desktopConnected(ctx, instances)
 	p.mu.Lock()
@@ -92,6 +95,21 @@ func (p *Provider) Status(ctx context.Context) provider.Status {
 	s.Installed, s.Running, s.InstallPath = app != "", len(instances) > 0, app
 	if err != nil {
 		s.LastError = err.Error()
+	}
+	if appErr != nil {
+		s.LastError = appErr.Error()
+	}
+	if !system.DesktopSupported {
+		s.State = "unsupported"
+		s.Detail = system.DesktopUnsupportedReason
+		if appErr != nil {
+			s.Detail = "安装状态检测失败；" + s.Detail
+		} else if err != nil {
+			s.Detail = "运行状态检测失败；" + s.Detail
+		} else if app == "" {
+			s.Detail = "未检测到 Codex 桌面应用；" + s.Detail
+		}
+		return s
 	}
 	if p.client == nil || !p.client.Alive() {
 		s.Detail = "共享 app-server 未连接"
@@ -490,6 +508,9 @@ func (p *Provider) observe(m rpc.Message, reply func(context.Context, any) error
 func (p *Provider) ConnectDesktop(ctx context.Context, expected []provider.Instance, confirm bool) error {
 	if p.kind == "cli" {
 		return p.Start(ctx)
+	}
+	if !system.DesktopSupported {
+		return errors.New(system.DesktopUnsupportedReason)
 	}
 	if !p.connectMu.TryLock() {
 		return errors.New("正在接入 App")
