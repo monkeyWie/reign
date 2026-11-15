@@ -69,6 +69,13 @@ func (s *State) observeTransports() {
 func (s *State) connectionLog(id string, a *connectAttempt) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "ReignHub connection diagnostics\nRuntime: %s/%s %s\nClient: %s\nDevice: %s\nStatus: %s\n", runtime.GOOS, runtime.GOARCH, runtime.Version(), s.clientName, id, s.connectionTitle(id))
+	if id == "" && s.api.CanHost() {
+		network := object(s.host["network"])
+		fmt.Fprintf(&b, "Host: %s\nName: %s\nService: %s\nHost transport: %s\n", safeDiagnostic(str(s.host, "deviceId")), safeDiagnostic(str(s.host, "name")), safeDiagnostic(str(s.host, "serviceUrl")), safeDiagnostic(str(network, "state")))
+	}
+	if detail := s.connectionDetails(id); detail != "" {
+		fmt.Fprintf(&b, "Details: %s\n", safeDiagnostic(detail))
+	}
 	for _, d := range s.devices {
 		if str(d, "id") == id {
 			fmt.Fprintf(&b, "Name: %s\nService: %s\nTransport: connected=%t path=%s\n", safeDiagnostic(deviceName(d)), safeDiagnostic(str(d, "service")), flag(d, "connected"), str(d, "path"))

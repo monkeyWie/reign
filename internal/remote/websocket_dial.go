@@ -22,7 +22,7 @@ func dialWebSocket(ctx context.Context, endpoint, token, stage string) (*websock
 	for attempt := 1; ; attempt++ {
 		traceCtx, trace := traceSocketDial(ctx, stage, attempt)
 		ws, response, err := websocket.Dial(traceCtx, endpoint, &websocket.DialOptions{
-			HTTPClient: connectivity.ConnectionHTTPClient,
+			HTTPClient: connectivity.ConnectionWebSocketClient,
 			HTTPHeader: http.Header{"Authorization": []string{"Bearer " + token}},
 		})
 		err = trace.finish(response, err)

@@ -84,3 +84,19 @@ func TestRecoveryBackoffRemainsConnectingAndInitialFailureDoesNot(t *testing.T) 
 		t.Fatal("first connection failure claimed automatic retry")
 	}
 }
+
+func TestLocalHostDiagnosticsIncludeServiceFailure(t *testing.T) {
+	s := &State{api: newDemoAPI(), clientName: "local", host: Object{
+		"deviceId": "local-device", "name": "My Mac", "serviceUrl": "https://example.test/?token=hidden",
+		"network": Object{"state": "error", "detail": `WebSocket failed: http2: invalid Upgrade request header ["websocket"]`},
+	}}
+	report := s.connectionLog("", nil)
+	for _, expected := range []string{"Host: local-device", "Name: My Mac", "Service: https://example.test/", "Host transport: error", "http2: invalid Upgrade request header"} {
+		if !strings.Contains(report, expected) {
+			t.Fatalf("missing %q in host diagnostics: %s", expected, report)
+		}
+	}
+	if strings.Contains(report, "hidden") {
+		t.Fatal("host diagnostics leaked credentials")
+	}
+}
