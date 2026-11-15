@@ -263,7 +263,14 @@ func (s *State) message(cx *core.Scope, get func() Message) core.Node {
 		}
 		return false
 	}, Then: func(*core.Scope) core.Node { return bubbleContent }}}
-	content = append(content, core.Show{When: func() bool { return !get().Live }, Then: func(cx *core.Scope) core.Node {
+	content = append(content, core.Show{When: func() bool { return get().Delivery != "" }, Then: func(cx *core.Scope) core.Node {
+		return core.View{TestID: "delivery-" + m.ID, Tooltip: dynamicText(cx, func() string { return get().DeliveryError }, 12, false), Style: core.Style{Padding: core.Edges{Top: 6}}, Children: []core.Node{core.Show{When: func() bool { return get().Delivery == "sending" }, Then: func(*core.Scope) core.Node {
+			return chat.Shimmer{Text: func() string { return "发送中…" }, Size: 11}
+		}, Else: func(cx *core.Scope) core.Node {
+			return dynamicText(cx, func() string { return choose(get().Delivery == "failed", "发送失败", "已发送") }, 11, true)
+		}}}}
+	}})
+	content = append(content, core.Show{When: func() bool { return !get().Live && get().Delivery != "sending" }, Then: func(cx *core.Scope) core.Node {
 		return core.View{TestID: "message-actions-" + m.ID, Style: core.Style{Height: core.Pt(32), Direction: core.Row, AlignItems: core.AlignCenter, Gap: 8}, StyleFunc: func() core.Style {
 			visible := hover.Get() || s.narrowLayout()
 			return core.Style{Opacity: core.Alpha(choose(visible, float32(1), float32(0))), PointerEvents: choose(visible, core.PointerEventsAuto, core.PointerEventsNone)}

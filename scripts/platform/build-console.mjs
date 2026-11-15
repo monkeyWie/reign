@@ -45,6 +45,19 @@ config.wasm += ".gz";
 const compressed = gzipSync(wasm, { level: 9 });
 config.wasmSize = compressed.length;
 writeFileSync(join(assets, config.wasm), compressed);
+// Small immutable objects work on CF Assets even when Range is ignored.
+// Keep the complete gzip available for tooling and verify assembly in smoke tests.
+config.wasmParts = [];
+const partSize = 512 * 1024;
+for (let start = 0, i = 0; start < compressed.length; start += partSize, i++) {
+  const part = compressed.subarray(start, start + partSize);
+  const file = config.wasm.replace(
+    /\.wasm\.gz$/,
+    `.part-${String(i).padStart(3, "0")}.bin`,
+  );
+  writeFileSync(join(assets, file), part);
+  config.wasmParts.push({ file, size: part.length });
+}
 writeFileSync(join(assets, "nsgo.json"), JSON.stringify(config) + "\n");
 const css = readFileSync(
   join(root, "apps/site/components/console-loading.css"),

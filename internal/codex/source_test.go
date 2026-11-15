@@ -52,7 +52,7 @@ func TestSessionCreationSourceIsIndependentOfAccessProvider(t *testing.T) {
 	}
 }
 
-func TestSessionListIncludesAllSourcesAndPreservesPagination(t *testing.T) {
+func TestSessionListExcludesSDKAndPreservesPagination(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ws, err := websocket.Accept(w, r, nil)
 		if err != nil {
@@ -82,13 +82,15 @@ func TestSessionListIncludesAllSourcesAndPreservesPagination(t *testing.T) {
 					t.Error(err)
 					return
 				}
-				if strings.Join(params.SourceKinds, ",") != "cli,vscode,appServer,exec,subAgent,unknown" || params.SortKey != "updated_at" || params.SortDirection != "desc" {
+				if strings.Join(params.SourceKinds, ",") != "cli,vscode,appServer,subAgent,unknown" || params.SortKey != "updated_at" || params.SortDirection != "desc" {
 					t.Errorf("unexpected listing filters: %s", m.Params)
 				}
 				if params.Cursor == "" {
-					result = json.RawMessage(`{"data":[{"id":"app","cwd":"/project","source":"vscode","originator":"Codex Desktop","updatedAt":10},{"id":"cli","cwd":"/project","source":"cli","updatedAt":9}],"nextCursor":"page-2"}`)
+					result = json.RawMessage(`{"data":[{"id":"sdk","source":"appServer","originator":"codex_sdk_ts"},{"id":"app","cwd":"/project","source":"vscode","originator":"Codex Desktop","updatedAt":10},{"id":"exec","source":"exec"},{"id":"cli","cwd":"/project","source":"cli","updatedAt":9}],"nextCursor":"page-2"}`)
+				} else if params.Cursor == "page-2" {
+					result = json.RawMessage(`{"data":[{"id":"sdk-only-page","source":"exec","originator":"codex_sdk_ts"}],"nextCursor":"page-3"}`)
 				} else {
-					if params.Cursor != "page-2" {
+					if params.Cursor != "page-3" {
 						t.Errorf("cursor lost: %s", params.Cursor)
 					}
 					result = json.RawMessage(`{"data":[{"id":"child","cwd":"/project","source":{"subAgent":"review"},"updatedAt":8}],"nextCursor":null}`)
@@ -121,7 +123,11 @@ func TestSessionListIncludesAllSourcesAndPreservesPagination(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(second.Sessions) != 1 || second.Sessions[0].SourceKind != "subAgent" || second.NextCursor != "" {
+	if len(second.Sessions) != 0 || second.NextCursor != "page-3" {
 		t.Fatalf("bad second page: %+v", second)
+	}
+	third, err := p.Sessions(ctx, second.NextCursor)
+	if err != nil || len(third.Sessions) != 1 || third.Sessions[0].SourceKind != "subAgent" || third.NextCursor != "" {
+		t.Fatalf("bad third page: %+v, %v", third, err)
 	}
 }

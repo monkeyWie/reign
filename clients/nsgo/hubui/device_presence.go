@@ -26,11 +26,8 @@ func (s *State) refreshDevicePresence() {
 			if s.ctx.Err() != nil || s.suspended {
 				return
 			}
-			s.devicePresence = map[string]Object{}
 			if err == nil {
-				for _, status := range objects(v) {
-					s.devicePresence[str(status, "id")] = status
-				}
+				s.applyDevicePresence(objects(v))
 			}
 			s.changed()
 		})
@@ -45,33 +42,68 @@ func (s *State) presenceFor(d Object) Object {
 	return status
 }
 
+// A live data path proves presence even if the service's last observation is
+// stale. Absence of a response to a presence query does not prove offline.
+func (s *State) deviceOnline(d Object) (online, known bool) {
+	if flag(d, "connected") {
+		return true, true
+	}
+	online, known = s.presenceFor(d)["online"].(bool)
+	return
+}
+
+func (s *State) deviceOffline(id string) bool {
+	for _, d := range s.devices {
+		if str(d, "id") == id {
+			online, known := s.deviceOnline(d)
+			return known && !online
+		}
+	}
+	return false
+}
+
+func (s *State) applyDevicePresence(statuses []Object) {
+	for _, status := range statuses {
+		id := str(status, "id")
+		wasOffline := s.deviceOffline(id)
+		if s.devicePresence == nil {
+			s.devicePresence = map[string]Object{}
+		}
+		s.devicePresence[id] = status
+		h := s.connection(id)
+		if s.deviceOffline(id) {
+			if h.reconnecting && h.attempt != nil && h.attempt.active {
+				a := h.attempt
+				a.active, a.finished = false, time.Now()
+				a.cancel()
+				h.reconnecting, h.waitingOnline = false, true
+				s.logConnection(id, "presence", "设备离线，等待上线", "检测到上线后恢复连接", "info")
+			}
+		} else if online, known := s.presenceFor(status)["online"].(bool); known && online && wasOffline {
+			delete(s.retrying, id)
+		}
+	}
+	s.autoReconnect()
+}
+
 func (s *State) deviceListStatus(d Object) string {
 	s.read()
-	if flag(d, "connected") {
-		return deviceStatus(d)
+	if online, known := s.deviceOnline(d); known {
+		if online {
+			return "在线"
+		}
+		return "离线"
 	}
-	if s.connection(str(d, "id")).reconnecting {
-		return "正在重新连接…"
-	}
-	status := s.presenceFor(d)
-	if online, ok := status["online"].(bool); ok {
-		return deviceStatus(Object{"online": online})
-	}
-	if s.directoryChecking {
-		return "正在获取在线状态…"
-	}
-	return "在线状态暂不可用"
+	// Keep an unknown presence neutral instead of inventing an offline state.
+	return ""
 }
 
 func (s *State) devicePresenceIndicator(cx *core.Scope, d func() Object) core.Node {
 	return core.Dynamic(func(cx *core.Scope) core.Node {
 		s.read()
 		device := d()
-		if flag(device, "connected") || s.connection(str(device, "id")).reconnecting {
-			return s.connectionIndicator(cx, func() string { return str(d(), "id") })
-		}
 		color := palette(cx).mutedText.Faded(.5)
-		if online, known := s.presenceFor(device)["online"].(bool); known && online {
+		if online, known := s.deviceOnline(device); known && online {
 			color = core.RGB(0x22a060)
 		}
 		return core.View{TestID: "device-presence-" + str(device, "id"), Label: s.deviceListStatus(device), Style: core.Style{Width: core.Pt(18), Height: core.Pt(18), AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter}, Children: []core.Node{core.View{Style: core.Style{Width: core.Pt(7), Height: core.Pt(7), CornerRadius: 4, Background: color}}}}
@@ -87,6 +119,11 @@ func (s *State) openDevice(id string) {
 		}
 		s.selectDevice(id)
 		if flag(d, "connected") || s.connection(id).reconnecting {
+			return
+		}
+		if s.deviceOffline(id) {
+			s.connection(id).waitingOnline = true
+			s.changed()
 			return
 		}
 		s.connection(id).established = false

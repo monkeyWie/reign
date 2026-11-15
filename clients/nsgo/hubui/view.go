@@ -366,7 +366,7 @@ func (s *State) directory(cx *core.Scope) core.Node {
 	}, Class: "dark:bg-zinc-950", Children: []core.Node{
 		core.View{Style: core.Style{Padding: core.Edges{Top: 20, Left: 18, Right: 12, Bottom: 6}}, Children: []core.Node{row(core.Show{When: func() bool { return s.width.Get() < compactBreakpoint }, Then: func(cx *core.Scope) core.Node {
 			return button(cx, "back-devices", "设备", lucide.ArrowLeft, "ghost", s.backDevices)
-		}}, core.View{Style: fill, Children: []core.Node{singleLine(cx, func() string { s.read(); return deviceName(s.device()) }, 14, false), singleLine(cx, func() string { s.read(); return deviceStatus(s.device()) }, 11, true)}}, s.connectionIndicator(cx, func() string { return s.target }), button(cx, "refresh-sessions", "", lucide.RefreshCw, "ghost", s.poll))}},
+		}}, core.View{Style: fill, Children: []core.Node{singleLine(cx, func() string { s.read(); return deviceName(s.device()) }, 14, false), singleLine(cx, func() string { s.read(); return s.deviceListStatus(s.device()) }, 11, true)}}, s.connectionIndicator(cx, func() string { return s.target }), button(cx, "refresh-sessions", "", lucide.RefreshCw, "ghost", s.poll))}},
 		core.View{Style: core.Style{Padding: core.Symmetric(6, 12)}, Children: []core.Node{leftButton(button(cx, "new-session", "新聊天", lucide.SquarePen, "ghost", func() { s.createDirectory = ""; s.dialog.Set("create") }))}},
 		core.View{Style: core.Style{Padding: core.Edges{Left: 22, Top: 16, Right: 16}}, Children: []core.Node{label(cx, "项目", 12, true)}},
 		s.emptyCatalogue(cx),

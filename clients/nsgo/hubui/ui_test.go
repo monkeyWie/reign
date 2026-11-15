@@ -78,7 +78,7 @@ func TestPhoneNavigation(t *testing.T) {
 	app.Find("id:mobile-devices")
 	app.Find("text:工作电脑")
 	app.Find("text:ID 123456")
-	app.Find("text:P2P · WebRTC")
+	app.Find("text:在线")
 	// Returning to the same device must reopen its sessions, not silently return.
 	app.Press("id:device-demo-device")
 	app.Find("id:session-sidebar")

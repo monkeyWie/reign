@@ -153,7 +153,7 @@ func (t thread) session() provider.Session {
 	return provider.Session{ID: t.ID, ProviderID: "codex", Title: title, Preview: t.Preview, CWD: t.Cwd, UpdatedAt: t.UpdatedAt, Status: t.Status.Type, Source: string(t.Source), SourceKind: t.sourceKind(), Originator: t.Originator, Model: t.Model}
 }
 func (p *Provider) Sessions(ctx context.Context, cursor string) (provider.SessionPage, error) {
-	params := map[string]any{"limit": 50, "sortKey": "updated_at", "sortDirection": "desc", "sourceKinds": []string{"cli", "vscode", "appServer", "exec", "subAgent", "unknown"}, "modelProviders": []string{}}
+	params := map[string]any{"limit": 50, "sortKey": "updated_at", "sortDirection": "desc", "sourceKinds": []string{"cli", "vscode", "appServer", "subAgent", "unknown"}, "modelProviders": []string{}}
 	if cursor != "" {
 		params["cursor"] = cursor
 	}
@@ -166,7 +166,10 @@ func (p *Provider) Sessions(ctx context.Context, cursor string) (provider.Sessio
 	}
 	page := provider.SessionPage{Sessions: []provider.Session{}, NextCursor: out.NextCursor}
 	for _, t := range out.Data {
-		page.Sessions = append(page.Sessions, p.session(t))
+		s := p.session(t)
+		if provider.SyncSession(s) {
+			page.Sessions = append(page.Sessions, s)
+		}
 	}
 	return page, nil
 }

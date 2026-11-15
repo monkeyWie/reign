@@ -20,6 +20,7 @@ type connectionHealth struct {
 	attempt       *connectAttempt
 	issues        map[string]string
 	reconnecting  bool
+	waitingOnline bool
 	established   bool
 	diagnostics   []connectionStep
 	observed      bool
@@ -89,6 +90,9 @@ func (s *State) connectionReady(id string) bool {
 func (s *State) connectionProblem(id string) bool { return !s.connectionReady(id) }
 func (s *State) connectionRecovering(id string) bool {
 	h := s.connection(id)
+	if s.deviceOffline(id) {
+		return false
+	}
 	if h.reconnecting {
 		return true
 	}
@@ -103,13 +107,10 @@ func (s *State) connectionTitle(id string) string {
 	if s.connectionReady(id) {
 		return "连接正常"
 	}
-	if s.connectionRecovering(id) {
-		if s.connection(id).established {
-			return "正在重新连接"
-		}
-		return "正在连接"
+	if s.deviceOffline(id) {
+		return "设备离线"
 	}
-	return "尚未连接，点击重试"
+	return "连接中"
 }
 func (s *State) connectionIndicator(cx *core.Scope, target func() string) core.Node {
 	status := core.NewMemo(cx, func() [2]string { s.read(); id := target(); return [2]string{id, s.connectionTitle(id)} })
@@ -117,7 +118,7 @@ func (s *State) connectionIndicator(cx *core.Scope, target func() string) core.N
 		value := status.Get()
 		id := value[0]
 		icon := lucide.Wifi
-		if s.connectionProblem(id) {
+		if s.deviceOffline(id) {
 			icon = lucide.WifiOff
 		}
 		node := button(cx, "connection-status-"+id, "", icon, "ghost", func() {
@@ -125,7 +126,7 @@ func (s *State) connectionIndicator(cx *core.Scope, target func() string) core.N
 			s.connectionDetailTarget = id
 			s.dialog.Set("connection-status")
 		}).(core.View)
-		if s.connectionRecovering(id) {
+		if s.connectionProblem(id) && !s.deviceOffline(id) {
 			node.Children = []core.Node{reconnectingGlyph(cx)}
 		}
 		node.Label = value[1]
@@ -133,8 +134,8 @@ func (s *State) connectionIndicator(cx *core.Scope, target func() string) core.N
 		baseStyle := node.StyleFunc
 		node.StyleFunc = func() core.Style {
 			st := baseStyle()
-			if s.connectionProblem(id) && !s.connectionRecovering(id) {
-				st.Color = core.RGB(0xd97706)
+			if s.deviceOffline(id) {
+				st.Color = palette(cx).mutedText
 			}
 			return st
 		}
@@ -204,6 +205,7 @@ func (s *State) acceptConnection(id string, devices []Object) {
 	s.observeTransports()
 	h := s.connection(id)
 	h.established = true
+	h.waitingOnline = false
 	h.issues = map[string]string{}
 	delete(s.connection("").issues, "presence")
 }
@@ -221,6 +223,7 @@ func (s *State) connectDevice(id string, automatic, pair bool) {
 		return
 	}
 	h.reconnecting = true
+	h.waitingOnline = false
 	if !automatic {
 		h.established = false
 	}
@@ -286,7 +289,7 @@ func (s *State) connectDevice(id string, automatic, pair bool) {
 		finished := time.Now()
 		cancel()
 		s.cx.Post(func() {
-			if s.ctx.Err() != nil || h.attempt != a {
+			if s.ctx.Err() != nil || h.attempt != a || !a.active {
 				return
 			}
 			a.active = false
@@ -373,7 +376,7 @@ func (s *State) setBackground(background bool) {
 	// previously connected device immediately instead of waiting for a heartbeat.
 	for _, d := range s.devices {
 		id := str(d, "id")
-		if s.connection(id).established && flag(d, "autoReconnect") {
+		if s.connection(id).established && flag(d, "autoReconnect") && !s.deviceOffline(id) {
 			s.reconnect(id, true)
 		}
 	}

@@ -25,7 +25,11 @@ func (s *HostStatus) set(state, detail string) {
 	s.mu.Lock()
 	s.state, s.detail = state, detail
 	if state != "connected" {
-		s.peers = make(map[string]*wire)
+		for id, w := range s.peers {
+			if w.ctx.Err() != nil || !w.hasDirectPath() {
+				delete(s.peers, id)
+			}
+		}
 	}
 	s.mu.Unlock()
 }

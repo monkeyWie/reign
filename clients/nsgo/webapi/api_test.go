@@ -145,3 +145,19 @@ func TestFirstPageMetadataSurvivesBeforeDirectorySync(t *testing.T) {
 		t.Fatal("preview resurrected deleted session", v, err)
 	}
 }
+
+func TestFreshReadCannotConfirmOfflineCache(t *testing.T) {
+	store := &memoryStore{v: map[string][]byte{}}
+	a := New(store)
+	defer a.Close()
+	command := Object{"method": "transcript", "provider": "codex-app", "session": "chat"}
+	raw, _ := json.Marshal(command)
+	_ = store.Put("rpc:one:"+string(raw), Object{"turns": []Object{}})
+	if v, e := a.Call(context.Background(), "client.call", nil, "one", command); e != nil || v == nil {
+		t.Fatal(v, e)
+	}
+	command["fresh"] = true
+	if _, e := a.Call(context.Background(), "client.call", nil, "one", command); e == nil {
+		t.Fatal("offline cache accepted as fresh confirmation")
+	}
+}

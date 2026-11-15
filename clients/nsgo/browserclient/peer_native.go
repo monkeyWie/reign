@@ -13,6 +13,8 @@ func pingSocket(ctx context.Context, ws *websocket.Conn) (bool, error) {
 	return err == nil, err
 }
 
+func closeSocket(ws *websocket.Conn) error { return ws.CloseNow() }
+
 func newPeer(*Client, []string) (peer, error) {
 	return nil, errors.New("browser WebRTC adapter is only used on js/wasm")
 }

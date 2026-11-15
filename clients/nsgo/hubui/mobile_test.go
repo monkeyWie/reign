@@ -34,7 +34,9 @@ func testMobileDeviceAndScanner(t *testing.T, os core.OS, scan bool) {
 	app.WaitFor("id:device-second", time.Second)
 	app.Find("text:MacBook Pro")
 	app.Find("text:开发工作站")
-	app.Find("text:Relay · WebSocket")
+	if app.Exists("text:Relay · WebSocket") || app.Exists("text:P2P · WebRTC") {
+		t.Fatal("device list exposed connection paths instead of presence")
+	}
 	app.WaitFor(`text:"离线"`, time.Second)
 	if !scan {
 		app.Screenshot("mobile-devices")

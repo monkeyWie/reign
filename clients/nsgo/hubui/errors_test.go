@@ -96,7 +96,7 @@ func testSessionWriterConflictGuidance(t *testing.T, width, height core.Points) 
 	if app.Exists("id:session-error-raw") {
 		t.Fatal("raw error is expanded by default")
 	}
-	if app.Find("id:chat-input").Text != "保留这段未发送的内容" {
+	if app.Find("id:chat-input").Text != "" {
 		t.Fatal("failed send lost the draft")
 	}
 	app.Press("id:session-error-details")
@@ -114,7 +114,7 @@ func testSessionWriterConflictGuidance(t *testing.T, width, height core.Points) 
 		t.Fatal("guidance retried the message or activated an Agent")
 	}
 	app.Press("id:dismiss-error")
-	if app.Exists("id:error-banner") || app.Find("id:chat-input").Text != "保留这段未发送的内容" {
+	if app.Exists("id:error-banner") || app.Find("id:chat-input").Text != "" {
 		t.Fatal("dismiss lost the draft or left the error visible")
 	}
 }

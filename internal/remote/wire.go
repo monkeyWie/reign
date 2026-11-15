@@ -40,6 +40,7 @@ type wire struct {
 	progressLast      map[string]connectivity.Progress
 	ws                *websocket.Conn
 	dataWS            *websocket.Conn
+	signalLost        atomic.Bool
 	hostRelay         *hostRelayLink
 	grantMu           sync.RWMutex
 	grant             string
@@ -233,6 +234,9 @@ func (w *wire) path() string {
 	if w.tcpSnapshot() != nil {
 		return "P2P · TCP"
 	}
+	if w.signalLost.Load() {
+		return "Disconnected"
+	}
 	if w.opts.RelayName != "" {
 		return "Relay · " + w.opts.RelayName
 	}
@@ -254,13 +258,16 @@ func (w *wire) close() {
 	}
 }
 func (w *wire) waitPath(ctx context.Context) error {
+	w.mu.Lock()
+	preferDirectUntil := w.preferDirectUntil
+	w.mu.Unlock()
 	// Give direct negotiation a short head start even when relay is permitted.
 	// P2P-only accounts must establish a direct path before any business RPC.
-	if w.relaySocket() == nil || (!w.host && !w.opts.RelayOnly && time.Now().Before(w.preferDirectUntil)) {
+	if w.relaySocket() == nil || (!w.host && !w.opts.RelayOnly && time.Now().Before(preferDirectUntil)) {
 		deadline := time.NewTimer(connectivity.StageTimeout)
 		defer deadline.Stop()
 		for {
-			if w.relaySocket() != nil && !time.Now().Before(w.preferDirectUntil) {
+			if w.relaySocket() != nil && !time.Now().Before(preferDirectUntil) {
 				break
 			}
 			w.mu.Lock()
@@ -305,6 +312,9 @@ func (w *wire) sendContext(ctx context.Context, data []byte) error {
 		direct = false
 	}
 	tcp := w.tcpSnapshot()
+	if !direct && tcp == nil && w.signalLost.Load() {
+		return errors.New("直连路径已断开，且信令尚未恢复")
+	}
 	// Small ordered chunks avoid SCTP message-size limits for large transcripts.
 	id := relay.ID()
 	total := (len(data) + 11999) / 12000

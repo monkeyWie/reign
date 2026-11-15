@@ -40,7 +40,7 @@ func TestDeviceListShowsServerPresenceWithoutConnecting(t *testing.T) {
 	app := nsgotest.Start(t, func(cx *core.Scope) core.Node {
 		return RootWithAPI(cx, f, true)
 	}, nsgotest.Size(390, 844))
-	app.WaitFor("text:在线 · 点击连接", 2*time.Second)
+	app.WaitFor("text:在线", 2*time.Second)
 	if f.calls.Load() != 0 || f.reads.Load() != 1 {
 		t.Fatal("presence started a connection or duplicated its batch")
 	}
@@ -69,10 +69,10 @@ func TestPresenceTextDoesNotConfuseOfflineWithDisconnected(t *testing.T) {
 			checked int64
 			want    string
 		}{
-			{true, time.Now().Unix(), "在线 · 点击连接"},
+			{true, time.Now().Unix(), "在线"},
 			{false, time.Now().Unix(), "离线"},
-			{nil, time.Now().Unix(), "在线状态暂不可用"},
-			{true, time.Now().Add(-2 * time.Minute).Unix(), "在线状态暂不可用"},
+			{nil, time.Now().Unix(), ""},
+			{true, time.Now().Add(-2 * time.Minute).Unix(), ""},
 		} {
 			s.devicePresence = map[string]Object{"host": {"online": test.online, "checkedAt": test.checked}}
 			if got := s.deviceListStatus(Object{"id": "host"}); got != test.want {
@@ -82,4 +82,98 @@ func TestPresenceTextDoesNotConfuseOfflineWithDisconnected(t *testing.T) {
 		return core.View{}
 	})
 	_ = app
+}
+
+type cachedPresenceAPI struct {
+	*cachedWorkspaceAPI
+	serverOnline   atomic.Bool
+	presenceBroken atomic.Bool
+}
+
+func (f *cachedPresenceAPI) Call(ctx context.Context, method string, p Object, target string, r Object) (any, error) {
+	if method == "client.presence" {
+		if f.presenceBroken.Load() {
+			return nil, errors.New("presence unavailable")
+		}
+		return []Object{{"id": "demo-device", "online": f.serverOnline.Load(), "checkedAt": time.Now().Unix()}}, nil
+	}
+	return f.cachedWorkspaceAPI.Call(ctx, method, p, target, r)
+}
+
+func TestOfflineDeviceOpensCacheAndConnectsOnceWhenPresenceReturns(t *testing.T) {
+	f := &cachedPresenceAPI{cachedWorkspaceAPI: &cachedWorkspaceAPI{demoAPI: newDemoAPI(), connectResult: make(chan error, 1), liveRelease: make(chan struct{})}}
+	var s *State
+	app := nsgotest.Start(t, func(cx *core.Scope) core.Node {
+		s = newState(cx, f)
+		s.width.Set(390)
+		s.initialize()
+		return s.phonePages(cx)
+	}, nsgotest.Size(390, 844))
+	app.WaitFor("text:离线", time.Second)
+	app.Press("id:device-demo-device")
+	app.WaitFor("id:session-demo-chat", time.Second)
+	app.Press("id:session-demo-chat")
+	app.WaitFor("text:本地保存的完整消息", time.Second)
+	app.Find("role:button 设备离线")
+	if f.connects.Load() != 0 || app.Exists("id:connection-retrying") {
+		t.Fatal("offline device initiated a connection instead of waiting")
+	}
+	app.Type("id:chat-input", "离线草稿")
+	if app.Find("id:chat-input").Props.Disabled || !app.Find("id:send-message").Props.Disabled {
+		t.Fatal("offline state prevented editing or allowed sending")
+	}
+	f.presenceBroken.Store(true)
+	app.Post(func() { s.cx.Post(func() { s.directoryChecked = time.Time{}; s.refreshDevicePresence() }) })
+	app.WaitUntil(time.Second, func() bool { return !s.directoryChecking })
+	app.Find("role:button 设备离线")
+	f.presenceBroken.Store(false)
+	f.serverOnline.Store(true)
+	app.Post(func() { s.cx.Post(func() { s.directoryChecked = time.Time{}; s.refreshDevicePresence() }) })
+	app.WaitUntil(time.Second, func() bool { return f.connects.Load() == 1 })
+	app.WaitFor("id:connection-retrying", time.Second)
+	f.connectResult <- errors.New("network reset")
+	app.WaitUntil(time.Second, func() bool { return !s.connection("demo-device").reconnecting })
+	app.Post(func() { s.cx.Post(func() { delete(s.retrying, "demo-device"); s.autoReconnect() }) })
+	app.Settle()
+	if f.connects.Load() != 1 {
+		t.Fatal("failed first connection entered automatic retry loop")
+	}
+	app.Find("text:本地保存的完整消息")
+	if app.Find("id:chat-input").Text != "离线草稿" {
+		t.Fatal("presence transition lost the draft")
+	}
+}
+
+func TestPresencePausesEstablishedRecoveryAndResumesOnOnline(t *testing.T) {
+	f := &cachedPresenceAPI{cachedWorkspaceAPI: &cachedWorkspaceAPI{demoAPI: newDemoAPI(), connectResult: make(chan error, 1), liveRelease: make(chan struct{})}}
+	var s *State
+	app := nsgotest.Start(t, func(cx *core.Scope) core.Node {
+		s = newState(cx, f)
+		s.devices = []Object{{"id": "demo-device", "autoReconnect": true}}
+		s.connection("demo-device").established = true
+		s.autoReconnect()
+		return core.View{}
+	})
+	app.WaitUntil(time.Second, func() bool { return f.connects.Load() == 1 })
+	app.Post(func() {
+		s.cx.Post(func() {
+			s.applyDevicePresence([]Object{{"id": "demo-device", "online": false, "checkedAt": time.Now().Unix()}})
+			s.autoReconnect()
+		})
+	})
+	app.WaitUntil(time.Second, func() bool { return !s.connection("demo-device").reconnecting })
+	if s.connectionTitle("demo-device") != "设备离线" || f.connects.Load() != 1 {
+		t.Fatal("offline recovery did not pause")
+	}
+	app.Post(func() {
+		s.cx.Post(func() {
+			s.applyDevicePresence([]Object{{"id": "demo-device", "online": true, "checkedAt": time.Now().Unix()}})
+		})
+	})
+	app.WaitUntil(time.Second, func() bool { return f.connects.Load() == 2 })
+	f.connectResult <- nil
+	app.WaitUntil(time.Second, func() bool { return s.connectionReady("demo-device") })
+	if s.connectionTitle("demo-device") != "连接正常" || s.deviceListStatus(s.devices[0]) != "在线" {
+		t.Fatal("successful reconnect did not update presence and readiness")
+	}
 }

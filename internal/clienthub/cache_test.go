@@ -87,3 +87,23 @@ func TestFirstPageIsCachedBeforeDirectoryScanCompletes(t *testing.T) {
 		t.Fatal("preview resurrected deleted session", v, err)
 	}
 }
+
+func TestFreshReadCannotMistakeOfflineCacheForRemoteConfirmation(t *testing.T) {
+	h, err := New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close()
+	r := control.Request{Method: "transcript", Provider: "codex-app", Session: "chat"}
+	b, _ := json.Marshal(r)
+	if err = h.DB.Put("rpc:one:"+string(b), map[string]any{"turns": []any{}}); err != nil {
+		t.Fatal(err)
+	}
+	if v, e := h.Call(context.Background(), "one", r); e != nil || v == nil {
+		t.Fatal("ordinary cache fallback failed", v, e)
+	}
+	r.Fresh = true
+	if _, e := h.Call(context.Background(), "one", r); e == nil {
+		t.Fatal("fresh read silently returned an offline snapshot")
+	}
+}

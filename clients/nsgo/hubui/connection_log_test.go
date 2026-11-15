@@ -76,7 +76,7 @@ func TestRecoveryBackoffRemainsConnectingAndInitialFailureDoesNot(t *testing.T) 
 	h := s.connection("test")
 	h.established = true
 	h.attempt = &connectAttempt{err: "network reset"}
-	if s.connectionTitle("test") != "正在重新连接" || s.connectionReady("test") {
+	if s.connectionTitle("test") != "连接中" || s.connectionReady("test") {
 		t.Fatal("backoff became unavailable or enabled commands")
 	}
 	h.established = false

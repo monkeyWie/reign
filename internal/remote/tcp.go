@@ -210,7 +210,11 @@ func (w *wire) onTCPConn(c net.Conn) {
 	if w.opts.TCPTrace != nil {
 		w.opts.TCPTrace("TCP selected host=%t remote=%s", w.host, c.RemoteAddr())
 	}
-	w.progress("path:tcp", "direct", "TCP 直连通道已建立", c.LocalAddr().String()+" → "+c.RemoteAddr().String(), "success")
+	message := "已选用 TCP 直连"
+	if w.path() == "P2P · WebRTC" {
+		message = "TCP 备用直连已就绪，当前使用 WebRTC"
+	}
+	w.progress("path:tcp", "direct", message, c.LocalAddr().String()+" → "+c.RemoteAddr().String(), "success")
 	retained = true
 	if a != nil {
 		a.Close()

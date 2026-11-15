@@ -71,6 +71,7 @@ type Client struct {
 	relayDone    chan struct{}
 	heartbeat    atomic.Int64
 	relayBeat    atomic.Int64
+	signalLost   atomic.Bool
 	progress     func(connectivity.Progress)
 	pc           peer
 	pending      map[string]chan Object
@@ -125,7 +126,7 @@ func Connect(ctx context.Context, p Pairing) (*Client, error) {
 		data, f, err := openSocket(relayCtx, u.String(), p.Token)
 		stop()
 		if err == nil && f.Peer != c.id {
-			data.CloseNow()
+			closeSocket(data)
 			err = errors.New("中继设备身份不匹配")
 		}
 		if err != nil {
@@ -145,7 +146,7 @@ func Connect(ctx context.Context, p Pairing) (*Client, error) {
 		if c.dataWS == nil {
 			return
 		}
-		defer c.dataWS.CloseNow()
+		defer closeSocket(c.dataWS)
 		for {
 			if _, _, err := c.dataWS.Read(life); err != nil {
 				c.note("relay-lost", "relay", "备用中继连接已断开", err.Error(), "warning")
@@ -261,7 +262,7 @@ func (c *Client) keepRelayAlive() {
 			lastTick = time.Now()
 			if time.Since(time.Unix(0, c.relayBeat.Load())) > 85*time.Second {
 				c.note("relay-heartbeat", "relay", "中继心跳未收到响应", "85s 内未收到中继控制帧", "warning")
-				c.dataWS.CloseNow()
+				closeSocket(c.dataWS)
 				return
 			}
 			ctx, stop := context.WithTimeout(c.ctx, 10*time.Second)
@@ -269,7 +270,7 @@ func (c *Client) keepRelayAlive() {
 			stop()
 			if err != nil {
 				c.note("relay-heartbeat", "relay", "中继心跳发送失败", err.Error(), "warning")
-				c.dataWS.CloseNow()
+				closeSocket(c.dataWS)
 				return
 			}
 			if confirmed {
@@ -290,7 +291,7 @@ func openSocket(ctx context.Context, endpoint, token string) (*websocket.Conn, f
 		err = errors.New("无效服务握手")
 	}
 	if err != nil {
-		ws.CloseNow()
+		closeSocket(ws)
 		return nil, f, err
 	}
 	return ws, f, nil
@@ -301,7 +302,7 @@ func (c *Client) note(id, stage, message, detail, state string) {
 	}
 }
 func (c *Client) relayAvailable() bool {
-	if c.dataWS == nil {
+	if c.signalLost.Load() || c.dataWS == nil {
 		return false
 	}
 	select {
@@ -384,7 +385,8 @@ func (c *Client) keepAlive() {
 			lastTick = time.Now()
 			if time.Since(time.Unix(0, c.heartbeat.Load())) > 85*time.Second {
 				c.note("signal-heartbeat", "signal", "信令心跳未收到响应", "85s 内未收到信令控制帧", "warning")
-				c.Close()
+				c.signalLost.Store(true)
+				_ = closeSocket(c.ws)
 				return
 			}
 			ctx, stop := context.WithTimeout(c.ctx, 10*time.Second)
@@ -399,7 +401,8 @@ func (c *Client) keepAlive() {
 			stop()
 			if err != nil {
 				c.note("signal-heartbeat", "signal", "信令心跳发送失败", err.Error(), "warning")
-				c.Close()
+				c.signalLost.Store(true)
+				_ = closeSocket(c.ws)
 				return
 			}
 		}
@@ -439,11 +442,15 @@ func (c *Client) relaySend(kind string, b []byte) error {
 	return socket.Write(ctx, websocket.MessageText, raw)
 }
 func (c *Client) readLoop() {
-	defer c.Close()
+	defer closeSocket(c.ws)
 	for {
 		_, raw, e := c.ws.Read(c.ctx)
 		if e != nil {
+			c.signalLost.Store(true)
 			c.note("signal-lost", "signal", "信令连接已断开", e.Error(), "warning")
+			if strings.HasPrefix(c.Path(), "P2P") {
+				c.note("signal-independent", "signal", "信令暂不可用，保留现有直连", "数据通信继续使用已建立的加密通道", "info")
+			}
 			return
 		}
 		c.heartbeat.Store(time.Now().UnixNano())
@@ -706,7 +713,7 @@ func (c *Client) Path() string {
 	if pc != nil && pc.Direct() {
 		return "P2P · WebRTC"
 	}
-	if !c.relayAvailable() {
+	if c.signalLost.Load() || !c.relayAvailable() {
 		return "Disconnected"
 	}
 	if c.p.RouteName != "" {
@@ -721,10 +728,10 @@ func (c *Client) Close() {
 	c.cancel()
 	c.closeOnce.Do(func() {
 		if c.ws != nil {
-			c.ws.CloseNow()
+			closeSocket(c.ws)
 		}
 		if c.dataWS != nil {
-			c.dataWS.CloseNow()
+			closeSocket(c.dataWS)
 		}
 		c.mu.Lock()
 		pc := c.pc

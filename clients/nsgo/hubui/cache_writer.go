@@ -51,13 +51,20 @@ func (s *State) persistSnapshot() {
 	if s.snapshots == nil || s.selected == nil || s.transcript == nil {
 		return
 	}
-	b, err := json.Marshal(s.transcript)
+	s.writeSnapshot(s.target, str(s.selected, "providerId"), str(s.selected, "id"), s.snapshotProjection())
+}
+
+func (s *State) writeSnapshot(target, provider, session string, transcript Object) {
+	if s.snapshots == nil {
+		return
+	}
+	b, err := json.Marshal(transcript)
 	if err != nil {
 		return
 	}
 	w := s.snapshots
 	w.mu.Lock()
-	w.pending[s.key()] = snapshotWrite{s.target, str(s.selected, "providerId"), str(s.selected, "id"), b}
+	w.pending[target+"|"+provider+"|"+session] = snapshotWrite{target, provider, session, b}
 	w.mu.Unlock()
 	select {
 	case w.wake <- struct{}{}:

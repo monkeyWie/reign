@@ -3,6 +3,8 @@ package hubui
 import (
 	"context"
 	"errors"
+
+	"github.com/monkeyWie/reignhub/internal/provider"
 )
 
 // A cold directory starts with one metadata page per provider. Full directory
@@ -24,7 +26,7 @@ func (s *State) loadCatalogue(ctx context.Context, cancel context.CancelFunc, ge
 			}
 			kept := []Object{}
 			for _, session := range s.sessions {
-				if visible[str(session, "providerId")] {
+				if visible[str(session, "providerId")] && visibleSession(session) {
 					kept = append(kept, session)
 				}
 			}
@@ -35,6 +37,9 @@ func (s *State) loadCatalogue(ctx context.Context, cancel context.CancelFunc, ge
 		results := make(chan error, len(providers))
 		count := 0
 		for _, p := range providers {
+			if p["installed"] == false {
+				continue
+			}
 			if !providerReady(p) && !flag(object(p["capabilities"]), "history") {
 				continue
 			}
@@ -89,12 +94,12 @@ func (s *State) applyCataloguePage(providerID string, incoming []Object, complet
 	// incremental directory remains authoritative for deletions and reconciliation.
 	merged := map[string]Object{}
 	for _, session := range s.sessions {
-		if !complete || str(session, "providerId") != providerID {
+		if visibleSession(session) && (!complete || str(session, "providerId") != providerID) {
 			merged[str(session, "providerId")+"|"+str(session, "id")] = session
 		}
 	}
 	for _, session := range incoming {
-		if str(session, "providerId") == providerID {
+		if str(session, "providerId") == providerID && visibleSession(session) {
 			merged[providerID+"|"+str(session, "id")] = session
 		}
 	}
@@ -105,4 +110,11 @@ func (s *State) applyCataloguePage(providerID string, incoming []Object, complet
 	s.catalogueVersion++
 	s.rememberWorkspace()
 	s.changed()
+}
+
+func visibleSession(s Object) bool {
+	return str(s, "providerId") != "codex-vscode" && provider.SyncSession(provider.Session{
+		ProviderID: str(s, "providerId"), Source: str(s, "source"),
+		SourceKind: str(s, "sourceKind"), Originator: str(s, "originator"),
+	})
 }

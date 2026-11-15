@@ -3,6 +3,7 @@ package hubui
 import (
 	"github.com/nsgo-dev/nsgo/core"
 	"github.com/nsgo-dev/nsgo/ui"
+	"time"
 )
 
 type workspaceCache struct{ providers, sessions []Object }
@@ -29,7 +30,7 @@ func (s *State) rememberSession() {
 	if _, exists := s.sessionCache[key]; !exists {
 		s.sessionCacheOrder = append(s.sessionCacheOrder, key)
 	}
-	s.sessionCache[key] = s.transcript
+	s.sessionCache[key] = s.snapshotProjection()
 	// Disk remains the source for other sessions; bound the in-memory history.
 	for len(s.sessionCacheOrder) > 6 {
 		delete(s.sessionCache, s.sessionCacheOrder[0])
@@ -58,7 +59,7 @@ func (s *State) loadCachedWorkspace(target string) {
 				}
 				if sessions := objects(cached["sessions"]); len(sessions) > 0 && len(s.sessions) == 0 {
 					for _, session := range sessions {
-						if str(session, "providerId") != "codex-vscode" {
+						if visibleSession(session) {
 							s.sessions = append(s.sessions, session)
 						}
 					}
@@ -84,6 +85,10 @@ func (s *State) loadCachedSession() {
 			s.transcriptLoading = false
 			if err == nil && v != nil && s.transcript == nil {
 				s.setTranscript(object(v))
+			} else if err == nil && v != nil {
+				s.restoreOutgoing(object(v))
+				s.reconcileOutgoing(time.Time{})
+				s.rebuildMessages()
 			}
 			s.changed()
 		})

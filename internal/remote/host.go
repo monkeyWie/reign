@@ -12,12 +12,13 @@ import (
 	"github.com/monkeyWie/reignhub/internal/relay"
 )
 
-// RunHost reconnects the authenticated signal lease. Losing that lease closes
-// existing peers; the optional data relay is repaired independently.
+// RunHost reconnects the authenticated signal lease independently of existing
+// authenticated direct data paths.
 func RunHost(ctx context.Context, p Pairing, opts Options, d *control.Dispatcher) {
 	RunHostObserved(ctx, p, opts, d, nil)
 }
 func RunHostObserved(ctx context.Context, p Pairing, opts Options, d *control.Dispatcher, status *HostStatus) {
+	defer status.DisconnectAll()
 	defer status.set("stopped", "后台连接已停止")
 	for ctx.Err() == nil {
 		status.set("connecting", "正在连接中继服务器")
@@ -62,7 +63,12 @@ func serveHostObserved(ctx context.Context, p Pairing, opts Options, d *control.
 	peers := map[string]*wire{}
 	defer func() {
 		for _, w := range peers {
-			w.close()
+			if ctx.Err() == nil && w.hasDirectPath() {
+				w.detachSignal(status)
+			} else {
+				w.close()
+				status.track(w.peer, nil)
+			}
 		}
 	}()
 	for {
@@ -76,14 +82,23 @@ func serveHostObserved(ctx context.Context, p Pairing, opts Options, d *control.
 		}
 		if f.Kind == "bye" {
 			if w := peers[f.Peer]; w != nil {
-				w.close()
-				delete(peers, f.Peer)
-				status.track(f.Peer, nil)
+				if w.hasDirectPath() {
+					w.detachSignal(status)
+				} else {
+					w.close()
+					delete(peers, f.Peer)
+					status.track(f.Peer, nil)
+				}
 			}
 			continue
 		}
 		w := peers[f.Peer]
 		if w == nil {
+			for id, old := range peers {
+				if old.ctx.Err() != nil {
+					delete(peers, id)
+				}
+			}
 			if len(peers) >= 16 {
 				continue
 			}
@@ -100,7 +115,7 @@ func serveHostObserved(ctx context.Context, p Pairing, opts Options, d *control.
 			limiter := make(chan struct{}, 8)
 			var watchMu sync.Mutex
 			var cancelWatch context.CancelFunc
-			peer, err = newWire(life, ws, f.Peer, key, true, opts, func(data []byte) {
+			peer, err = newWire(ctx, ws, f.Peer, key, true, opts, func(data []byte) {
 				if opts.ResolveKey != nil {
 					if _, ok := opts.ResolveKey(deviceID); !ok {
 						return

@@ -44,7 +44,7 @@ func sessionAccessHelp(raw string, failure *sessionOperationError) accessHelp {
 		return accessHelp{}
 	}
 	app := failure.provider == "codex-app" || failure.source == "app"
-	h := accessHelp{Title: "此会话暂时无法发送消息", Description: "该会话由另一个 Codex 进程管理。能查看会话历史，不代表 ReignHub 已接入它的运行后端。输入内容已保留。"}
+	h := accessHelp{Title: "此会话暂时无法发送消息", Description: "该会话由另一个 Codex 进程管理。能查看会话历史，不代表 ReignHub 已接入它的运行后端。请按接入步骤启用远控后重试。"}
 	where := "被控电脑"
 	if failure.device != "" {
 		where += "「" + failure.device + "」"

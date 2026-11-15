@@ -58,6 +58,11 @@ func Connect(ctx context.Context, p Pairing, opts Options) (*Client, error) {
 	c.wire = w
 	w.dataWS = dataWS
 	go func() {
+		<-w.ctx.Done()
+		_ = ws.CloseNow()
+		close(c.done)
+	}()
+	go func() {
 		defer close(c.relayDone)
 		if err := drainRelay(w.ctx, dataWS); err != nil {
 			w.progress("relay-lost", "relay", "备用中继连接已断开", err.Error(), "warning")
@@ -68,13 +73,15 @@ func Connect(ctx context.Context, p Pairing, opts Options) (*Client, error) {
 		go keepSocketAlive(w.ctx, dataWS, false)
 	}
 	go func() {
-		defer close(c.done)
-		defer w.close()
 		defer ws.CloseNow()
 		for {
 			_, raw, err := ws.Read(w.ctx)
 			if err != nil {
+				w.signalLost.Store(true)
 				w.progress("signal-lost", "signal", "信令连接已断开", err.Error(), "warning")
+				if strings.HasPrefix(w.path(), "P2P") {
+					w.progress("signal-independent", "signal", "信令暂不可用，保留现有直连", w.path()+" · 数据通信继续使用已建立的加密通道", "info")
+				}
 				return
 			}
 			var f relay.Frame
@@ -104,6 +111,11 @@ func Connect(ctx context.Context, p Pairing, opts Options) (*Client, error) {
 		message = "正在验证中继连接"
 	}
 	connectivity.Report(ctx, "direct", message, connectivity.StageTimeout)
+	// Negotiation starts after the handshake, not when its potentially slow
+	// control sockets were opened. Give LAN paths their actual head start.
+	w.mu.Lock()
+	w.preferDirectUntil = time.Now().Add(1500 * time.Millisecond)
+	w.mu.Unlock()
 	go w.offer()
 	if err = w.waitPath(ctx); err != nil {
 		c.Close()

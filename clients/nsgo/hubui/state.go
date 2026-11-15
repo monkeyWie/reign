@@ -66,6 +66,7 @@ type State struct {
 	timezone                                                *time.Location
 	timeline                                                *core.Ref
 	pendingSends                                            map[string]string
+	outgoing                                                map[string][]*outgoingMessage
 	streamKey, streamEpoch                                  string
 	streamCursor                                            int64
 	connectAttempt                                          *connectAttempt
@@ -349,7 +350,8 @@ func (s *State) selectSession(session Object) {
 	s.selected = session
 	s.transcriptSyncing = false
 	s.transcript = s.sessionCache[s.key()]
-	s.messageRows = messages(s.transcript)
+	s.restoreOutgoing(s.transcript)
+	s.rebuildMessages()
 	s.approvals = nil
 	s.models = nil
 	s.model = str(session, "model")
@@ -398,8 +400,10 @@ func (s *State) startSessionWatch() {
 }
 func (s *State) setTranscript(t Object) {
 	s.transcriptLoading = false
+	s.restoreOutgoing(t)
 	s.transcript = mergeLatest(s.transcript, t)
-	s.messageRows = messages(s.transcript)
+	s.reconcileOutgoing(time.Time{})
+	s.rebuildMessages()
 	if s.model == "" {
 		s.model = str(object(t["session"]), "model")
 	}
@@ -408,13 +412,16 @@ func (s *State) setTranscript(t Object) {
 }
 func (s *State) watch(ctx context.Context, target, p, id, key, epoch string, cursor int64) {
 	snapshot := func() error {
-		v, e := rpc(ctx, s.api, target, p, id, "transcript", nil)
+		started := time.Now()
+		v, e := rpc(ctx, s.api, target, p, id, "transcript", Object{"fresh": true})
 		s.cx.Post(func() {
 			if ctx.Err() == nil && s.key() == key {
 				s.transcriptSyncing = false
 				s.setConnectionIssue(target, "transcript", e)
 				if e == nil {
 					s.setTranscript(object(v))
+					s.reconcileOutgoing(started)
+					s.rebuildMessages()
 					s.trackNativeTask(target, p, id, object(v))
 				} else {
 					s.changed()
@@ -468,7 +475,8 @@ func (s *State) watch(ctx context.Context, target, p, id, key, epoch string, cur
 				s.transcript = next
 				s.trackNativeTask(target, p, id, next)
 				s.scheduleSnapshot()
-				s.messageRows = messages(next)
+				s.reconcileOutgoing(time.Time{})
+				s.rebuildMessages()
 				s.changed()
 				applied <- reset
 			})
@@ -541,7 +549,7 @@ func (s *State) older() {
 		}
 		s.transcript["turns"] = append(older, current...)
 		s.transcript["nextCursor"] = page["nextCursor"]
-		s.messageRows = messages(s.transcript)
+		s.rebuildMessages()
 		s.scheduleSnapshot()
 	})
 }
@@ -588,6 +596,10 @@ func (s *State) send(method string) {
 		s.pendingSends = map[string]string{}
 	}
 	s.pendingSends[key] = method
+	var outgoing *outgoingMessage
+	if method != "interrupt" {
+		outgoing = s.queueOutgoing(body, sent)
+	}
 	s.error = ""
 	s.changed()
 	failure := &sessionOperationError{target: target, device: str(s.device(), "name"), provider: p, session: id, source: str(s.selected, "sourceKind"), method: method}
@@ -598,37 +610,30 @@ func (s *State) send(method string) {
 				return
 			}
 			delete(s.pendingSends, key)
-			if err != nil {
+			confirmed := outgoing != nil && outgoing.Status == "confirmed"
+			if err != nil && !confirmed {
 				if s.key() == key {
 					failure.cause = err
 					s.error, s.failure = err.Error(), failure
 				}
-			} else if method != "interrupt" {
-				// The editor remains usable while awaiting acceptance. Only consume the
-				// submitted draft/attachments, never text or files added in the meantime.
-				consume := func(d draftState) draftState {
-					if strings.TrimSpace(d.Text) == body {
-						d.Text = ""
-					}
-					kept := []*Upload{}
-					for _, u := range d.Uploads {
-						wasSent := false
-						for _, submitted := range sent {
-							wasSent = wasSent || u == submitted
-						}
-						if !wasSent {
-							kept = append(kept, u)
-						}
-					}
-					d.Uploads = kept
-					return d
+			}
+			if outgoing != nil {
+				outgoing.FinishedAt = time.Now()
+				if !confirmed {
+					outgoing.Status = "accepted"
+				}
+				if err != nil && !confirmed {
+					outgoing.Status, outgoing.Error = "failed", err.Error()
 				}
 				if s.key() == key {
-					d := consume(draftState{s.draft.GetUntracked(), s.model, s.uploads})
-					s.draft.Set(d.Text)
-					s.uploads = d.Uploads
-				} else {
-					s.drafts[key] = consume(s.drafts[key])
+					s.rebuildMessages()
+					s.persistSnapshot()
+				} else if cached := s.sessionCache[key]; cached != nil {
+					cached["localMessages"] = s.outgoing[key]
+					s.writeSnapshot(target, p, id, cached)
+				}
+				if err == nil && s.key() == key && s.connected() {
+					s.refreshAfterSend(key, target, p, id)
 				}
 			}
 			s.changed()
@@ -647,11 +652,23 @@ func (s *State) autoReconnect() {
 		return
 	}
 	for _, d := range s.devices {
-		if flag(d, "connected") && s.connection(str(d, "id")).attempt == nil {
-			s.connection(str(d, "id")).established = true
+		id := str(d, "id")
+		h := s.connection(id)
+		if flag(d, "connected") && h.attempt == nil {
+			h.established = true
 		}
-		if s.connection(str(d, "id")).established && !flag(d, "connected") && flag(d, "autoReconnect") && time.Now().After(s.retrying[str(d, "id")]) {
-			id := str(d, "id")
+		if flag(d, "connected") || h.reconnecting || s.deviceOffline(id) {
+			continue
+		}
+		if h.waitingOnline {
+			if online, known := s.deviceOnline(d); known && online {
+				// A click on an offline device queues one initial attempt, not
+				// an infinite retry loop after a failed first connection.
+				s.connectDevice(id, h.established, !flag(d, "autoReconnect"))
+			}
+			continue
+		}
+		if h.established && flag(d, "autoReconnect") && time.Now().After(s.retrying[id]) {
 			s.reconnect(id, true)
 		}
 	}

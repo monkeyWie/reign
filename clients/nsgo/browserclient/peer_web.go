@@ -16,6 +16,10 @@ func pingSocket(ctx context.Context, ws *websocket.Conn) (bool, error) {
 	return false, ws.Write(ctx, websocket.MessageText, []byte("reign:ping"))
 }
 
+// Browsers only permit close code 1000 or application codes 3000–4999.
+// websocket.CloseNow uses 1001, which the browser rejects before closing.
+func closeSocket(ws *websocket.Conn) error { return ws.Close(websocket.StatusNormalClosure, "") }
+
 type jsPeer struct {
 	client         *Client
 	pc, dc         js.Value

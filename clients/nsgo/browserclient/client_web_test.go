@@ -108,4 +108,23 @@ func browserDirectInterop(t *testing.T) {
 	if _, err := c.Call(ctx, Object{"method": "sessions", "provider": "fixture"}); err != nil {
 		t.Fatal(err)
 	}
+	// Losing the coordination socket must not close an already authenticated
+	// DataChannel, including when the host receives the relay's peer-bye frame.
+	if err := closeSocket(c.ws); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for !c.signalLost.Load() {
+		if time.Now().After(deadline) {
+			t.Fatal("signal closure not observed")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if !strings.HasPrefix(c.Path(), "P2P") {
+		t.Fatal("signal closure destroyed browser P2P", c.Path())
+	}
+	if _, err := c.Call(ctx, Object{"method": "sessions", "provider": "fixture"}); err != nil {
+		t.Fatal("direct read after signaling loss", err)
+	}
 }

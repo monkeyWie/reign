@@ -16,11 +16,12 @@ type Directory struct {
 	Sessions    []Object
 }
 type Message struct {
-	ID, Role, Text, Turn string
-	Live                 bool
-	Timestamp            int64
-	Attachments          []Object
-	Tools                []Object
+	ID, Role, Text, Turn    string
+	Delivery, DeliveryError string
+	Live                    bool
+	Timestamp               int64
+	Attachments             []Object
+	Tools                   []Object
 }
 
 func directories(sessions []Object) []Directory {
@@ -30,7 +31,7 @@ func directories(sessions []Object) []Directory {
 	}
 	for _, s := range sessions {
 		p := str(s, "providerId")
-		if p == "codex-vscode" || str(s, "sourceKind") == "vscode" {
+		if !visibleSession(s) || str(s, "sourceKind") == "vscode" {
 			continue
 		}
 		family := p

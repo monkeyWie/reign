@@ -222,9 +222,20 @@ export async function smokeSite(origin: string) {
   const moduleResponse = await fetch(origin + "/assets/chat/" + config.wasm);
   assert.equal(moduleResponse.status, 200);
   assert.match(moduleResponse.headers.get("Cache-Control") || "", /immutable/);
-  const moduleBytes = gunzipSync(
-    new Uint8Array(await moduleResponse.arrayBuffer()),
+  const compressed = Buffer.from(await moduleResponse.arrayBuffer());
+  assert.ok(config.wasmParts?.length > 1);
+  const parts = await Promise.all(
+    config.wasmParts.map(async (part: { file: string; size: number }) => {
+      const response = await fetch(origin + "/assets/chat/" + part.file);
+      assert.equal(response.status, 200);
+      assert.match(response.headers.get("Cache-Control") || "", /immutable/);
+      const bytes = Buffer.from(await response.arrayBuffer());
+      assert.equal(bytes.length, part.size);
+      return bytes;
+    }),
   );
+  assert.deepEqual(Buffer.concat(parts), compressed);
+  const moduleBytes = gunzipSync(compressed);
   assert.equal(moduleBytes.subarray(0, 4).toString("hex"), "0061736d");
   const robots = await (await fetch(origin + "/robots.txt")).text();
   for (const path of ["/chat", "/account", "/admin", "/api/", "/p2p/"])

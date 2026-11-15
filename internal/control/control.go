@@ -15,6 +15,7 @@ import (
 )
 
 type Request struct {
+	Fresh          bool                   `json:"fresh,omitempty"`
 	Params         json.RawMessage        `json:"params,omitempty"`
 	Epoch          string                 `json:"epoch,omitempty"`
 	After          int64                  `json:"after,omitempty"`

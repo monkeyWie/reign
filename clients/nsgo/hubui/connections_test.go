@@ -242,7 +242,7 @@ func TestReconnectStatusShowsAnimatedIndicator(t *testing.T) {
 		})
 	})
 	app.WaitFor("id:connection-retrying", time.Second)
-	app.Find("role:button 正在重新连接")
+	app.Find("role:button 连接中")
 	app.Screenshot("phone-connection-retrying")
 }
 

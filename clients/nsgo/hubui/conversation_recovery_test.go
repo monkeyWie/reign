@@ -107,6 +107,10 @@ func TestOfflineEditingAndSendLoadingPreserveNewDraft(t *testing.T) {
 	app.WaitUntil(time.Second, func() bool { return !app.Find("id:send-message").Props.Disabled })
 	app.Press("id:send-message")
 	app.WaitFor("id:send-loading", time.Second)
+	app.Find("text:断线时也能写")
+	if app.Find("id:chat-input").Text != "" {
+		t.Fatal("submitted message did not immediately move into the timeline")
+	}
 	if !app.Find("id:send-message").Props.Disabled || app.Find("id:chat-input").Props.Disabled {
 		t.Fatal("pending send must stay visible, block duplicates and allow editing")
 	}
@@ -122,18 +126,20 @@ func TestOfflineEditingAndSendLoadingPreserveNewDraft(t *testing.T) {
 	app.Screenshot("send-loading-draft-preserved")
 }
 
-func TestSendFailureStopsLoadingAndKeepsDraft(t *testing.T) {
+func TestSendFailureStopsLoadingAndKeepsMessage(t *testing.T) {
 	f := &delayedSendAPI{demoAPI: newDemoAPI(), release: make(chan struct{})}
 	f.fail.Store(true)
 	app, _ := conversationFixture(t, f, 390, Object{}, true)
-	app.Type("id:chat-input", "发送失败也不能丢")
+	app.Type("id:chat-input", "这条消息不能丢")
 	app.Press("id:send-message")
 	app.WaitFor("id:send-loading", time.Second)
 	close(f.release)
 	app.WaitUntil(time.Second, func() bool { return !app.Exists("id:send-loading") })
-	if app.Find("id:chat-input").Text != "发送失败也不能丢" || app.Find("id:send-message").Props.Disabled {
-		t.Fatal("failed send lost draft or stayed disabled")
+	if app.Find("id:chat-input").Text != "" {
+		t.Fatal("submitted draft was not moved to the timeline")
 	}
+	app.Find("text:这条消息不能丢")
+	app.Find("text:发送失败")
 }
 
 type replayAPI struct {
@@ -183,7 +189,7 @@ func TestReconnectPreservesLiveReplyAndReplaysFromCursor(t *testing.T) {
 	app.WaitUntil(time.Second, func() bool { app.Settle(); return s.streamCursor == 11 })
 	f.offline.Store(true)
 	app.Post(func() { s.cx.Post(func() { s.devices[0]["connected"] = false; s.changed() }) })
-	app.WaitFor("role:button 尚未连接，点击重试", time.Second)
+	app.WaitFor("role:button 连接中", time.Second)
 	// Return to the foreground while offline: transcript reads succeed from an
 	// older cache, but must not erase the visible streamed reply.
 	app.Post(func() { s.cx.Post(s.startSessionWatch) })

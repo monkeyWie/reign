@@ -367,13 +367,15 @@ func (h *Hub) Forget(id string) error {
 	return h.DB.Delete("saved:" + id)
 }
 func (h *Hub) Call(ctx context.Context, id string, r control.Request) (any, error) {
-	raw, _ := json.Marshal(r)
+	cacheRequest := r
+	cacheRequest.Fresh = false
+	raw, _ := json.Marshal(cacheRequest)
 	cacheKey := "rpc:" + id + ":" + string(raw)
 	h.mu.Lock()
 	c := h.connections[id]
 	h.mu.Unlock()
 	if c == nil || c.Path() == "Disconnected" {
-		if control.ReadOnly(r.Method) {
+		if !r.Fresh && control.ReadOnly(r.Method) {
 			var data any
 			if h.DB.Get(cacheKey, &data) == nil {
 				return data, nil

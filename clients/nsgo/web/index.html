@@ -134,6 +134,7 @@
         const { downloadWasm } = await import("/assets/chat/__DOWNLOADER__");
         const bytes = await downloadWasm("/assets/chat/" + config.wasm, {
           size: config.wasmSize,
+          parts: config.wasmParts,
           onProgress(loaded, total) {
             phase.textContent = text("Downloading workspace", "正在下载工作区");
             const percent = total

@@ -423,7 +423,13 @@ func (a *API) Call(ctx context.Context, method string, p Object, target string, 
 		}
 		return nil, nil
 	case "client.call":
-		b, _ := json.Marshal(command)
+		cacheCommand := Object{}
+		for k, v := range command {
+			if k != "fresh" {
+				cacheCommand[k] = v
+			}
+		}
+		b, _ := json.Marshal(cacheCommand)
 		key := "rpc:" + target + ":" + string(b)
 		read := false
 		switch str(command, "method") {
@@ -432,7 +438,7 @@ func (a *API) Call(ctx context.Context, method string, p Object, target string, 
 		}
 		c := a.client(target)
 		if c == nil || !c.Connected() {
-			if read {
+			if read && command["fresh"] != true {
 				v, e := a.store.Get(key)
 				if e != nil || v != nil {
 					return v, e
