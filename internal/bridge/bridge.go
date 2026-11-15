@@ -178,6 +178,17 @@ func CallContext(parent context.Context, raw string) string {
 		e = h.Forget(p.ID)
 	case "client.sync":
 		out, e = h.Sync(ctx, in.Target, p.Provider)
+	case "client.cached":
+		out, e = h.Cached(in.Target, in.Request)
+	case "client.snapshot":
+		var snapshot struct {
+			Provider, Session string
+			Transcript        json.RawMessage
+		}
+		e = json.Unmarshal(in.Params, &snapshot)
+		if e == nil {
+			e = h.SaveSnapshot(in.Target, snapshot.Provider, snapshot.Session, snapshot.Transcript)
+		}
 	case "client.call":
 		out, e = h.Call(ctx, in.Target, in.Request)
 	default:

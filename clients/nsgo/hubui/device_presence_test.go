@@ -45,16 +45,18 @@ func TestDeviceListShowsServerPresenceWithoutConnecting(t *testing.T) {
 		t.Fatal("presence started a connection or duplicated its batch")
 	}
 	app.Press("id:device-demo-device")
-	app.WaitFor("id:dialog-connecting", time.Second)
-	app.WaitFor("text:请在被控电脑的 ReignHub 中允许此次连接", time.Second)
-	if app.Exists("id:session-sidebar") {
-		t.Fatal("entered sessions before connecting")
+	app.WaitFor("id:session-sidebar", time.Second)
+	app.WaitFor("id:session-demo-chat", time.Second)
+	if app.Exists("id:dialog-connecting") {
+		t.Fatal("saved device navigation blocked on connection")
 	}
+	app.Press("id:connection-status-demo-device")
+	app.WaitFor("text:请在被控电脑的 ReignHub 中允许此次连接", time.Second)
 	f.finish <- errors.New("被控设备离线")
 	app.WaitFor("text:被控电脑不在线", time.Second)
 	app.Press("id:connection-done")
-	if app.Exists("id:session-sidebar") || f.calls.Load() != 1 {
-		t.Fatal("failed first connection opened sessions or retried")
+	if !app.Exists("id:session-sidebar") || f.calls.Load() != 1 {
+		t.Fatal("failed connection discarded cached page or retried")
 	}
 	app.Screenshot("device-list-server-presence")
 }

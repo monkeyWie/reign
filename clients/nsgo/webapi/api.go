@@ -313,6 +313,13 @@ func (a *API) Call(ctx context.Context, method string, p Object, target string, 
 	switch method {
 	case "client.list":
 		return a.list()
+	case "client.cached":
+		return a.cached(target, command)
+	case "client.snapshot":
+		if target == "" || str(p, "provider") == "" || str(p, "session") == "" || p["transcript"] == nil {
+			return nil, errors.New("invalid local transcript snapshot")
+		}
+		return nil, a.store.Put(snapshotKey(target, str(p, "provider"), str(p, "session")), p["transcript"])
 	case "client.presence":
 		saved, err := a.saved()
 		if err != nil {
@@ -409,7 +416,7 @@ func (a *API) Call(ctx context.Context, method string, p Object, target string, 
 				return nil, e
 			}
 			for _, k := range keys {
-				if strings.HasPrefix(k, "directory:"+id+":") || strings.HasPrefix(k, "rpc:"+id+":") {
+				if strings.HasPrefix(k, "directory:"+id+":") || strings.HasPrefix(k, "rpc:"+id+":") || strings.HasPrefix(k, "snapshot:"+id+":") {
 					_ = a.store.Delete(k)
 				}
 			}

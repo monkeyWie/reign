@@ -78,24 +78,19 @@ func (s *State) devicePresenceIndicator(cx *core.Scope, d func() Object) core.No
 	})
 }
 
-// Clicking an unconnected saved host is a deliberate connection attempt. Keep
-// the complete progress panel visible and enter its sessions only on success.
+// Navigation is local. Connection setup runs behind the status indicator and
+// must never gate reading cached sessions or messages.
 func (s *State) openDevice(id string) {
 	for _, d := range s.devices {
 		if str(d, "id") != id {
 			continue
 		}
-		if flag(d, "connected") {
-			s.selectDevice(id)
-			return
-		}
-		if s.connection(id).reconnecting {
-			s.connectionDetailTarget = id
-			s.dialog.Set("connection-status")
+		s.selectDevice(id)
+		if flag(d, "connected") || s.connection(id).reconnecting {
 			return
 		}
 		s.connection(id).established = false
-		s.connect(Object{"service": d["service"], "code": d["connectionId"], "public": d["public"], "name": s.clientName, "remember": true, "relayOnly": d["relayOnly"]})
+		s.connectDevice(id, false, !flag(d, "autoReconnect"))
 		return
 	}
 }

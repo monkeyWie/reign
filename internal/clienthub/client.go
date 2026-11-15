@@ -354,6 +354,11 @@ func (h *Hub) Forget(id string) error {
 		return e
 	}
 	keys = append(keys, directories...)
+	snapshots, e := h.DB.Keys("snapshot:" + id + ":")
+	if e != nil {
+		return e
+	}
+	keys = append(keys, snapshots...)
 	for _, k := range keys {
 		if e = h.DB.Delete(k); e != nil {
 			return e

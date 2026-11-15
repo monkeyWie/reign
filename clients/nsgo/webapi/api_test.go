@@ -83,3 +83,39 @@ func TestOfflineDeviceIsolationAndForget(t *testing.T) {
 		t.Fatal("forget removed other device's cache")
 	}
 }
+
+func TestCachedCatalogueAndStreamedSnapshotWithoutConnection(t *testing.T) {
+	s := &memoryStore{v: map[string][]byte{}}
+	a := New(s)
+	defer a.Close()
+	ctx := context.Background()
+	for _, target := range []string{"one", "two"} {
+		b, _ := json.Marshal(Object{"method": "providers", "provider": "", "session": ""})
+		_ = s.Put("rpc:"+target+":"+string(b), []Object{{"id": "codex-app"}})
+		_ = s.Put("directory:"+target+":codex-app", Object{"items": Object{"chat": Object{"id": target, "providerId": "codex-app"}}})
+		if _, err := a.Call(ctx, "client.snapshot", Object{"provider": "codex-app", "session": "chat", "transcript": Object{"turns": []Object{{"id": "streamed"}}}}, target, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	v, err := a.Call(ctx, "client.cached", nil, "one", nil)
+	if err != nil || len(arr(obj(v)["sessions"])) != 1 || str(arr(obj(v)["sessions"])[0], "id") != "one" {
+		t.Fatal("cached directory mixed devices", v, err)
+	}
+	r := Object{"method": "transcript", "provider": "codex-app", "session": "chat"}
+	v, err = a.Call(ctx, "client.cached", nil, "one", r)
+	if err != nil || str(arr(obj(v)["turns"])[0], "id") != "streamed" {
+		t.Fatal("lost cached deltas", v, err)
+	}
+	if _, err = a.Call(ctx, "client.cached", nil, "one", Object{"method": "send"}); err == nil {
+		t.Fatal("cache accepted a mutation")
+	}
+	if _, err = a.Call(ctx, "client.forget", Object{"id": "one"}, "", nil); err != nil {
+		t.Fatal(err)
+	}
+	if v, err = a.Call(ctx, "client.cached", nil, "one", r); v != nil || err != nil {
+		t.Fatal("forgotten snapshot retained", v, err)
+	}
+	if v, err = a.Call(ctx, "client.cached", nil, "two", r); v == nil || err != nil {
+		t.Fatal("other device's snapshot removed", v, err)
+	}
+}

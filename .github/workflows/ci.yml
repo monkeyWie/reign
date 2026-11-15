@@ -310,7 +310,7 @@ jobs:
           run_browser_test -env "AGENTHUB_NSGO_TEST_FIXTURE=$fixture_url" \
             -run 'TestBrowserP2PAndRelayWithExistingHost|TestBrowserDirectWithoutRelay' ./browserclient
           run_browser_test \
-            -run 'TestDesktopNavigationAndDrafts|TestPhoneNavigation|TestComposerSubmit|TestWebNativePresentationParity|TestReconnectStatusShowsAnimatedIndicator|TestImageMarkersAreNotUserMessageText|TestMessageTimesUseControllerTimezone|TestResponsiveLayoutUsesWidthAcrossPlatforms|TestMobileHeaderOverlaysMessages|TestDeviceListShowsServerPresenceWithoutConnecting|TestVerifiedConnectionImmediatelyUpdatesIconAndIgnoresStalePresence' ./hubui
+            -run 'TestDesktopNavigationAndDrafts|TestPhoneNavigation|TestComposerSubmit|TestWebNativePresentationParity|TestReconnectStatusShowsAnimatedIndicator|TestImageMarkersAreNotUserMessageText|TestMessageTimesUseControllerTimezone|TestResponsiveLayoutUsesWidthAcrossPlatforms|TestMobileHeaderOverlaysMessages|TestDeviceListShowsServerPresenceWithoutConnecting|TestVerifiedConnectionImmediatelyUpdatesIconAndIgnoresStalePresence|TestSavedDeviceOpensCachedMessagesWhileConnectingAndAfterFailure|TestConnectedSlowPeerShowsCacheBeforeLiveReadsComplete|TestNoCachedSessionsShowsLoadingAndStopsAfterConnectionFailure|TestLateDiskSnapshotCannotOverwriteNewerLiveMessages' ./hubui
       - name: Browser diagnostics
         if: failure()
         run: |

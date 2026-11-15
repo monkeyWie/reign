@@ -69,11 +69,20 @@ type State struct {
 	streamKey, streamEpoch                                  string
 	streamCursor                                            int64
 	connectAttempt                                          *connectAttempt
+	workspaces                                              map[string]workspaceCache
+	sessionCache                                            map[string]Object
+	sessionCacheOrder                                       []string
+	cacheLoading, transcriptLoading, localPolling           bool
+	catalogueVersion, sessionGeneration                     uint64
+	deviceGeneration                                        uint64
+	transcriptSyncing, snapshotScheduled                    bool
+	snapshots                                               *snapshotWriter
 }
 
 func newState(cx *core.Scope, api API) *State {
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &State{clientName: platformDeviceName(), drafts: map[string]draftState{}, expanded: map[string]bool{}, cx: cx, api: api, ctx: ctx, cancel: cancel, revision: core.NewSignal(cx, 0), width: core.NewSignal(cx, core.Points(1320)), dialog: core.NewSignal(cx, ""), draft: core.NewSignal(cx, ""), deviceWidth: core.NewSignal(cx, core.Points(210)), sessionWidth: core.NewSignal(cx, core.Points(300)), collapsed: map[string]bool{}, images: map[string][]byte{}, loadingImages: map[string]bool{}, previewIndex: core.NewSignal(cx, 0), prompted: map[string]bool{}, retrying: map[string]time.Time{}, timeline: &core.Ref{}}
+	s.snapshots = newSnapshotWriter(ctx, api)
 	cx.Cleanup(func() {
 		cancel()
 		if s.watchCancel != nil {
@@ -116,6 +125,8 @@ func (s *State) call(method string, p Object, done func(any)) {
 	})
 }
 func (s *State) initialize() {
+	// Saved devices are local data; native host startup must not delay browsing.
+	s.pollPresence()
 	s.observeLifecycle()
 	s.refreshTimezone()
 	resolveDeviceName(s.cx, func(name string) { s.clientName = name; s.changed() })
@@ -161,60 +172,78 @@ func (s *State) initialize() {
 	}()
 }
 
-type pollResult struct {
-	local, providers, sessions []Object
-	host                       Object
-	target                     string
+// Local host discovery and the selected remote catalogue have independent
+// lifetimes. A slow local Agent or remote device cannot block cached navigation.
+func (s *State) pollLocal() {
+	if !s.ready || !s.api.CanHost() || s.localPolling {
+		return
+	}
+	s.localPolling = true
+	go func() {
+		info, err := s.api.Call(s.ctx, "host.info", nil, "", nil)
+		var providers any
+		if err == nil {
+			providers, err = s.api.Call(s.ctx, "providers", nil, "", nil)
+		}
+		s.cx.Post(func() {
+			s.localPolling = false
+			if s.ctx.Err() != nil || s.suspended {
+				return
+			}
+			if info != nil {
+				s.host = object(info)
+			}
+			if providers != nil {
+				s.localProviders = visibleProviders(objects(providers))
+			}
+			s.setConnectionIssue("", "catalogue", err)
+			s.changed()
+			s.promptHost()
+		})
+	}()
+}
+
+func (s *State) cancelCatalogue() {
+	if s.pollCancel != nil {
+		s.pollCancel()
+		s.pollCancel = nil
+	}
+	s.pollGeneration++
+	s.polling = false
 }
 
 func (s *State) poll() {
-	if !s.ready || s.suspended || s.ctx.Err() != nil {
+	if s.suspended || s.ctx.Err() != nil {
 		return
 	}
 	s.pollPresence()
-	if s.polling {
+	s.pollLocal()
+	if s.polling || s.target == "" || !s.connected() {
 		return
 	}
 	s.polling = true
 	s.pollGeneration++
-	generation := s.pollGeneration
+	generation, target := s.pollGeneration, s.target
 	ctx, cancel := context.WithCancel(s.ctx)
 	s.pollCancel = cancel
-	target := s.target
+	s.changed()
 	go func() {
 		defer cancel()
-		r := pollResult{target: target}
-		var v any
-		var err error
-		if s.api.CanHost() && err == nil {
-			v, err = s.api.Call(ctx, "host.info", nil, "", nil)
-			if err == nil {
-				r.host = object(v)
-			}
-			if err == nil {
-				v, err = s.api.Call(ctx, "providers", nil, "", nil)
-				if err == nil {
-					r.local = visibleProviders(objects(v))
+		v, err := rpc(ctx, s.api, target, "", "", "providers", nil)
+		providers := visibleProviders(objects(v))
+		sessions := []Object{}
+		if err == nil {
+			for _, p := range providers {
+				// History remains browsable even when this provider cannot accept writes.
+				if !providerReady(p) && !flag(object(p["capabilities"]), "history") {
+					continue
 				}
-			}
-		}
-		issueTarget := ""
-		if target != "" && err == nil {
-			issueTarget = target
-			v, err = rpc(ctx, s.api, target, "", "", "providers", nil)
-			r.providers = visibleProviders(objects(v))
-			if err == nil {
-				for _, p := range r.providers {
-					if !providerReady(p) {
-						continue
-					}
-					var list any
-					list, err = s.api.Call(ctx, "client.sync", Object{"provider": p["id"]}, target, nil)
-					if err != nil {
-						break
-					}
-					r.sessions = append(r.sessions, objects(list)...)
+				var list any
+				list, err = s.api.Call(ctx, "client.sync", Object{"provider": p["id"]}, target, nil)
+				if err != nil {
+					break
 				}
+				sessions = append(sessions, objects(list)...)
 			}
 		}
 		s.cx.Post(func() {
@@ -223,25 +252,16 @@ func (s *State) poll() {
 			}
 			s.polling = false
 			s.pollCancel = nil
-			if s.ctx.Err() != nil {
+			if s.ctx.Err() != nil || s.target != target {
 				return
 			}
-			if r.host != nil {
-				s.host = r.host
-			}
-			if r.local != nil {
-				s.localProviders = r.local
-			}
-			s.setConnectionIssue(issueTarget, "catalogue", err)
-			if issueTarget != "" {
-				s.setConnectionIssue("", "catalogue", nil)
-			}
-			if err == nil && s.target == r.target {
-				s.providers = r.providers
-				s.sessions = r.sessions
+			s.setConnectionIssue(target, "catalogue", err)
+			if err == nil {
+				s.catalogueVersion++
+				s.providers, s.sessions = providers, sessions
+				s.rememberWorkspace()
 			}
 			s.changed()
-			s.promptHost()
 			s.autoReconnect()
 		})
 	}()
@@ -311,21 +331,31 @@ func (s *State) selectDevice(id string) {
 		return
 	}
 	s.rememberDraft()
+	s.rememberSession()
+	s.rememberWorkspace()
+	s.cancelCatalogue()
 	if s.watchCancel != nil {
 		s.watchCancel()
 	}
 	s.target = id
+	s.deviceGeneration++
 	s.selected = nil
+	s.transcriptSyncing = false
 	s.transcript = nil
 	s.messageRows = nil
 	s.approvals = nil
 	s.providers = nil
 	s.sessions = nil
+	s.cacheLoading = false
+	if workspace, ok := s.workspaces[id]; ok {
+		s.providers, s.sessions = workspace.providers, workspace.sessions
+	}
 	s.narrowChat = false
 	s.draft.Set("")
 	s.uploads = nil
 	s.showPhoneSessions()
 	s.changed()
+	s.loadCachedWorkspace(id)
 	s.poll()
 }
 func (s *State) selectSession(session Object) {
@@ -336,12 +366,15 @@ func (s *State) selectSession(session Object) {
 		return
 	}
 	s.rememberDraft()
+	s.rememberSession()
+	s.sessionGeneration++
 	if s.watchCancel != nil {
 		s.watchCancel()
 	}
 	s.selected = session
-	s.transcript = nil
-	s.messageRows = nil
+	s.transcriptSyncing = false
+	s.transcript = s.sessionCache[s.key()]
+	s.messageRows = messages(s.transcript)
 	s.approvals = nil
 	s.models = nil
 	s.model = str(session, "model")
@@ -355,15 +388,17 @@ func (s *State) selectSession(session Object) {
 	s.timeline = &core.Ref{}
 	s.showPhoneChat()
 	s.changed()
+	s.loadCachedSession()
 	s.startSessionWatch()
 }
 func (s *State) startSessionWatch() {
-	if s.selected == nil || s.suspended {
+	if s.selected == nil || s.suspended || !s.connected() {
 		return
 	}
 	if s.watchCancel != nil {
 		s.watchCancel()
 	}
+	s.transcriptSyncing = s.transcript == nil
 	target, p, id, key := s.target, str(s.selected, "providerId"), str(s.selected, "id"), s.key()
 	if s.streamKey != key {
 		s.streamKey, s.streamEpoch, s.streamCursor = key, "", 0
@@ -387,11 +422,13 @@ func (s *State) startSessionWatch() {
 	go s.watch(ctx, target, p, id, key, epoch, cursor)
 }
 func (s *State) setTranscript(t Object) {
+	s.transcriptLoading = false
 	s.transcript = mergeLatest(s.transcript, t)
 	s.messageRows = messages(s.transcript)
 	if s.model == "" {
 		s.model = str(object(t["session"]), "model")
 	}
+	s.scheduleSnapshot()
 	s.changed()
 }
 func (s *State) watch(ctx context.Context, target, p, id, key, epoch string, cursor int64) {
@@ -399,6 +436,7 @@ func (s *State) watch(ctx context.Context, target, p, id, key, epoch string, cur
 		v, e := rpc(ctx, s.api, target, p, id, "transcript", nil)
 		s.cx.Post(func() {
 			if ctx.Err() == nil && s.key() == key {
+				s.transcriptSyncing = false
 				s.setConnectionIssue(target, "transcript", e)
 				if e == nil {
 					s.setTranscript(object(v))
@@ -452,6 +490,7 @@ func (s *State) watch(ctx context.Context, target, p, id, key, epoch string, cur
 				}
 				next, reset := applyEvents(s.transcript, events)
 				s.transcript = next
+				s.scheduleSnapshot()
 				s.messageRows = messages(next)
 				s.changed()
 				applied <- reset
@@ -496,8 +535,16 @@ func (s *State) older() {
 		return
 	}
 	key, target, p, id := s.key(), s.target, str(s.selected, "providerId"), str(s.selected, "id")
+	connected := s.connected()
 	s.busy = true
 	s.async(func(ctx context.Context) (any, error) {
+		v, err := s.api.Call(ctx, "client.cached", nil, target, Object{"method": "transcript", "provider": p, "session": id, "cursor": cursor})
+		if err == nil && v != nil {
+			return v, nil
+		}
+		if !connected {
+			return nil, fmt.Errorf("更早的消息尚未缓存，请连接设备后加载")
+		}
 		return rpc(ctx, s.api, target, p, id, "transcript", Object{"cursor": cursor})
 	}, func(v any) {
 		if key != s.key() || str(s.transcript, "nextCursor") != cursor {
@@ -518,6 +565,7 @@ func (s *State) older() {
 		s.transcript["turns"] = append(older, current...)
 		s.transcript["nextCursor"] = page["nextCursor"]
 		s.messageRows = messages(s.transcript)
+		s.scheduleSnapshot()
 	})
 }
 func (s *State) pendingSend() string {

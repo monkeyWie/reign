@@ -233,7 +233,13 @@ func TestSlowCatalogueHasNoDeadlineAndDoesNotBlockPresence(t *testing.T) {
 func TestReconnectStatusShowsAnimatedIndicator(t *testing.T) {
 	f := &connectionFixture{demoAPI: newDemoAPI()}
 	app, s := conversationFixture(t, f, 390, Object{}, true)
-	app.Post(func() { s.cx.Post(func() { s.connection("demo-device").reconnecting = true; s.changed() }) })
+	app.Post(func() {
+		s.cx.Post(func() {
+			s.connection("demo-device").established = true
+			s.connection("demo-device").reconnecting = true
+			s.changed()
+		})
+	})
 	app.WaitFor("id:connection-retrying", time.Second)
 	app.Find("role:button 正在重新连接")
 	app.Screenshot("phone-connection-retrying")

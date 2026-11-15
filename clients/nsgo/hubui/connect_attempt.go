@@ -22,6 +22,7 @@ type connectAttempt struct {
 	steps                          []connectionStep
 	target                         string
 	complete                       bool
+	savedPairing                   bool
 	params                         Object
 	cancel                         context.CancelFunc
 	step                           connectivity.Progress

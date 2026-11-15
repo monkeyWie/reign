@@ -76,6 +76,9 @@ func (s *State) connectionProblem(id string) bool {
 func (s *State) connectionTitle(id string) string {
 	h := s.connection(id)
 	if h.reconnecting {
+		if !h.established {
+			return "正在连接"
+		}
 		return "正在重新连接"
 	}
 	if s.connectionProblem(id) {
@@ -182,6 +185,11 @@ func (s *State) acceptConnection(id string, devices []Object) {
 func (s *State) reconnectDevice(id string) { s.reconnect(id, false) }
 
 func (s *State) reconnect(id string, automatic bool) {
+	pair := !automatic && s.connection(id).attempt != nil && s.connection(id).attempt.savedPairing
+	s.connectDevice(id, automatic, pair)
+}
+
+func (s *State) connectDevice(id string, automatic, pair bool) {
 	h := s.connection(id)
 	if h.reconnecting || s.ctx.Err() != nil {
 		return
@@ -194,10 +202,10 @@ func (s *State) reconnect(id string, automatic bool) {
 	params := Object{}
 	for _, device := range s.devices {
 		if str(device, "id") == id {
-			params = Object{"code": str(device, "connectionId"), "service": str(device, "service")}
+			params = Object{"code": str(device, "connectionId"), "service": str(device, "service"), "public": device["public"], "name": s.clientName, "remember": true, "relayOnly": device["relayOnly"]}
 		}
 	}
-	a := &connectAttempt{params: params, target: id, cancel: cancel, active: true, started: time.Now(), stepStarted: time.Now()}
+	a := &connectAttempt{params: params, target: id, savedPairing: pair, cancel: cancel, active: true, started: time.Now(), stepStarted: time.Now()}
 	a.inherit(h.attempt)
 	reason := "手动重新连接"
 	detail := "用户发起重新连接"
@@ -235,7 +243,11 @@ func (s *State) reconnect(id string, automatic bool) {
 	s.retrying[id] = time.Now().Add(15 * time.Second)
 	s.changed()
 	go func() {
-		v, err := s.api.Call(ctx, "client.reconnect", Object{"id": id}, "", nil)
+		method, request := "client.reconnect", Object{"id": id}
+		if pair {
+			method, request = "client.connect", params
+		}
+		v, err := s.api.Call(ctx, method, request, "", nil)
 		finished := time.Now()
 		cancel()
 		s.cx.Post(func() {

@@ -107,16 +107,14 @@ func (s *State) conversation(cx *core.Scope, narrow bool) core.Node {
 			return button(cx, "load-older", "加载更早消息", nil, "ghost", s.older)
 		}}}},
 	}
-	timelineChildren := []core.Node{list, core.Show{When: func() bool { return !s.narrowLayout() }, Then: func(cx *core.Scope) core.Node { return s.messageNavigation(cx, rows, listRef, viewport, tailCount) }}, core.Show{When: func() bool { return !atBottom.Get() }, Then: func(cx *core.Scope) core.Node {
+	timelineChildren := []core.Node{list, s.emptyTranscript(cx), core.Show{When: func() bool { return !s.narrowLayout() }, Then: func(cx *core.Scope) core.Node { return s.messageNavigation(cx, rows, listRef, viewport, tailCount) }}, core.Show{When: func() bool { return !atBottom.Get() }, Then: func(cx *core.Scope) core.Node {
 		return core.View{Style: core.Style{Position: core.Absolute, Bottom: core.Pt(12), Right: core.Pt(40)}, Children: []core.Node{button(cx, "jump-to-latest", "回到最新", lucide.ArrowDown, "outline", func() { listRef.ScrollToIndexAt(0, 1, 0, true) })}}
 	}}}
 	if floatingHeader {
 		timelineChildren = append(timelineChildren, s.compactConversationHeader(cx, narrow))
 	}
 	children = append(children, core.View{TestID: "timeline", Style: fill, Children: timelineChildren})
-	children = append(children, core.Show{When: func() bool { return !s.connected() }, Then: func(cx *core.Scope) core.Node {
-		return core.View{Style: core.Style{Padding: core.Symmetric(8, 18)}, Children: []core.Node{label(cx, "设备离线，显示本地缓存；连接恢复后同步最新消息。", 12, true)}}
-	}}, s.composer(cx))
+	children = append(children, s.composer(cx))
 	return core.View{TestID: "conversation", Style: fill, Children: children}
 }
 

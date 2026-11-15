@@ -48,6 +48,14 @@ func (d *demoAPI) Call(ctx context.Context, method string, p Object, target stri
 		return demoProviders(), nil
 	case "client.list", "client.connect", "client.reconnect":
 		return []Object{{"id": "demo-device", "name": "工作电脑", "connectionId": "123456", "path": "P2P · WebRTC", "connected": true, "autoReconnect": false, "service": DefaultService}}, nil
+	case "client.cached":
+		if str(r, "method") == "transcript" {
+			return d.transcript, nil
+		}
+		if str(r, "method") == "models" {
+			return []Object{{"id": "gpt-5.4", "name": "GPT-5.4"}, {"id": "gpt-5.3-codex", "name": "GPT-5.3 Codex"}}, nil
+		}
+		return Object{"providers": demoProviders(), "sessions": d.sessions}, nil
 	case "client.sync":
 		out := []Object{}
 		for _, s := range d.sessions {
