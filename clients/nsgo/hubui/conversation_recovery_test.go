@@ -144,7 +144,7 @@ func TestSendFailureStopsLoadingAndKeepsMessage(t *testing.T) {
 
 type replayAPI struct {
 	*demoAPI
-	offline, recovered, delivered, wrongCursor atomic.Bool
+	offline, recovered, wrongCursor atomic.Bool
 }
 
 const initialLiveText = "已收到的回复🙂"
@@ -158,11 +158,12 @@ func (f *replayAPI) Call(ctx context.Context, method string, p Object, target st
 		if f.offline.Load() {
 			return nil, errors.New("设备离线")
 		}
-		if f.recovered.Load() && !f.delivered.Load() {
+		// Match the real event log: cancellation is not an acknowledgement.
+		// A replacement watch must be able to replay the same cursor.
+		if f.recovered.Load() && number(r, "after") < 12 {
 			if str(r, "epoch") != "replay" || number(r, "after") != 11 {
 				f.wrongCursor.Store(true)
 			}
-			f.delivered.Store(true)
 			return Object{"epoch": "replay", "cursor": 12, "events": []Object{{"kind": "text", "turnId": "live", "itemId": "answer", "offset": len(utf16.Encode([]rune(initialLiveText))), "delta": "，重连后继续输出"}}}, nil
 		}
 		if str(r, "epoch") == "" {
