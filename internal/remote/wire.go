@@ -714,51 +714,6 @@ func sessionCryptor(key, peer string, hello helloMessage, host bool) (*cryptor, 
 	return crypto, nil
 }
 
-// Native protocol pings are handled by Cloudflare without waking a hibernating
-// Durable Object. Keep the outbound relay link healthy even during P2P traffic.
-func keepAlive(ctx context.Context, ws *websocket.Conn) {
-	keepSocketAlive(ctx, ws, true)
-}
-
-// Keep both physical sockets active. Only signaling may renew the lease;
-// sending renewal frames on the relay would violate its data-only protocol.
-func keepSocketAlive(ctx context.Context, ws *websocket.Conn, renew bool) {
-	tick := time.NewTicker(25 * time.Second)
-	defer tick.Stop()
-	pulses := 0
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-tick.C:
-			probe, cancel := context.WithTimeout(ctx, 10*time.Second)
-			err := ws.Ping(probe)
-			pulses++
-			if err == nil && renew && pulses%3 == 0 {
-				err = ws.Write(probe, websocket.MessageText, []byte(`{"kind":"renew"}`))
-			}
-			cancel()
-			if err != nil {
-				_ = ws.CloseNow()
-				return
-			}
-		}
-	}
-}
-
-// Relay is a write-only business ingress; its reader consumes control frames.
-func drainRelay(ctx context.Context, ws *websocket.Conn) error {
-	if ws == nil {
-		return nil
-	}
-	defer ws.CloseNow()
-	for {
-		if _, _, err := ws.Read(ctx); err != nil {
-			return err
-		}
-	}
-}
-
 func (w *wire) progress(id, stage, message, detail, state string) {
 	if w.opts.Progress == nil || w.ctx.Err() != nil {
 		return

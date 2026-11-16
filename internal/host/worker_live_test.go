@@ -24,7 +24,7 @@ func TestDeployedWorkerNativeRelay(t *testing.T) {
 	if origin == "" {
 		t.Skip("set REIGNHUB_TEST_WORKER_ORIGIN to test a deployed Worker")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 	cfg, err := config.Load(t.TempDir())
 	if err != nil {
@@ -63,4 +63,23 @@ func TestDeployedWorkerNativeRelay(t *testing.T) {
 		raw, _ := json.Marshal(result)
 		t.Log(req.Method, "response bytes:", len(raw))
 	}
+	// Keep the real relay alive across several heartbeats and a lease renewal.
+	// Short connect/read tests miss sockets closed by the first liveness probe.
+	tick := time.NewTicker(10 * time.Second)
+	defer tick.Stop()
+	for i := 0; i < 8; i++ {
+		select {
+		case <-ctx.Done():
+			t.Fatal("relay longevity:", ctx.Err())
+		case <-tick.C:
+		}
+		probe, stop := context.WithTimeout(ctx, 10*time.Second)
+		_, err := hub.Call(probe, saved.ID, control.Request{Method: "providers"})
+		stop()
+		if err != nil {
+			t.Fatalf("relay after %ds: %v (host: %+v)", (i+1)*10, err, m.Network())
+		}
+		t.Logf("relay still usable after %ds", (i+1)*10)
+	}
+
 }

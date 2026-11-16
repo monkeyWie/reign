@@ -67,7 +67,8 @@ func serveHostObserved(ctx context.Context, p Pairing, opts Options, d *control.
 	}
 	life, cancel := context.WithCancel(ctx)
 	defer cancel()
-	go keepAlive(life, ws)
+	heartbeat := newSocketHeartbeat()
+	go heartbeat.run(life, ws, true, opts.Progress)
 	var replyRelay *relayLink
 	if allowRelay {
 		replyRelay = &relayLink{}
@@ -91,6 +92,7 @@ func serveHostObserved(ctx context.Context, p Pairing, opts Options, d *control.
 		if err != nil {
 			return err
 		}
+		heartbeat.received()
 		var f relay.Frame
 		if json.Unmarshal(raw, &f) != nil || f.Peer == "" {
 			continue

@@ -26,8 +26,12 @@ func (l *relayLink) run(ctx context.Context, p Pairing, role, peer string, statu
 	for ctx.Err() == nil {
 		if socket := l.socket.Load(); socket != nil {
 			life, cancel := context.WithCancel(ctx)
-			go keepSocketAlive(life, socket, false)
-			drainRelay(life, socket)
+			heartbeat := newSocketHeartbeat()
+			go heartbeat.run(life, socket, false, connectivity.Observer(ctx))
+			err := drainRelay(life, socket, heartbeat)
+			if ctx.Err() == nil && err != nil {
+				connectivity.Note(ctx, "relay-lost", "relay", "备用中继连接已断开", err.Error(), "warning")
+			}
 			cancel()
 			l.socket.CompareAndSwap(socket, nil)
 			if role == "client" {

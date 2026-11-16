@@ -88,7 +88,8 @@ func connectOnce(ctx context.Context, p Pairing, opts Options) (*Client, error) 
 		_ = ws.CloseNow()
 		close(c.done)
 	}()
-	go keepAlive(w.ctx, ws)
+	heartbeat := newSocketHeartbeat()
+	go heartbeat.run(w.ctx, ws, true, opts.Progress)
 	if allowRelay {
 		// The pairing RPC's context ends after Connect returns. Optional relay
 		// setup belongs to the live wire and must not gate handshake or ICE.
@@ -107,6 +108,7 @@ func connectOnce(ctx context.Context, p Pairing, opts Options) (*Client, error) 
 				}
 				return
 			}
+			heartbeat.received()
 			var f relay.Frame
 			if json.Unmarshal(raw, &f) == nil {
 				w.receive(f)
