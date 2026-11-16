@@ -195,7 +195,7 @@ func (a *API) connect(ctx context.Context, p Object) (any, error) {
 		if _, e = post(ctx, service, token, "/p2p/pairings/request", Object{"id": request, "host": d["id"], "envelope": envelope}); e != nil {
 			return nil, e
 		}
-		approvalCtx, stopApproval := context.WithTimeout(ctx, connectivity.StageTimeout)
+		approvalCtx, stopApproval := context.WithTimeout(ctx, connectivity.ApprovalTimeout)
 		defer stopApproval()
 		var result Object
 		for approvalCtx.Err() == nil {
@@ -357,7 +357,7 @@ func (a *API) Call(ctx context.Context, method string, p Object, target string, 
 				}
 				if old := a.client(str(s, "id")); old != nil {
 					connectivity.Report(ctx, "resume", "正在恢复原有连接", connectivity.StageTimeout)
-					probe, stop := context.WithTimeout(ctx, 8*time.Second)
+					probe, stop := context.WithTimeout(ctx, connectivity.ResumeTimeout)
 					err := old.Resume(probe)
 					stop()
 					if err == nil {

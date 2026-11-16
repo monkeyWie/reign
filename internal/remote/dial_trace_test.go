@@ -14,15 +14,24 @@ import (
 )
 
 func TestDialTraceIdentifiesWaitingForUpgradeResponse(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { <-r.Context().Done() }))
+	received := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { close(received); <-r.Context().Done() }))
 	defer server.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	var mu sync.Mutex
 	steps := []connectivity.Progress{}
 	ctx = connectivity.WithProgress(ctx, func(p connectivity.Progress) { mu.Lock(); steps = append(steps, p); mu.Unlock() })
+	go func() {
+		select {
+		case <-received:
+			cancel()
+		case <-time.After(5 * time.Second):
+			cancel()
+		}
+	}()
 	_, _, err := dialWebSocket(ctx, server.URL, "private-token", "signal")
-	if !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "等待服务响应") {
+	if !errors.Is(err, context.Canceled) || !strings.Contains(err.Error(), "等待服务响应") {
 		t.Fatalf("lost stalled phase: %v", err)
 	}
 	mu.Lock()

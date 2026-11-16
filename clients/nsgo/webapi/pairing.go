@@ -90,7 +90,7 @@ func post(ctx context.Context, service, token, path string, v Object) (Object, e
 	if token != "" {
 		r.Header.Set("Authorization", "Bearer "+token)
 	}
-	resp, e := http.DefaultClient.Do(r)
+	resp, e := connectivity.ConnectionHTTPClient.Do(r)
 	if e != nil {
 		return nil, e
 	}

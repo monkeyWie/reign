@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/nsgo-dev/nsgo/core"
 )
@@ -46,6 +47,16 @@ func (s *State) observeNativeBackground() {
 		s.keepAlive = flag(object(v), "running")
 		s.setBackground(s.backgrounded)
 	})
+	s.cx.OnHostEvent("ras.network-change", func(any) {
+		// A network change ends the recovery pause, never a healthy data path.
+		for id := range s.retrying {
+			delete(s.retrying, id)
+		}
+		s.directoryChecked = time.Time{}
+		s.presenceGeneration++
+		s.presencePolling = false
+		s.pollPresence()
+	})
 	s.cx.OnHostEvent("ras.open-session", func(v any) {
 		session := object(v)
 		if str(session, "target") == "" || str(session, "id") == "" {
@@ -77,7 +88,7 @@ func (s *State) nativeBackgroundStatus() Object {
 		id := str(d, "id")
 		if flag(d, "connected") {
 			connected++
-		} else if h := s.connections[id]; h != nil && h.reconnecting {
+		} else if h := s.connections[id]; h != nil && (h.reconnecting || h.established && flag(d, "autoReconnect")) {
 			connecting++
 		}
 	}

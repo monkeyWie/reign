@@ -17,7 +17,7 @@ type Progress struct {
 }
 
 // StageTimeout is a fresh budget for each connection stage, never a total attempt budget.
-const StageTimeout = 2 * time.Minute
+const StageTimeout = 30 * time.Second
 
 type progressKey struct{}
 

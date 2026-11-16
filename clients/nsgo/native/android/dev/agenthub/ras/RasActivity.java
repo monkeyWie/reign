@@ -24,8 +24,14 @@ public final class RasActivity extends NsgoActivity {
             stateInfo.put("running", running);
             view.send("ras.background-state", stateInfo);
         };
+        ConnectionService.networkListener = () -> view.send("ras.network-change", new HashMap<String,Object>());
         view.handle("ras.background", (data, reply) -> ConnectionService.request(this, resumed, data, reply));
         view.registerComponent("ras.qr-camera", (context, events) -> new QrCamera(this, events));
+        view.handle("ras.background-settings", (data, reply) -> {
+            // Open the system list; changing battery exemptions stays the user's choice.
+            startActivity(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));
+            reply.resolve(null);
+        });
         view.handle("ras.timezone", (data, reply) -> {
             java.util.TimeZone zone = java.util.TimeZone.getDefault();
             HashMap<String,Object> result = new HashMap<>();
@@ -76,6 +82,7 @@ public final class RasActivity extends NsgoActivity {
     }
     @Override protected void onDestroy() {
         ConnectionService.listener = null;
+        ConnectionService.networkListener = null;
         stopService(new Intent(this, ConnectionService.class));
         super.onDestroy();
     }

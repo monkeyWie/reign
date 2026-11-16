@@ -151,7 +151,21 @@ func (s *State) appearanceSettings(cx *core.Scope) core.Node {
 }
 func (s *State) connectionSettings(cx *core.Scope) core.Node {
 	if !s.api.CanHost() {
-		return card(cx, label(cx, "连接服务", 18, false), label(cx, serviceOrigin(), 14, true), label(cx, "连接设备时，可以选择官方服务或你自己部署的服务。", 14, true), button(cx, "settings-connect", "连接设备", lucide.Plus, "primary", func() { s.openSettingsDialog("connect") }))
+		connection := card(cx, label(cx, "连接服务", 18, false), label(cx, serviceOrigin(), 14, true), label(cx, "连接设备时，可以选择官方服务或你自己部署的服务。", 14, true), button(cx, "settings-connect", "连接设备", lucide.Plus, "primary", func() { s.openSettingsDialog("connect") }))
+		if !isWeb() && cx.Env().OS() == core.OSAndroid {
+			return core.View{Style: core.Style{Gap: 16}, Children: []core.Node{connection,
+				card(cx, label(cx, "后台连接", 18, false), label(cx, "连接期间通过前台服务保持网络。若锁屏后仍断开，可在系统电池设置中允许 ReignHub 后台运行。", 13, true),
+					button(cx, "background-settings", "打开系统后台设置", lucide.Settings, "outline", func() {
+						cx.CallHost("ras.background-settings", nil, func(_ any, err error) {
+							if err != nil {
+								s.error = err.Error()
+								s.changed()
+							}
+						})
+					})),
+			}}
+		}
+		return connection
 	}
 	return card(cx, label(cx, "本机服务", 18, false), dynamicText(cx, func() string { s.read(); return str(s.host, "serviceUrl") }, 14, true), dynamicText(cx, func() string { s.read(); return str(s.host, "name") }, 14, false), label(cx, "优先直连，自动回退到加密中继。", 13, true), button(cx, "settings-service", "配置服务", lucide.Network, "outline", func() { s.openSettingsDialog("service-settings") }), button(cx, "settings-password", "访问密码", lucide.LockKeyhole, "ghost", func() { s.openSettingsDialog("password") }))
 }

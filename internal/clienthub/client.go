@@ -149,7 +149,7 @@ func (h *Hub) Reconnect(ctx context.Context, id string) (Saved, error) {
 	h.mu.Unlock()
 	if old != nil {
 		connectivity.Report(ctx, "resume", "正在恢复原有连接", connectivity.StageTimeout)
-		probe, stop := context.WithTimeout(ctx, 8*time.Second)
+		probe, stop := context.WithTimeout(ctx, connectivity.ResumeTimeout)
 		err := old.Resume(probe)
 		stop()
 		if err == nil {
@@ -233,8 +233,8 @@ func (h *Hub) connect(ctx context.Context, service, code, public, password, name
 		if password != "" {
 			message = "正在等待被控电脑验证访问密码"
 		}
-		connectivity.Report(ctx, "approval", message, connectivity.StageTimeout)
-		approvalCtx, stopApproval := context.WithTimeout(ctx, connectivity.StageTimeout)
+		connectivity.Report(ctx, "approval", message, connectivity.ApprovalTimeout)
+		approvalCtx, stopApproval := context.WithTimeout(ctx, connectivity.ApprovalTimeout)
 		defer stopApproval()
 		tick := time.NewTicker(time.Second)
 		defer tick.Stop()

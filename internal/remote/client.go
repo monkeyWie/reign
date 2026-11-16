@@ -26,6 +26,15 @@ type Client struct {
 }
 
 func Connect(ctx context.Context, p Pairing, opts Options) (*Client, error) {
+	if opts.Progress != nil {
+		ctx = connectivity.WithProgress(ctx, opts.Progress)
+	}
+	return connectivity.RetrySetup(ctx, func(setup context.Context) (*Client, error) {
+		return connectOnce(setup, p, opts)
+	})
+}
+
+func connectOnce(ctx context.Context, p Pairing, opts Options) (*Client, error) {
 	if opts.Progress == nil {
 		opts.Progress = connectivity.Observer(ctx)
 	} else {

@@ -19,17 +19,22 @@ import (
 // Retry only transient transport failures during the upgrade. All attempts
 // share the caller's stage deadline; application rejections are never retried.
 func dialWebSocket(ctx context.Context, endpoint, token, stage string) (*websocket.Conn, *http.Response, error) {
+	return dialWebSocketBudget(ctx, endpoint, token, stage, connectivity.SocketAttemptTimeout)
+}
+func dialWebSocketBudget(ctx context.Context, endpoint, token, stage string, budget time.Duration) (*websocket.Conn, *http.Response, error) {
 	for attempt := 1; ; attempt++ {
-		traceCtx, trace := traceSocketDial(ctx, stage, attempt)
+		setup, stop := context.WithTimeout(ctx, budget)
+		traceCtx, trace := traceSocketDial(setup, stage, attempt)
 		ws, response, err := websocket.Dial(traceCtx, endpoint, &websocket.DialOptions{
 			HTTPClient: connectivity.ConnectionWebSocketClient,
 			HTTPHeader: http.Header{"Authorization": []string{"Bearer " + token}},
 		})
 		err = trace.finish(response, err)
+		stop()
 		if err == nil {
 			return ws, response, nil
 		}
-		if attempt >= 3 || ctx.Err() != nil || response != nil || !transientDialError(err) {
+		if attempt >= 3 || ctx.Err() != nil || response != nil || !connectivity.RetryableSetup(err) {
 			return nil, response, err
 		}
 		u, _ := url.Parse(endpoint)

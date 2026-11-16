@@ -88,6 +88,12 @@ func id() string {
 }
 func sum(s string) string { v := sha256.Sum256([]byte(s)); return hex.EncodeToString(v[:]) }
 func Connect(ctx context.Context, p Pairing) (*Client, error) {
+	return connectivity.RetrySetup(ctx, func(setup context.Context) (*Client, error) {
+		return connectOnce(setup, p)
+	})
+}
+
+func connectOnce(ctx context.Context, p Pairing) (*Client, error) {
 	u, e := url.Parse(p.Relay)
 	rawKey, ke := hex.DecodeString(p.Key)
 	if e != nil || u.User != nil || u.Host == "" || u.Scheme != "wss" && !(u.Scheme == "ws" && CleartextAllowed(u.Hostname())) || ke != nil || len(rawKey) != 32 || len(p.Host) < 16 || p.Token == "" {
@@ -309,6 +315,20 @@ func (c *Client) keepRelayAlive(life context.Context, socket *websocket.Conn) {
 	}
 }
 func openSocket(ctx context.Context, endpoint, token string) (*websocket.Conn, frame, error) {
+	for attempt := 1; ; attempt++ {
+		setup, stop := context.WithTimeout(ctx, connectivity.SocketAttemptTimeout)
+		ws, f, err := openSocketOnce(setup, endpoint, token)
+		stop()
+		if err == nil || attempt >= connectivity.SetupAttempts || ctx.Err() != nil || !connectivity.RetryableSetup(err) {
+			return ws, f, err
+		}
+		connectivity.Note(ctx, fmt.Sprintf("socket-retry:%d", attempt), "signal", "服务连接未能就绪，正在重试", fmt.Sprintf("第 %d/%d 次", attempt+1, connectivity.SetupAttempts), "warning")
+		if err := connectivity.RetryPause(ctx, attempt); err != nil {
+			return nil, frame{}, err
+		}
+	}
+}
+func openSocketOnce(ctx context.Context, endpoint, token string) (*websocket.Conn, frame, error) {
 	var f frame
 	ws, _, err := websocket.Dial(ctx, endpoint, &websocket.DialOptions{Subprotocols: []string{"reign.p2p", "auth." + base64.RawURLEncoding.EncodeToString([]byte(token))}})
 	if err != nil {
@@ -554,7 +574,7 @@ func (c *Client) receiveChunk(packet []byte) error {
 	}
 	c.mu.Lock()
 	for k, a := range c.chunks {
-		if time.Since(a.updated) > connectivity.StageTimeout {
+		if time.Since(a.updated) > 2*time.Minute {
 			delete(c.chunks, k)
 		}
 	}

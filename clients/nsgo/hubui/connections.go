@@ -19,6 +19,7 @@ import (
 type connectionHealth struct {
 	attempt       *connectAttempt
 	issues        map[string]string
+	retryFailures int
 	reconnecting  bool
 	waitingOnline bool
 	established   bool
@@ -318,6 +319,12 @@ func (s *State) connectDevice(id string, automatic, pair bool) {
 			}
 			a.finish(finished, err)
 			h.reconnecting = false
+			if err != nil {
+				h.retryFailures++
+				s.retrying[id] = time.Now().Add(min(15*time.Second, time.Second<<min(h.retryFailures, 4)))
+			} else {
+				h.retryFailures = 0
+			}
 			s.setConnectionIssue(id, "reconnect", err)
 			if err != nil {
 				s.logConnection(id, "retry-result", "本轮连接结束", err.Error(), "warning")

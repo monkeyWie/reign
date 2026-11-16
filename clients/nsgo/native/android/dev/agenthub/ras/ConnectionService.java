@@ -14,6 +14,9 @@ import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.PowerManager;
+import android.net.wifi.WifiManager;
+import android.net.ConnectivityManager;
+import android.net.Network;
 import dev.oneo.nsgo.NsgoView;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -30,10 +33,15 @@ public final class ConnectionService extends Service {
     private static ConnectionService current;
     private static final ArrayList<NsgoView.HostReply> pending = new ArrayList<>();
     static Consumer<Boolean> listener;
+    static Runnable networkListener;
     private final HashMap<String,String> taskStates = new HashMap<>();
     private final Handler handler = new Handler(Looper.getMainLooper());
     private PowerManager.WakeLock wake;
-    private boolean working;
+    private WifiManager.WifiLock wifi;
+    private boolean maintaining;
+    private ConnectivityManager connectivity;
+    private ConnectivityManager.NetworkCallback networks;
+    private final Runnable networkChanged = () -> { if (networkListener != null) networkListener.run(); };
 
     static void request(Activity activity, boolean foreground, Object data, NsgoView.HostReply reply) {
         try {
@@ -74,8 +82,24 @@ public final class ConnectionService extends Service {
         NotificationManager manager = getSystemService(NotificationManager.class);
         manager.createNotificationChannel(new NotificationChannel(CHANNEL, "设备连接", NotificationManager.IMPORTANCE_LOW));
         manager.createNotificationChannel(new NotificationChannel(TASKS, "Agent 会话", NotificationManager.IMPORTANCE_DEFAULT));
-        wake = getSystemService(PowerManager.class).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "ReignHub:AgentTask");
+        connectivity = getSystemService(ConnectivityManager.class);
+        networks = new ConnectivityManager.NetworkCallback() {
+            private void changed() {
+                handler.removeCallbacks(networkChanged);
+                handler.postDelayed(networkChanged, 300);
+            }
+            @Override public void onAvailable(Network network) { changed(); }
+            @Override public void onLost(Network network) { changed(); }
+        };
+        try { connectivity.registerDefaultNetworkCallback(networks, handler); }
+        catch (RuntimeException error) { networks = null; }
+        wake = getSystemService(PowerManager.class).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "ReignHub:Connection");
         wake.setReferenceCounted(false);
+        WifiManager managerWifi = (WifiManager)getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+        if (managerWifi != null) {
+            wifi = managerWifi.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "ReignHub:Connection");
+            wifi.setReferenceCounted(false);
+        }
     }
 
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
@@ -111,19 +135,20 @@ public final class ConnectionService extends Service {
         startForeground(CONNECTION, notification(CHANNEL, status.optString("title", "ReignHub"),
                 status.optString("body", "后台连接保持中"), null).setOngoing(true).setOnlyAlertOnce(true).build());
         JSONArray tasks = status.optJSONArray("tasks");
-        boolean active = false;
         if (tasks != null) {
             for (int i = 0; i < tasks.length(); i++) {
                 JSONObject task = tasks.optJSONObject(i);
                 if (task == null) continue;
                 updateTask(task);
-                active |= task.optBoolean("connected") && "inProgress".equals(task.optString("status"));
             }
         }
-        if (active != working) {
-            working = active;
-            if (working) renewWake();
-            else { handler.removeCallbacksAndMessages(null); if (wake.isHeld()) wake.release(); }
+        // Protect the connection for the whole user-visible service lifetime,
+        // including idle chats and recovery. Releasing on a temporary socket
+        // loss would prevent Android from running the reconnect itself.
+        if (!maintaining) {
+            maintaining = true;
+            renewWake();
+            if (wifi != null && !wifi.isHeld()) wifi.acquire();
         }
     }
 
@@ -149,7 +174,7 @@ public final class ConnectionService extends Service {
     }
 
     private void renewWake() {
-        if (!working) return;
+        if (!maintaining) return;
         wake.acquire(10 * 60 * 1000L);
         handler.postDelayed(this::renewWake, 5 * 60 * 1000L);
     }
@@ -158,9 +183,14 @@ public final class ConnectionService extends Service {
         if (current == this) current = null;
         for (NsgoView.HostReply waiting : new ArrayList<>(pending)) waiting.resolve(result(false));
         pending.clear();
-        working = false;
+        maintaining = false;
+        if (networks != null) {
+            try { connectivity.unregisterNetworkCallback(networks); } catch (RuntimeException ignored) {}
+            networks = null;
+        }
         handler.removeCallbacksAndMessages(null);
         if (wake != null && wake.isHeld()) wake.release();
+        if (wifi != null && wifi.isHeld()) wifi.release();
         // Do not leave a running notification after the user disconnects or
         // removes the app's task; retain completed notifications for reading.
         NotificationManager manager = getSystemService(NotificationManager.class);

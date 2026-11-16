@@ -160,3 +160,34 @@ func TestAndroidTaskStatusIgnoresHistoricalCompletions(t *testing.T) {
 		t.Fatal("notifications for different devices collided")
 	}
 }
+
+func TestBackgroundServiceSurvivesRecoveryPauseWithoutAnActiveReply(t *testing.T) {
+	f := &connectionFixture{demoAPI: newDemoAPI()}
+	app, s := conversationFixture(t, f, 390, Object{}, false)
+	checked := make(chan bool, 1)
+	app.Post(func() {
+		s.cx.Post(func() {
+			s.devices[0]["autoReconnect"] = true
+			s.connection("demo-device").established = true
+			// A failed attempt is waiting for the short retry pause. No active reply.
+			s.connection("demo-device").reconnecting = false
+			status := s.nativeBackgroundStatus()
+			kept := flag(status, "enabled")
+			// Explicitly disconnecting ends the service and its protection.
+			s.devices[0]["autoReconnect"] = false
+			stopped := !flag(s.nativeBackgroundStatus(), "enabled")
+			checked <- kept && stopped
+		})
+	})
+	app.WaitUntil(time.Second, func() bool {
+		select {
+		case ok := <-checked:
+			if !ok {
+				t.Fatal("foreground service stopped during recovery or survived explicit disconnect")
+			}
+			return true
+		default:
+			return false
+		}
+	})
+}

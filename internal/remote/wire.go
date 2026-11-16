@@ -404,7 +404,7 @@ func (w *wire) onChunk(data []byte) {
 	for id, a := range w.chunks {
 		// Expire abandoned fragments by inactivity, never by total transfer
 		// duration: a large snapshot may legitimately take minutes to arrive.
-		if time.Since(a.updated) > connectivity.StageTimeout {
+		if time.Since(a.updated) > 2*time.Minute {
 			for _, p := range a.parts {
 				w.chunkBytes -= len(p)
 			}

@@ -109,3 +109,35 @@ func TestTransportRetriesStopAfterThreeAttempts(t *testing.T) {
 		t.Fatalf("unbounded or missing retries: requests=%d err=%v", requests.Load(), err)
 	}
 }
+
+func TestStalledUpgradeGetsFreshSocketWithoutClosingSuccessfulConnection(t *testing.T) {
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if requests.Add(1) == 1 {
+			<-r.Context().Done()
+			return
+		}
+		ws, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer ws.CloseNow()
+		// Send after the setup budget has expired to prove it does not become a
+		// lifetime deadline on the upgraded socket.
+		time.Sleep(150 * time.Millisecond)
+		_ = ws.Write(r.Context(), websocket.MessageText, []byte("still-connected"))
+		_, _, _ = ws.Read(r.Context())
+	}))
+	defer server.Close()
+	ctx, stop := context.WithTimeout(context.Background(), 4*time.Second)
+	defer stop()
+	ws, _, err := dialWebSocketBudget(ctx, server.URL, "secret", "signal", 50*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ws.CloseNow()
+	_, data, err := ws.Read(ctx)
+	if err != nil || string(data) != "still-connected" || requests.Load() != 2 {
+		t.Fatalf("fresh-socket fallback failed: %q %d %v", data, requests.Load(), err)
+	}
+}
