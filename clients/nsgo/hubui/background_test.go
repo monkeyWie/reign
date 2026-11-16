@@ -2,6 +2,7 @@ package hubui
 
 import (
 	"context"
+	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -14,11 +15,27 @@ type backgroundTaskFixture struct {
 	*demoAPI
 	finished     chan struct{}
 	monitorReads atomic.Int32
+	stateReads   atomic.Int32
+	watchReads   atomic.Int32
+	heartbeats   chan struct{}
+	legacy       bool
 }
 
 func (f *backgroundTaskFixture) Call(ctx context.Context, method string, p Object, target string, request Object) (any, error) {
 	if method == "client.call" && str(request, "session") == "demo-chat" {
 		switch str(request, "method") {
+		case "turn.status":
+			f.stateReads.Add(1)
+			if f.legacy {
+				return nil, fmt.Errorf("unknown method %q", "turn.status")
+			}
+			status := "inProgress"
+			select {
+			case <-f.finished:
+				status = "completed"
+			default:
+			}
+			return Object{"id": "live", "status": status}, nil
 		case "transcript":
 			f.monitorReads.Add(1)
 			status := "inProgress"
@@ -29,12 +46,15 @@ func (f *backgroundTaskFixture) Call(ctx context.Context, method string, p Objec
 			}
 			return Object{"session": f.sessions[0], "turns": []Object{{"id": "live", "status": status, "items": []Object{{"id": "answer", "role": "assistant", "text": "任务输出"}}}}}, nil
 		case "watch":
+			f.watchReads.Add(1)
 			if flag(request, "probe") {
 				return Object{"epoch": "tasks", "cursor": number(request, "after"), "reset": str(request, "epoch") != "tasks"}, nil
 			}
 			select {
 			case <-ctx.Done():
 				return nil, ctx.Err()
+			case <-f.heartbeats:
+				return Object{"epoch": "tasks", "cursor": 0, "heartbeat": true}, nil
 			case <-f.finished:
 				if number(request, "after") > 0 {
 					<-ctx.Done()
@@ -51,7 +71,15 @@ func TestAndroidTaskCompletesAfterSwitchingChats(t *testing.T) {
 	if isWeb() || nsgotest.Target() != "" {
 		t.Skip("native host injection")
 	}
-	f := &backgroundTaskFixture{demoAPI: newDemoAPI(), finished: make(chan struct{})}
+	for _, legacy := range []bool{false, true} {
+		t.Run(fmt.Sprint("legacy=", legacy), func(t *testing.T) {
+			testTaskAfterSwitchingChats(t, legacy)
+		})
+	}
+}
+
+func testTaskAfterSwitchingChats(t *testing.T, legacy bool) {
+	f := &backgroundTaskFixture{demoAPI: newDemoAPI(), finished: make(chan struct{}), heartbeats: make(chan struct{}, 1), legacy: legacy}
 	host := core.NewHost()
 	var latest atomic.Value
 	host.Handle("ras.background", func(call *core.HostCall) {
@@ -76,10 +104,26 @@ func TestAndroidTaskCompletesAfterSwitchingChats(t *testing.T) {
 		return ""
 	}
 	app.WaitUntil(time.Second, func() bool { return status() == "inProgress" })
-	before := f.monitorReads.Load()
+	before := f.stateReads.Load()
 	app.Press("id:back-sessions")
 	app.Press("id:session-demo-cli")
-	app.WaitUntil(time.Second, func() bool { return f.monitorReads.Load() > before })
+	app.WaitUntil(time.Second, func() bool { return f.stateReads.Load() > before })
+	if legacy {
+		app.WaitUntil(time.Second, func() bool { return f.monitorReads.Load() >= 2 })
+	}
+	historyReads := f.monitorReads.Load()
+	for range 3 {
+		before := f.stateReads.Load()
+		watches := f.watchReads.Load()
+		f.heartbeats <- struct{}{}
+		app.WaitUntil(time.Second, func() bool { return f.watchReads.Load() > watches })
+		if !legacy {
+			app.WaitUntil(time.Second, func() bool { return f.stateReads.Load() > before })
+		}
+	}
+	if f.monitorReads.Load() != historyReads {
+		t.Fatal("background heartbeat downloaded conversation history")
+	}
 	close(f.finished)
 	app.WaitUntil(2*time.Second, func() bool { return status() == "completed" })
 }

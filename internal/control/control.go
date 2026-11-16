@@ -176,6 +176,28 @@ func (d *Dispatcher) dispatch(ctx context.Context, r Request) (any, error) {
 		return d.Sync(ctx, p, r)
 	case "sessions":
 		return p.Sessions(ctx, r.Cursor)
+	case "turn.status":
+		var state provider.Turn
+		if status, ok := p.(provider.TurnStatusProvider); ok {
+			var err error
+			state, err = status.TurnStatus(ctx, r.Session, r.Turn)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			transcript, err := p.Transcript(ctx, r.Session, "")
+			if err != nil {
+				return nil, err
+			}
+			for _, turn := range transcript.Turns {
+				if turn.ID == r.Turn {
+					state = turn
+					break
+				}
+			}
+		}
+		// Never transfer history, tool output or attachments for task polling.
+		return provider.Turn{ID: r.Turn, Status: state.Status}, nil
 	case "transcript":
 		if !r.Progress {
 			return p.Transcript(ctx, r.Session, r.Cursor)
@@ -243,7 +265,7 @@ func (d *Dispatcher) dispatch(ctx context.Context, r Request) (any, error) {
 // are never cached or transparently retried.
 func ReadOnly(method string) bool {
 	switch method {
-	case "providers", "network", "sessions", "transcript", "approvals", "sync", "models":
+	case "providers", "network", "sessions", "transcript", "approvals", "sync", "models", "turn.status":
 		return true
 	}
 	return false

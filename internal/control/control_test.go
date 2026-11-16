@@ -126,3 +126,25 @@ func TestWatchProbeDispatchesWithoutWaitingForNewText(t *testing.T) {
 		t.Fatal("probe dispatched as a long poll")
 	}
 }
+
+type taskHistoryFixture struct{ snapshotProvider }
+
+func (*taskHistoryFixture) Transcript(context.Context, string, string) (provider.Transcript, error) {
+	return provider.Transcript{Turns: []provider.Turn{{ID: "task", Status: "completed", Items: []provider.Item{{Text: strings.Repeat("private body", 200000)}}}}}, nil
+}
+
+type taskStatusFixture struct{ taskHistoryFixture }
+
+func (*taskStatusFixture) TurnStatus(context.Context, string, string) (provider.Turn, error) {
+	return provider.Turn{ID: "task", Status: "completed", Items: []provider.Item{{Text: "must not transfer"}}}, nil
+}
+func TestBackgroundTurnStatusTransfersNoConversationContent(t *testing.T) {
+	for _, p := range []provider.Provider{&taskHistoryFixture{}, &taskStatusFixture{}} {
+		d := &Dispatcher{Providers: map[string]provider.Provider{"test": p}, Execute: func(Request, func() Response) Response { t.Fatal("status read treated as mutation"); return Response{} }}
+		r := d.HandleRemote(context.Background(), Request{Method: "turn.status", Provider: "test", Session: "session", Turn: "task"})
+		var turn provider.Turn
+		if r.Error != "" || json.Unmarshal(r.Result, &turn) != nil || turn.ID != "task" || turn.Status != "completed" || len(turn.Items) != 0 || len(r.Result) > 100 {
+			t.Fatalf("unexpected task state response: %+v", r)
+		}
+	}
+}

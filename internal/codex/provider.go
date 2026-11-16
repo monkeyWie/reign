@@ -195,6 +195,20 @@ func (p *Provider) Sessions(ctx context.Context, cursor string) (provider.Sessio
 	}
 	return page, nil
 }
+func (p *Provider) TurnStatus(ctx context.Context, session, turn string) (provider.Turn, error) {
+	var out struct{ Data []struct{ ID, Status string } }
+	err := p.call(ctx, "thread/turns/list", map[string]any{"threadId": session, "limit": 30, "sortDirection": "desc", "itemsView": "full", "itemSnapshot": "latest"}, &out)
+	if err != nil {
+		return provider.Turn{}, err
+	}
+	for _, item := range out.Data {
+		if item.ID == turn {
+			return provider.Turn{ID: turn, Status: item.Status}, nil
+		}
+	}
+	return provider.Turn{ID: turn}, nil
+}
+
 func (p *Provider) Transcript(ctx context.Context, id, cursor string) (provider.Transcript, error) {
 	// Capture before reading: later events can safely replay over this snapshot.
 	epoch, boundary := p.stream().log.Position()
