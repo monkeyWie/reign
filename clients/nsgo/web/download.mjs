@@ -28,6 +28,9 @@ export async function downloadWasm(
           ...options,
           size: part.size,
           signal: controller.signal,
+          onStart() {
+            options.onPartProgress?.(i, loaded[i], part.size, true);
+          },
           onProgress(bytes) {
             loaded[i] = bytes;
             options.onPartProgress?.(i, bytes, part.size, bytes < part.size);
@@ -65,6 +68,7 @@ async function downloadFile(
   {
     size = 0,
     onProgress = () => {},
+    onStart = () => {},
     onRetry = () => {},
     fetcher = fetch,
     retries = 2,
@@ -78,6 +82,7 @@ async function downloadFile(
   for (let attempt = 0; ; attempt++) {
     try {
       signal?.throwIfAborted();
+      onStart();
       const response = await fetcher(url, {
         ...(loaded ? { headers: { Range: `bytes=${loaded}-` } } : {}),
         ...(signal ? { signal } : {}),
@@ -95,12 +100,15 @@ async function downloadFile(
         ) {
           chunks = [];
           loaded = 0;
+          onProgress(loaded, size);
           throw new Error("Invalid download range");
         }
         size ||= Number(range[2]);
       } else {
+        const restarted = loaded > 0;
         chunks = [];
         loaded = 0;
+        if (restarted) onProgress(loaded, size);
       }
       const reader = response.body.getReader();
       try {
@@ -113,6 +121,7 @@ async function downloadFile(
           if (size && loaded > size) {
             chunks = [];
             loaded = 0;
+            onProgress(loaded, size);
             throw new Error("Invalid download size");
           }
         }

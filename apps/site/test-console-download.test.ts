@@ -151,6 +151,42 @@ test("an interrupted part retries independently without redownloading completed 
   assert.deepEqual([...new Uint8Array(await blob.arrayBuffer())], [1, 2, 3, 4]);
 });
 
+test("each active request reports partial streamed bytes before it finishes", async () => {
+  const streams: ReadableStreamDefaultController<Uint8Array>[] = [];
+  const values = [0, 0];
+  const active = [false, false];
+  const download = downloadWasm("https://example.com/app.wasm.gz", {
+    size: 8,
+    parts: [{ file: "0.bin", size: 4 }, { file: "1.bin", size: 4 }],
+    onPartProgress(i: number, bytes: number, total: number, running = false) {
+      values[i] = bytes / total;
+      active[i] = running;
+    },
+    fetcher: async (url: URL) => new Response(new ReadableStream<Uint8Array>({
+      start(controller) { streams[Number(url.pathname.slice(1, 2))] = controller; },
+    })),
+  });
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+  await tick();
+  assert.deepEqual(active, [true, true]);
+  streams[0].enqueue(new Uint8Array([1]));
+  streams[1].enqueue(new Uint8Array([5, 6]));
+  await tick();
+  assert.deepEqual(values, [.25, .5]);
+  assert.deepEqual(active, [true, true]);
+  streams[1].enqueue(new Uint8Array([7, 8]));
+  streams[1].close();
+  await tick();
+  assert.deepEqual(values, [.25, 1]);
+  assert.deepEqual(active, [true, false]);
+  streams[0].enqueue(new Uint8Array([2, 3, 4]));
+  streams[0].close();
+  const blob = await download;
+  assert.deepEqual(values, [1, 1]);
+  assert.deepEqual(active, [false, false]);
+  assert.deepEqual([...new Uint8Array(await blob.arrayBuffer())], [1, 2, 3, 4, 5, 6, 7, 8]);
+});
+
 test("invalid part manifests fail before fetching", async () => {
   await assert.rejects(
     downloadWasm("https://example.com/app.wasm.gz", {

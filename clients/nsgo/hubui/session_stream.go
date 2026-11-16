@@ -71,7 +71,10 @@ func (w *sessionStream) startSnapshot() {
 	w.invalid = false
 	w.journal = nil
 	w.journalBytes = 0
-	w.syncing(true)
+	// Once history has caught up, refreshing a running Agent's live tail is
+	// normal streaming, not another history download. Only a missing/reset
+	// baseline should display catch-up dots or suppress the typing effect.
+	w.syncing(!w.baseline)
 	started, epoch := time.Now(), w.epoch
 	go func() {
 		previewCtx, stopPreviews := context.WithCancel(w.ctx)

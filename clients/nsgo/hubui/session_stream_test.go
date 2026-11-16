@@ -145,6 +145,45 @@ func TestFirstHistoryDisplaysMessagesBeforeTheFinalResponse(t *testing.T) {
 	app.Screenshot("progressive-first-history-complete")
 }
 
+func TestCaughtUpRunningAgentDoesNotShowSyncDotsDuringTailRefresh(t *testing.T) {
+	f := &independentStreamAPI{demoAPI: newDemoAPI(), snapshots: make(chan snapshotRequest, 4), events: make(chan Object, 8), approvalsStarted: make(chan struct{})}
+	live := Object{"streamEpoch": "live", "streamCursor": 0, "turns": []Object{{"id": "reply", "status": "inProgress", "items": []Object{{"id": "answer", "role": "assistant", "text": "正在回复"}}}}}
+	app, s := conversationFixture(t, f, 390, live, true)
+	app.Post(func() { s.cx.Post(s.startSessionWatch) })
+	app.WaitUntil(time.Second, func() bool { return len(f.snapshots) > 0 })
+	first := <-f.snapshots
+	// A cached in-progress turn alone does not prove history is caught up.
+	app.WaitFor("id:transcript-syncing", time.Second)
+	first.reply <- live
+	app.WaitUntil(time.Second, func() bool { return !app.Exists("id:transcript-syncing") })
+	f.events <- Object{"epoch": "live", "cursor": 1, "events": []Object{{"id": 1, "kind": "snapshot"}}}
+	app.WaitUntil(time.Second, func() bool { return len(f.snapshots) > 0 })
+	refresh := <-f.snapshots
+	// Keep the refresh outstanding longer than the dots' debounce. The Agent
+	// is still running, but history is complete and this is a live-tail read.
+	time.Sleep(350 * time.Millisecond)
+	app.Settle()
+	if s.transcriptSyncing || app.Exists("id:transcript-syncing") {
+		t.Fatal("live tail refresh was presented as history catch-up")
+	}
+	f.events <- Object{"epoch": "live", "cursor": 2, "events": []Object{{"id": 2, "kind": "text", "turnId": "reply", "itemId": "answer", "offset": 4, "delta": "，继续生成"}}}
+	waitAnimatedText(app, "正在回复，继续生成", time.Second)
+	if app.Exists("id:transcript-syncing") {
+		t.Fatal("live text reactivated catch-up dots")
+	}
+	refresh.reply <- live
+	app.WaitUntil(time.Second, func() bool { app.Settle(); return !s.stream.snapshotInFlight })
+	// A genuine history reset must still show catch-up, even with a running
+	// turn on screen; hiding every indicator for active turns would be wrong.
+	f.events <- Object{"epoch": "live", "cursor": 2, "reset": true}
+	app.WaitUntil(time.Second, func() bool { return len(f.snapshots) > 0 })
+	reset := <-f.snapshots
+	app.WaitFor("id:transcript-syncing", time.Second)
+	reset.reply <- live
+	app.WaitUntil(time.Second, func() bool { return !app.Exists("id:transcript-syncing") })
+	app.Screenshot("caught-up-agent-still-replying")
+}
+
 func TestPartialHistoryPreservesCacheUntilAuthoritativeCompletion(t *testing.T) {
 	old := Object{"turns": []Object{{"id": "older", "status": "completed", "items": []Object{{"id": "a", "text": "缓存旧消息"}}}, {"id": "current", "status": "completed", "items": []Object{{"id": "b", "text": "缓存第一条"}, {"id": "c", "text": "缓存第二条"}}}, {"id": "live", "status": "inProgress", "items": []Object{{"id": "d", "text": "新的实时回复"}}}}}
 	partial := Object{"turns": []Object{{"id": "current", "status": "completed", "items": []Object{{"id": "b", "text": "服务器修正第一条"}}}}}

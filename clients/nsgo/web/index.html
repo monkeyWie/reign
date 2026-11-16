@@ -100,6 +100,8 @@
             >0%</span
           >
         </div>
+        <div id="boot-part-summary" class="console-download-summary" aria-live="off"></div>
+        <div id="boot-parts" class="console-download-parts" role="list" aria-live="off"></div>
         <div id="boot-error" hidden>
           <p></p>
           <button type="button">Try again</button>
@@ -115,7 +117,17 @@
       const progress = document.getElementById("boot-progress");
       const percentLabel = document.getElementById("boot-percent");
       const track = document.getElementById("boot-track");
-      const segments = (config.wasmParts?.length ? config.wasmParts : [null]).map((part) => {
+      const partList = document.getElementById("boot-parts");
+      const partSummary = document.getElementById("boot-part-summary");
+      const zh = (
+        document.cookie.match(/(?:^|; )reignhub_locale=([^;]+)/)?.[1] ||
+        navigator.language
+      ).startsWith("zh");
+      document.documentElement.lang = zh ? "zh-CN" : "en";
+      const text = (en, cn) => (zh ? cn : en);
+      partList.setAttribute("aria-label", text("Download progress by part", "各分片下载进度"));
+      partList.hidden = partSummary.hidden = !(config.wasmParts?.length > 1);
+      const segments = (config.wasmParts?.length ? config.wasmParts : [null]).map((part, index) => {
         const segment = document.createElement("span");
         segment.className = "console-download-part";
         segment.style.flexGrow = String(part?.size || 1);
@@ -123,20 +135,43 @@
         fill.className = "console-download-fill";
         segment.append(fill);
         track.append(segment);
-        return { segment, fill };
+        const card = document.createElement("div");
+        card.className = "console-download-card";
+        card.dataset.state = "queued";
+        card.setAttribute("role", "listitem");
+        const heading = document.createElement("span");
+        heading.className = "console-download-card-heading";
+        const number = document.createElement("span");
+        number.className = "console-download-card-number";
+        number.textContent = String(index + 1).padStart(2, "0");
+        const percent = document.createElement("span");
+        percent.textContent = "0%";
+        heading.append(number, percent);
+        const meter = document.createElement("span");
+        meter.className = "console-download-card-meter";
+        meter.append(document.createElement("span"));
+        card.append(heading, meter);
+        partList.append(card);
+        return { segment, fill, card, percent, active: false, complete: false };
       });
       const showPartProgress = (index, loaded, total, active = false) => {
         const value = total ? Math.max(0, Math.min(100, loaded / total * 100)) : 0;
-        const { segment, fill } = segments[index];
-        segment.dataset.active = String(active && value < 100);
+        const part = segments[index];
+        const { segment, fill, card, percent } = part;
+        part.complete = value === 100;
+        part.active = active && !part.complete;
+        segment.dataset.active = String(part.active);
         fill.style.setProperty("--part-progress", `${value}%`);
+        card.style.setProperty("--part-progress", `${value}%`);
+        card.dataset.state = part.complete ? "complete" : part.active ? "active" : "queued";
+        percent.textContent = `${Math.floor(value)}%`;
+        card.setAttribute("aria-label", `${text("Part", "分片")} ${index + 1}: ${Math.floor(value)}%`);
+        const running = segments.filter((part) => part.active).length;
+        const completed = segments.filter((part) => part.complete).length;
+        partSummary.textContent = completed === segments.length
+          ? text("Download complete", "下载完成")
+          : text(`${running} loading at once · ${completed}/${segments.length} complete`, `${running} 项同时加载 · ${completed}/${segments.length} 已完成`);
       };
-      const zh = (
-        document.cookie.match(/(?:^|; )reignhub_locale=([^;]+)/)?.[1] ||
-        navigator.language
-      ).startsWith("zh");
-      document.documentElement.lang = zh ? "zh-CN" : "en";
-      const text = (en, cn) => (zh ? cn : en);
       progress.setAttribute(
         "aria-label",
         text("Workspace download", "工作区下载"),
@@ -198,6 +233,7 @@
         panel.hidden = false;
         phase.textContent = text("Unable to open workspace", "工作区加载失败");
         progress.hidden = true;
+        partList.hidden = partSummary.hidden = true;
         panel.querySelector("p").textContent =
           text(
             "The download or initialization could not complete. Please retry.\n",
