@@ -113,7 +113,7 @@ func (s *State) conversation(cx *core.Scope, narrow bool) core.Node {
 		}}}},
 	}
 	timelineChildren := []core.Node{list, s.emptyTranscript(cx), s.syncIndicator(cx), core.Show{When: func() bool { return !s.narrowLayout() }, Then: func(cx *core.Scope) core.Node { return s.messageNavigation(cx, rows, listRef, viewport, tailCount) }}, core.Show{When: func() bool { return !atBottom.Get() }, Then: func(cx *core.Scope) core.Node {
-		return core.View{Style: core.Style{Position: core.Absolute, Bottom: core.Pt(12), Right: core.Pt(40)}, Children: []core.Node{button(cx, "jump-to-latest", "回到最新", lucide.ArrowDown, "outline", func() { listRef.ScrollToIndexAt(0, 1, 0, true) })}}
+		return core.View{Style: core.Style{Position: core.Absolute, Bottom: core.Pt(12), Right: core.Pt(40)}, Children: []core.Node{button(cx, "jump-to-latest", "回到最新", lucide.ArrowDown, "outline", func() { listRef.ScrollToIndexAt(0, 0, 0, false) })}}
 	}}}
 	if floatingHeader {
 		timelineChildren = append(timelineChildren, s.compactConversationHeader(cx, narrow))

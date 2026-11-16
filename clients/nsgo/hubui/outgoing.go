@@ -108,7 +108,9 @@ func (s *State) queueOutgoing(body string, uploads []*Upload) *outgoingMessage {
 	// not delay the send button's first pending frame.
 	s.messageRows = append(s.messageRows, Message{ID: m.ID, Role: "user", Text: m.Text, Timestamp: m.Timestamp, Attachments: m.Attachments, Delivery: m.Status})
 	s.scheduleSnapshot()
-	s.timeline.ScrollToIndexAt(0, 1, 0, true)
+	// Inverted lists count alignment from their bottom edge. Position 1
+	// aligns the top of a tall message and leaves its end below the viewport.
+	s.timeline.ScrollToIndexAt(0, 0, 0, false)
 	return m
 }
 

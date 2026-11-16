@@ -38,6 +38,34 @@ func TestMobileMultilineMessage320(t *testing.T) { testMobileMultilineMessage(t,
 func TestMobileMultilineMessage390(t *testing.T) { testMobileMultilineMessage(t, 390) }
 func TestMobileMultilineMessage720(t *testing.T) { testMobileMultilineMessage(t, 720) }
 
+func TestSendingLongMessageAndJumpToLatestReachTheBottom(t *testing.T) {
+	f := &delayedSendAPI{demoAPI: newDemoAPI(), release: make(chan struct{})}
+	app, s := conversationFixture(t, f, 390, Object{}, true)
+	// Seed the multiline draft directly: desktop test keyboards treat Return
+	// as submit, unlike the phone keyboard used by this scenario.
+	app.Post(func() {
+		s.cx.Post(func() { s.draft.Set(strings.Repeat("这是一条超过可视区域的长消息。\n", 35)) })
+	})
+	app.Settle()
+	app.Press("id:send-message")
+	app.WaitFor("id:send-loading", time.Second)
+	app.WaitUntil(time.Second, func() bool { return !app.Exists("id:jump-to-latest") })
+	// Simulate the reduced viewport while a phone keyboard is open. The
+	// bottom must remain visible while composing the next multiline draft.
+	if nsgotest.Target() == "" {
+		app.Resize(390, 520)
+	}
+	app.Post(func() { s.cx.Post(func() { s.draft.Set("下一条草稿\n第二行\n第三行") }) })
+	app.Settle()
+	app.WaitUntil(time.Second, func() bool { return !app.Exists("id:jump-to-latest") })
+	app.Post(func() { s.cx.Post(func() { s.timeline.ScrollTo(core.Point{}, false) }) })
+	app.Settle()
+	app.WaitFor("id:jump-to-latest", time.Second)
+	app.Press("id:jump-to-latest")
+	app.WaitUntil(time.Second, func() bool { return !app.Exists("id:jump-to-latest") })
+	app.Screenshot("long-message-follows-bottom")
+}
+
 func testMobileMultilineMessage(t *testing.T, width core.Points) {
 	t.Helper()
 	text := "发现的问题\n\n1. 网站页脚没有公示任何有效的客服联系方式（如联系邮箱、联系电话或在线客服），用户在其他页面也难以直接找到官方客服渠道。\n\n修改建议\n\n1. 请在网站全站页脚公示至少一种有效的联系方式，例如联系邮箱、联系电话或在线客服入口，方便用户随时联系。\n\n" + "https://example.com/" + strings.Repeat("long-path-", 30) + "\n\n```text\n" + strings.Repeat("long-code-", 30) + "\n```"
