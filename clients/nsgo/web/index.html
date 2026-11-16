@@ -63,13 +63,6 @@
         font: inherit;
         cursor: pointer;
       }
-      #boot-progress {
-        min-height: 22px;
-        margin: 8px 0 0;
-        color: var(--muted);
-        font-size: 12px;
-        font-variant-numeric: tabular-nums;
-      }
     </style>
   </head>
   <body>
@@ -93,13 +86,22 @@
         <p class="console-loading-caption" id="boot-phase">
           Opening your workspace
         </p>
-        <p
+        <div
           id="boot-progress"
+          class="console-download"
           role="progressbar"
           aria-label="Workspace download"
           aria-valuemin="0"
           aria-valuemax="100"
-        ></p>
+          aria-valuenow="0"
+        >
+          <span class="console-download-track" aria-hidden="true">
+            <span class="console-download-fill"></span>
+          </span>
+          <span id="boot-percent" class="console-download-value" aria-hidden="true"
+            >0%</span
+          >
+        </div>
         <div id="boot-error" hidden>
           <p></p>
           <button type="button">Try again</button>
@@ -113,13 +115,25 @@
       const boot = document.getElementById("boot");
       const phase = document.getElementById("boot-phase");
       const progress = document.getElementById("boot-progress");
+      const percentLabel = document.getElementById("boot-percent");
       const zh = (
         document.cookie.match(/(?:^|; )reignhub_locale=([^;]+)/)?.[1] ||
         navigator.language
       ).startsWith("zh");
       document.documentElement.lang = zh ? "zh-CN" : "en";
       const text = (en, cn) => (zh ? cn : en);
-      const mb = (bytes) => (bytes / 1048576).toFixed(1) + " MB";
+      progress.setAttribute(
+        "aria-label",
+        text("Workspace download", "工作区下载"),
+      );
+      const showProgress = (loaded, total) => {
+        const percent = total
+          ? Math.max(0, Math.min(100, Math.floor((loaded / total) * 100)))
+          : 0;
+        progress.style.setProperty("--download-progress", `${percent}%`);
+        progress.setAttribute("aria-valuenow", String(percent));
+        percentLabel.textContent = `${percent}%`;
+      };
       const observer = new MutationObserver(() => {
         if (root.childElementCount) {
           boot.hidden = true;
@@ -137,27 +151,18 @@
           parts: config.wasmParts,
           onProgress(loaded, total) {
             phase.textContent = text("Downloading workspace", "正在下载工作区");
-            const percent = total
-              ? Math.min(100, Math.floor((loaded / total) * 100))
-              : 0;
-            progress.textContent = total
-              ? `${percent}% · ${mb(loaded)} / ${mb(total)}`
-              : mb(loaded);
-            if (total) progress.setAttribute("aria-valuenow", String(percent));
+            showProgress(loaded, total);
           },
-          onRetry(attempt, loaded, total) {
+          onRetry(_attempt, loaded, total) {
             phase.textContent = text(
               "Connection interrupted · retrying",
               "下载中断，正在重试",
             );
-            progress.textContent =
-              text(`Retry ${attempt}/2`, `重试 ${attempt}/2`) +
-              ` · ${mb(loaded)} / ${mb(total)}`;
+            showProgress(loaded, total);
           },
         });
         phase.textContent = text("Preparing workspace", "正在初始化工作区");
-        progress.textContent = text("Download complete", "下载完成");
-        progress.setAttribute("aria-valuenow", "100");
+        showProgress(1, 1);
         const { mount } = await import("/assets/chat/__LOADER__");
         const module = WebAssembly.compileStreaming(
           new Response(
