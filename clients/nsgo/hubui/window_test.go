@@ -1,9 +1,10 @@
 package hubui
 
 import (
+	"testing"
+
 	"github.com/nsgo-dev/nsgo/core"
 	"github.com/nsgo-dev/nsgo/nsgotest"
-	"testing"
 )
 
 func TestDesktopWindowFrame(t *testing.T) {
@@ -18,28 +19,42 @@ func TestDesktopWindowFrame(t *testing.T) {
 				if command.Action == core.WindowSetTitleBar && command.TitleBar == core.TitleBarHidden {
 					hidden = true
 				}
-				if command.Action == core.WindowSetControls && command.Controls.Hidden {
+				if command.Action == core.WindowSetControls && command.Controls == (core.WindowControls{}) {
 					controls = true
 				}
 			}
 			if !hidden || !controls {
-				t.Fatal("system title bar or window controls remain visible")
+				t.Fatal("title bar must be hidden while platform window controls stay visible")
 			}
 			if app.Find("id:window-drag-region").Props.WindowDrag != core.WindowDragOn {
 				t.Fatal("missing drag region")
 			}
 			for _, id := range []string{"window-minimize", "window-maximize", "window-close"} {
-				if app.Find("id:"+id).Props.WindowDrag != core.WindowDragOff {
-					t.Fatal("window button intercepts drag incorrectly")
+				if app.Exists("id:"+id) != (os == core.OSLinux) {
+					t.Fatalf("%s: only Linux needs app-drawn controls", id)
 				}
-				app.Press("id:" + id)
 			}
-			want := []core.WindowAction{core.WindowMinimize, core.WindowToggleMaximize, core.WindowClose}
-			commands := app.Window[len(app.Window)-3:]
-			for i, action := range want {
-				if commands[i].Action != action {
-					t.Fatalf("window action %d: %v", i, commands[i])
+			if os == core.OSLinux {
+				for _, id := range []string{"window-minimize", "window-maximize", "window-close"} {
+					if app.Find("id:"+id).Props.WindowDrag != core.WindowDragOff {
+						t.Fatal("window control must not start dragging")
+					}
+					app.Press("id:" + id)
 				}
+				commands := app.Window[len(app.Window)-3:]
+				for i, action := range []core.WindowAction{core.WindowMinimize, core.WindowToggleMaximize, core.WindowClose} {
+					if commands[i].Action != action {
+						t.Fatalf("Linux control action %d: %v", i, commands[i])
+					}
+				}
+			}
+			// Native caption buttons can be taller or sit on either side.
+			insets := core.Edges{Top: 48, Left: 80, Right: 138}
+			app.SetEnvironment(core.Environment{OS: os, Idiom: core.IdiomDesktop, TitleBar: insets})
+			bar := globalBounds(app.Find("id:window-toolbar"))
+			drag := globalBounds(app.Find("id:window-drag-region"))
+			if bar.Size.Height != 48 || drag.Origin.X != 80 || drag.Origin.X+drag.Size.Width > 1000-138 {
+				t.Fatalf("native caption controls overlap the drag region: bar=%v drag=%v", bar, drag)
 			}
 			app.Resize(390, 844)
 			toolbar := globalBounds(app.Find("id:window-toolbar"))
