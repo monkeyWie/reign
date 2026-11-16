@@ -310,7 +310,10 @@ func (c *Client) Call(ctx context.Context, r control.Request, out any) error {
 				if err := json.Unmarshal(result.Result, &fragment); err != nil {
 					return err
 				}
-				history.Add(fragment)
+				if err := history.Add(fragment); err != nil {
+					c.cancelRead(r)
+					return err
+				}
 				if err := provider.ObserveTranscript(ctx, fragment); err != nil {
 					return err
 				}
@@ -331,7 +334,9 @@ func (c *Client) Call(ctx context.Context, r control.Request, out any) error {
 				if err := json.Unmarshal(result.Result, &metadata); err != nil {
 					return err
 				}
-				history.Add(metadata)
+				if err := history.Add(metadata); err != nil {
+					return err
+				}
 				result.Result, err = json.Marshal(history.Transcript)
 				if err != nil {
 					return err

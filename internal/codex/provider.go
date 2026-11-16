@@ -264,12 +264,12 @@ func normalizeTurn(raw json.RawMessage) provider.Turn {
 	out := provider.Turn{ID: t.ID, Status: t.Status, Items: []provider.Item{}}
 	for _, raw := range t.Items {
 		var i struct {
-			ID, Type, Text, Command, AggregatedOutput, Phase, Status string
-			DurationMS                                               *int64
-			StartedAtMS, CompletedAtMS                               *int64
-			Content                                                  json.RawMessage
-			Summary                                                  []string
-			Changes                                                  []struct {
+			ID, Type, Text, Phase, Status string
+			DurationMS                    *int64
+			StartedAtMS, CompletedAtMS    *int64
+			Content                       json.RawMessage
+			Summary                       []string
+			Changes                       []struct {
 				Path, Diff string
 				Kind       json.RawMessage
 			}
@@ -296,7 +296,6 @@ func normalizeTurn(raw json.RawMessage) provider.Turn {
 			item.Role = "assistant"
 		case "commandExecution":
 			item.Role = "tool"
-			item.Text = i.Command + "\n" + i.AggregatedOutput
 		case "reasoning":
 			item.Role = "reasoning"
 			// Only the protocol's display summary is presentation metadata.
@@ -310,13 +309,15 @@ func normalizeTurn(raw json.RawMessage) provider.Turn {
 			}
 		case "functionCallOutput", "hookPrompt", "contextCompaction", "enteredReviewMode", "exitedReviewMode":
 			item.Role = "internal"
+			item.Text = ""
 		default:
 			item.Role = "tool"
-			if item.Text == "" {
-				item.Text = string(raw)
-			}
 		}
 		if item.Role == "tool" {
+			// The controller renders typed activities, never raw tool stdout or
+			// embedded native JSON. Do not put megabytes of invisible output in
+			// front of the next assistant message during ordered catch-up.
+			item.Text = ""
 			// A completed command can belong to a still-running turn. Missing
 			// item status stays unknown rather than inheriting the turn status.
 			item.Status = i.Status
@@ -336,7 +337,7 @@ func normalizeTurn(raw json.RawMessage) provider.Turn {
 			ms := *t.StartedAt * 1000
 			item.TimestampMS, item.TimestampSource = &ms, "turnStarted"
 		}
-		if strings.TrimSpace(item.Text) != "" || len(item.Activities) > 0 || item.Role == "reasoning" || item.Role == "assistant" || (item.Role == "user" && len(i.Content) > 0) {
+		if strings.TrimSpace(item.Text) != "" || len(item.Activities) > 0 || item.Role == "tool" || item.Role == "reasoning" || item.Role == "assistant" || (item.Role == "user" && len(i.Content) > 0) {
 			out.Items = append(out.Items, item)
 		}
 	}

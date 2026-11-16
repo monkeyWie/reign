@@ -66,6 +66,9 @@ func TestActivitySnapshotsPreserveToolLifecycleAndStructuredActions(t *testing.T
 		t.Fatalf("missing items: %+v", turn)
 	}
 	read := turn.Items[0]
+	if read.Text != "" {
+		t.Fatal("invisible raw tool output competes with assistant replies")
+	}
 	if read.Status != "completed" || read.DurationMS == nil || *read.DurationMS != 1250 {
 		t.Fatalf("item inherited turn state or lost duration: %+v", read)
 	}

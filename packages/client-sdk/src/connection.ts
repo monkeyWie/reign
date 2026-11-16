@@ -269,7 +269,7 @@ export class Connection extends EventTarget {
         CONNECTION_STAGE_TIMEOUT,
       );
       this.report("handshake", "handshake", "与被控设备建立加密握手");
-      await this.sendFrame("hello", { rpc: 2, clientNonce: this.nonce });
+      await this.sendFrame("hello", { rpc: 3, clientNonce: this.nonce });
       try {
         await ready;
         this.report(
@@ -348,7 +348,7 @@ export class Connection extends EventTarget {
         clientNonce: string;
         hostNonce: string;
       };
-      if (h.rpc !== 2)
+      if (h.rpc !== 3)
         throw Error("设备协议版本不一致，请同时更新控制端和被控端");
       if (h.clientNonce !== this.nonce || !/^[a-f0-9]{64}$/.test(h.hostNonce))
         throw Error("无效配对握手");
@@ -753,7 +753,7 @@ export class Connection extends EventTarget {
     if (this.closed || !this.cipher) throw Error("连接已断开");
     const rawSize = raw.length;
     let encoding = "identity";
-    if (rawSize >= 16384) {
+    if (rawSize >= 1024) {
       const compressed = new Uint8Array(
         await new Response(
           new Blob([raw.slice().buffer])

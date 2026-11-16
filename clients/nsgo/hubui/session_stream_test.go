@@ -92,8 +92,14 @@ func TestLiveTextDoesNotWaitForSnapshotsOrApprovals(t *testing.T) {
 	app.WaitFor("id:transcript-syncing", time.Second)
 	app.Find("text:本地已有消息")
 	app.Screenshot("message-catch-up-dots")
+	// Establish the history ordering boundary before testing a slow refresh.
+	request.reply <- Object{"streamEpoch": "live", "streamCursor": 0, "turns": objects(cached["turns"])}
+	app.WaitUntil(time.Second, func() bool { app.Settle(); return s.stream.baseline })
+	f.events <- Object{"epoch": "live", "cursor": 0, "events": []Object{{"kind": "snapshot"}}}
+	app.WaitUntil(time.Second, func() bool { return len(f.snapshots) > 0 })
+	request = <-f.snapshots
 	f.events <- Object{"epoch": "live", "cursor": 1, "events": []Object{{"id": 1, "kind": "text", "turnId": "reply", "itemId": "answer", "offset": 0, "delta": "第一段🙂"}}}
-	app.WaitFor("text:第一段🙂", time.Second)
+	waitAnimatedText(app, "第一段🙂", time.Second)
 	// This stale response must replay the text that arrived while it waited.
 	request.reply <- Object{"streamEpoch": "live", "streamCursor": 0, "turns": []Object{{"id": "reply", "status": "inProgress", "items": []Object{}}}}
 	app.WaitUntil(time.Second, func() bool { return !app.Exists("id:transcript-syncing") })
@@ -105,7 +111,7 @@ func TestLiveTextDoesNotWaitForSnapshotsOrApprovals(t *testing.T) {
 	// A caught-up probe on reconnect must not download history or show dots.
 	app.Post(func() { s.cx.Post(s.startSessionWatch) })
 	app.Settle()
-	if f.reads.Load() != 1 {
+	if f.reads.Load() != 2 {
 		t.Fatalf("repeated history reads blocked the stream: %d", f.reads.Load())
 	}
 	if app.Exists("id:transcript-syncing") {
@@ -148,7 +154,10 @@ func TestFirstHistoryDisplaysMessagesBeforeTheFinalResponse(t *testing.T) {
 	app.WaitFor("text:历史第二条", time.Second)
 	app.Find("text:历史第一条")
 	f.events <- Object{"epoch": "live", "cursor": 1, "events": []Object{{"id": 1, "kind": "text", "turnId": "live-reply", "itemId": "answer", "offset": 0, "delta": "同步期间的实时回复"}}}
-	app.WaitFor("text:同步期间的实时回复", time.Second)
+	app.WaitUntil(time.Second, func() bool { app.Settle(); return s.stream.cursor == 1 })
+	if app.Exists("text:同步期间的实时回复") {
+		t.Fatal("live tail overtook unfinished ordered history")
+	}
 	// The final history can be older than the live text already rendered.
 	request.reply <- Object{"streamEpoch": "live", "streamCursor": 0, "turns": []Object{{"id": "history", "status": "completed", "items": []Object{{"id": "one", "role": "user", "text": "历史第一条"}, {"id": "two", "role": "assistant", "text": "历史第二条"}}}}}
 	app.WaitUntil(time.Second, func() bool { return !app.Exists("id:transcript-syncing") })
@@ -207,6 +216,54 @@ func TestPartialHistoryPreservesCacheUntilAuthoritativeCompletion(t *testing.T) 
 	if len(turns) != 3 || str(turns[0], "id") != "older" || str(turns[1], "id") != "current" || str(turns[2], "id") != "live" || len(objects(turns[1]["items"])) != 2 || str(objects(turns[1]["items"])[0], "text") != "服务器修正第一条" {
 		t.Fatalf("partial history erased or duplicated cache: %+v", old)
 	}
+}
+
+func TestPartialHistoryInsertsMissingReplyBeforeLaterCachedUserItems(t *testing.T) {
+	old := Object{"turns": []Object{{"id": "turn", "status": "completed", "items": []Object{{"id": "u1", "role": "user", "text": "first"}, {"id": "u2", "role": "user", "text": "second"}}}}}
+	partial := Object{"turns": []Object{{"id": "turn", "status": "completed", "items": []Object{{"id": "u1", "role": "user", "text": "first"}, {"id": "answer", "role": "assistant", "phase": "commentary", "text": "reply prefix"}}}}}
+	rows := messages(previewTranscript(old, partial))
+	if len(rows) != 3 || rows[0].Text != "first" || rows[1].Text != "reply prefix" || rows[2].Text != "second" {
+		t.Fatal("missing assistant reply was hidden or appended after later user messages", rows)
+	}
+}
+
+func TestLongHistoryReplyRendersItsPrefixAndKeepsFollowingMessagesInOrder(t *testing.T) {
+	f := &independentStreamAPI{demoAPI: newDemoAPI(), snapshots: make(chan snapshotRequest, 4), events: make(chan Object, 8), approvalsStarted: make(chan struct{})}
+	app, s := conversationFixture(t, f, 390, Object{}, true)
+	app.Post(func() { s.cx.Post(s.startSessionWatch) })
+	app.WaitUntil(time.Second, func() bool { return len(f.snapshots) > 0 })
+	request := <-f.snapshots
+	prefix, suffix := strings.Repeat("渐进回复 ", 30), strings.Repeat("后续正文 ", 300)
+	fragment := provider.Transcript{StreamEpoch: "live", Turns: []provider.Turn{{ID: "history", Status: "completed", Items: []provider.Item{{ID: "user", Role: "user", Text: "历史问题"}, {ID: "answer", Role: "assistant", Phase: "commentary", Text: prefix, TextOffset: new(0)}}}}}
+	request.fragments <- fragment
+	app.WaitFor("text:"+strings.TrimSpace(prefix), time.Second)
+	app.Find("text:历史问题")
+	app.WaitFor("id:transcript-syncing", time.Second)
+	app.Screenshot("assistant-history-first-prefix")
+	f.events <- Object{"epoch": "live", "cursor": 1, "events": []Object{{"id": 1, "kind": "item", "turnId": "following", "itemId": "new-user", "item": Object{"id": "new-user", "role": "user", "text": "后来的问题"}}}}
+	app.WaitUntil(time.Second, func() bool { app.Settle(); return s.stream.cursor == 1 })
+	if app.Exists("text:后来的问题") {
+		t.Fatal("small later user event overtook the unfinished reply")
+	}
+	fragment.Turns[0].Items = []provider.Item{{ID: "answer", Role: "assistant", Phase: "commentary", Text: suffix, TextOffset: new(len(prefix))}}
+	request.fragments <- fragment
+	app.WaitFor("text:"+strings.TrimSpace(prefix+suffix), time.Second)
+	if app.Exists("text:后来的问题") {
+		t.Fatal("history preview replayed a later event before ordered catch-up completed")
+	}
+	request.reply <- Object{"streamEpoch": "live", "streamCursor": 0, "turns": []Object{{"id": "history", "status": "completed", "items": []Object{{"id": "user", "role": "user", "text": "历史问题"}, {"id": "answer", "role": "assistant", "phase": "commentary", "text": prefix + suffix}}}}}
+	app.WaitFor("text:后来的问题", time.Second)
+	app.WaitUntil(time.Second, func() bool { return !app.Exists("id:transcript-syncing") })
+	app.Post(func() {
+		s.cx.Post(func() {
+			rows := s.messageRows
+			if len(rows) != 3 || rows[0].Text != "历史问题" || rows[1].Text != prefix+suffix || rows[2].Text != "后来的问题" {
+				t.Error("completed catch-up changed conversation order", rows)
+			}
+		})
+	})
+	app.Settle()
+	app.Screenshot("ordered-progressive-assistant-history")
 }
 
 func TestSmoothReplyOnlyAnimatesNewLiveSuffix(t *testing.T) {

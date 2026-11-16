@@ -87,7 +87,9 @@ func (w *sessionStream) startSnapshot() {
 				return
 			}
 			preview := previewTranscript(w.s.transcript, partial)
-			preview, _ = applyEvents(preview, w.replayAfter(partial))
+			if w.baseline {
+				preview, _ = applyEvents(preview, w.replayAfter(partial))
+			}
 			w.s.setTranscript(preview)
 		})
 		ctx := provider.WithTranscriptObserver(w.ctx, observe)
@@ -163,16 +165,14 @@ func previewTranscript(old, partial Object) Object {
 	turns := []Object{}
 	for _, turn := range objects(partial["turns"]) {
 		value := copyObject(turn)
-		items := append([]Object{}, objects(previous[str(turn, "id")]["items"])...)
-		indices := map[string]int{}
-		for i, item := range items {
-			indices[str(item, "id")] = i
-		}
+		items := []Object{}
+		seen := map[string]bool{}
 		for _, item := range objects(turn["items"]) {
-			if i, ok := indices[str(item, "id")]; ok {
-				items[i] = item
-			} else {
-				indices[str(item, "id")] = len(items)
+			seen[str(item, "id")] = true
+			items = append(items, item)
+		}
+		for _, item := range objects(previous[str(turn, "id")]["items"]) {
+			if !seen[str(item, "id")] {
 				items = append(items, item)
 			}
 		}
@@ -221,6 +221,12 @@ func (w *sessionStream) batch(b Object) {
 			}
 			w.journal = append(w.journal, event)
 		}
+	}
+	// A reset has no ordering baseline yet. Keep later watch events in the
+	// journal until the ordered history prefix is complete; otherwise small
+	// user items leap over missing assistant replies and appear as a false chat.
+	if !w.baseline {
+		return
 	}
 	if len(events) > 0 {
 		s := w.s

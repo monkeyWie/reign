@@ -148,9 +148,6 @@ func messages(t Object) []Message {
 			if role != "user" && role != "assistant" {
 				continue
 			}
-			if str(item, "phase") == "commentary" && !live {
-				continue
-			}
 			body := str(item, "text")
 			attachments := objects(item["attachments"])
 			if strings.TrimSpace(body) == "" && len(attachments) == 0 {

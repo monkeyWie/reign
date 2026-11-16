@@ -34,10 +34,11 @@ func (*fixtureProvider) Transcript(ctx context.Context, _, _ string) (provider.T
 	turn := provider.Turn{ID: "turn", Status: "completed"}
 	for i := range 40 {
 		item := provider.Item{ID: fmt.Sprint(i), Role: "assistant", Text: fmt.Sprintf("消息 %d🙂", i)}
+		if i == 10 {
+			item.Text = strings.Repeat("长回复🙂 mixed text.\n", 2000)
+		}
 		turn.Items = append(turn.Items, item)
-		fragment := out
-		fragment.Turns = []provider.Turn{{ID: turn.ID, Status: turn.Status, Items: []provider.Item{item}}}
-		if err := provider.ObserveTranscript(ctx, fragment); err != nil {
+		if err := provider.EmitTranscriptTurn(ctx, out, provider.Turn{ID: turn.ID, Status: turn.Status, Items: []provider.Item{item}}); err != nil {
 			return provider.Transcript{}, err
 		}
 	}
@@ -75,10 +76,23 @@ func TestHostEncryptedInterop(t *testing.T) {
 		if len(rows) != 1 || len(rows[0].(map[string]any)["preview"].(string)) < 100000 {
 			t.Fatal("large fragmented transcript lost bytes")
 		}
-		fragments := 0
+		fragments, itemIndex, textParts := 0, 0, 0
+		longReply := strings.Repeat("长回复🙂 mixed text.\n", 2000)
 		progress := provider.WithTranscriptObserver(ctx, func(fragment provider.Transcript) error {
-			if len(fragment.Turns) != 1 || fragment.Turns[0].Items[0].ID != fmt.Sprint(fragments) {
-				t.Errorf("history reordered at %d", fragments)
+			if len(fragment.Turns) != 1 || fragment.Turns[0].Items[0].ID != fmt.Sprint(itemIndex) {
+				t.Errorf("history reordered at %d", itemIndex)
+			}
+			item := fragment.Turns[0].Items[0]
+			if item.TextOffset != nil {
+				textParts++
+				if len(item.Text) > provider.TranscriptTextChunkSize {
+					t.Error("long reply was not progressive")
+				}
+				if *item.TextOffset+len(item.Text) == len(longReply) {
+					itemIndex++
+				}
+			} else {
+				itemIndex++
 			}
 			fragments++
 			return nil
@@ -92,7 +106,7 @@ func TestHostEncryptedInterop(t *testing.T) {
 		if err := json.Unmarshal(raw, &transcript); err != nil {
 			t.Fatal(err)
 		}
-		if fragments != 40 || len(transcript.Turns) != 1 || len(transcript.Turns[0].Items) != 40 || transcript.NextCursor != "older" || transcript.StreamCursor != 7 {
+		if fragments <= 40 || itemIndex != 40 || textParts < 2 || len(transcript.Turns) != 1 || len(transcript.Turns[0].Items) != 40 || transcript.NextCursor != "older" || transcript.StreamCursor != 7 || transcript.Turns[0].Items[10].Text != longReply || transcript.Turns[0].Items[10].TextOffset != nil {
 			t.Fatalf("incomplete progressive browser history: fragments=%d transcript=%+v", fragments, transcript)
 		}
 	}

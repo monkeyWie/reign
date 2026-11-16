@@ -525,7 +525,7 @@ func (c *Client) readLoop() {
 				continue
 			}
 			if hello.RPC != transport.Version {
-				c.note("protocol-mismatch", "handshake", "设备协议版本不一致，请同时更新控制端和被控端", "当前加密 RPC 协议为第 2 版", "warning")
+				c.note("protocol-mismatch", "handshake", "设备协议版本不一致，请同时更新控制端和被控端", "当前加密 RPC 协议为第 3 版", "warning")
 				c.Close()
 				return
 			}
@@ -753,7 +753,10 @@ func (c *Client) Call(ctx context.Context, request Object) (any, error) {
 				if err := json.Unmarshal(raw, &fragment); err != nil {
 					return nil, err
 				}
-				history.Add(fragment)
+				if err := history.Add(fragment); err != nil {
+					cancelRead()
+					return nil, err
+				}
 				if err := provider.ObserveTranscript(ctx, fragment); err != nil {
 					return nil, err
 				}
@@ -804,7 +807,9 @@ func (c *Client) Call(ctx context.Context, request Object) (any, error) {
 		if err := json.Unmarshal(raw, &metadata); err != nil {
 			return nil, err
 		}
-		history.Add(metadata)
+		if err := history.Add(metadata); err != nil {
+			return nil, err
+		}
 		raw, err = json.Marshal(history.Transcript)
 		if err != nil {
 			return nil, err

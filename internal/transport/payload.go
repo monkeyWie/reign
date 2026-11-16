@@ -6,10 +6,16 @@ import (
 	"compress/gzip"
 	"errors"
 	"io"
+	"sync"
 )
 
+var gzipWriters = sync.Pool{New: func() any {
+	w, _ := gzip.NewWriterLevel(io.Discard, gzip.BestSpeed)
+	return w
+}}
+
 const (
-	Version    = 2
+	Version    = 3
 	ChunkSize  = 4096
 	MaxPayload = 16 << 20
 	Identity   = "identity"
@@ -36,11 +42,16 @@ func Encode(raw []byte) (data []byte, encoding string, err error) {
 	if len(raw) == 0 || len(raw) > MaxPayload {
 		return nil, "", errors.New("RPC payload must be between 1 byte and 16 MiB")
 	}
-	if len(raw) < 16<<10 {
+	if len(raw) < 1024 {
 		return raw, Identity, nil
 	}
 	var b bytes.Buffer
-	w, _ := gzip.NewWriterLevel(&b, gzip.BestSpeed)
+	w := gzipWriters.Get().(*gzip.Writer)
+	w.Reset(&b)
+	defer func() {
+		w.Reset(io.Discard)
+		gzipWriters.Put(w)
+	}()
 	if _, err = w.Write(raw); err != nil {
 		return nil, "", err
 	}

@@ -84,7 +84,7 @@ func TestStreamingUTF16AndReplay(t *testing.T) {
 		t.Fatal("gap needs a snapshot")
 	}
 }
-func TestCompletedTurnHidesTransientSteps(t *testing.T) {
+func TestCompletedTurnKeepsAssistantRepliesAndHidesTools(t *testing.T) {
 	turn := Object{"id": "t", "status": "inProgress", "items": []Object{{"id": "u", "role": "user", "text": "hello"}, {"id": "r", "role": "reasoning", "text": "private reasoning"}, {"id": "a", "role": "assistant", "phase": "commentary", "text": "处理中"}, {"id": "x", "role": "tool", "text": "raw tool output"}, {"id": "f", "role": "assistant", "text": "完成"}}}
 	snapshot := Object{"turns": []Object{turn}}
 	live := messages(snapshot)
@@ -93,7 +93,7 @@ func TestCompletedTurnHidesTransientSteps(t *testing.T) {
 	}
 	turn["status"] = "completed"
 	done := messages(snapshot)
-	if len(done) != 2 || done[1].Text != "完成" || done[1].Live {
+	if len(done) != 3 || done[1].Text != "处理中" || done[2].Text != "完成" || done[1].Live || done[2].Live {
 		t.Fatalf("bad completed projection: %+v", done)
 	}
 }

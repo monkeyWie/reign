@@ -12,7 +12,7 @@
         {"id":"final","role":"assistant","type":"agentMessage","phase":"final_answer","text":"All done"}
       ]}]
     },
-    "ids": ["done|u","done|final"], "roles": ["user","assistant"], "live": [false,false], "thinking": false
+    "ids": ["done|u","done|comment","done|final"], "roles": ["user","assistant","assistant"], "live": [false,false,false], "thinking": false
   },
   {
     "name": "active mixed text and tool groups keep source order",

@@ -80,6 +80,7 @@ type transcriptPreview struct {
 	indices  map[string]int
 	items    map[string]map[string]int
 	editable map[string]bool
+	texts    map[string]*provider.TranscriptTextBuffer
 }
 
 func (b *transcriptPreview) add(fragment provider.Transcript) error {
@@ -94,6 +95,7 @@ func (b *transcriptPreview) add(fragment provider.Transcript) error {
 	b.metadata = value
 	if b.indices == nil {
 		b.indices, b.items = map[string]int{}, map[string]map[string]int{}
+		b.texts = map[string]*provider.TranscriptTextBuffer{}
 	}
 	if b.editable == nil {
 		b.editable = map[string]bool{}
@@ -116,6 +118,22 @@ func (b *transcriptPreview) add(fragment provider.Transcript) error {
 		items := objects(target["items"])
 		for _, item := range objects(turn["items"]) {
 			key := str(item, "id")
+			textKey := id + "\x00" + key
+			if _, chunked := item["textOffset"]; chunked {
+				textBuffer := b.texts[textKey]
+				if textBuffer == nil {
+					textBuffer = &provider.TranscriptTextBuffer{}
+					b.texts[textKey] = textBuffer
+				}
+				text, err := textBuffer.Append(str(item, "text"), int(number(item, "textOffset")))
+				if err != nil {
+					return err
+				}
+				item["text"] = text
+				delete(item, "textOffset")
+			} else {
+				delete(b.texts, textKey)
+			}
 			if j, exists := b.items[id][key]; exists {
 				items[j] = item
 			} else {

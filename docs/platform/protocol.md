@@ -28,9 +28,9 @@ Lease format is `base64url(JSON).base64url(Ed25519 signature)` signed over `reig
 
 A paid entitlement enables fallback, rather than forcing relay use. Native clients continuously negotiate WebRTC/UDP and TCP; browsers negotiate WebRTC. Connection loss ends associated peer lifetimes and reconnect begins with fresh handshake randomness. Transcript watch cursors reset to a full snapshot on epoch/replay-window changes; ordinary updates are incremental.
 
-## Encrypted RPC version 2
+## Encrypted RPC version 3
 
-The encrypted hello contains `rpc: 2`. Both endpoints require this version;
+The encrypted hello contains `rpc: 3`. Both endpoints require this version;
 there is no fallback to older framing. The service welcome protocol remains 1
 because the service forwards opaque encrypted frames and does not parse RPCs.
 
@@ -38,7 +38,7 @@ Each encrypted chunk is `{r, id, i, n, e, s, b}`: RPC request ID, transfer ID,
 zero-based index, fragment count, `identity` or `gzip`, uncompressed byte count,
 and base64 payload. Requests and responses both require the RPC ID. Payloads
 are limited to 16 MiB before and after decompression, with at most 4,096 fragments
-of 4,096 bytes each. Payloads of at least 16 KiB use gzip at the fastest setting
+of 4,096 bytes each. Payloads of at least 1 KiB use gzip at the fastest setting
 only when it saves at least 12.5%. Compression happens before encryption.
 
 Per-connection bounded frame queues prioritize live/control traffic, then
@@ -61,3 +61,18 @@ user messages do not trigger a history snapshot. Android monitors only the state
 of known running tasks through `turn.status`, never their transcript contents.
 History is reread for initial loading, replay-epoch gaps, explicit older pages,
 and attachment import events that require an authoritative snapshot.
+
+Progressive history follows source turn/item order. A long item's text is sent
+in UTF-8-safe parts of at most 2,048 bytes; `textOffset` is the original UTF-8
+byte offset. Receivers append verified contiguous/overlapping text, publish
+immutable prefixes and remove `textOffset` from assembled snapshots. They
+never wait for a whole long item to render its first prefix. Compression is
+also applied to these smaller responses when useful. Codex tool activities
+retain their typed metadata without forwarding raw stdout/native tool JSON
+that the controller does not render.
+
+Initial/reset catch-up journals watch events until the ordered history is
+complete, so small later user messages cannot overtake missing assistant
+replies. Once a baseline exists, live watch events remain independent of
+background snapshot refreshes. Assistant commentary is retained in completed
+history, in its source order; completion does not hide prior visible replies.

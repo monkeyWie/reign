@@ -41,6 +41,18 @@ func TestIncompressibleAttachmentsAndTinyMessagesKeepTheirBytes(t *testing.T) {
 		}
 	}
 }
+
+func TestProgressiveReplyPartsStillUseCompression(t *testing.T) {
+	part := bytes.Repeat([]byte("长回复🙂 repeated content\n"), 60)
+	packed, encoding, err := Encode(part)
+	if err != nil || encoding != Gzip || len(packed) >= len(part) {
+		t.Fatal("small streamed reply lost compression", encoding, err)
+	}
+	decoded, err := Decode(packed, encoding, len(part))
+	if err != nil || !bytes.Equal(decoded, part) {
+		t.Fatal("compressed reply part changed its text", err)
+	}
+}
 func awaitQueue(t *testing.T, s *Sender, p Priority, n int) {
 	t.Helper()
 	deadline := time.Now().Add(time.Second)

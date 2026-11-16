@@ -696,7 +696,7 @@ func (w *wire) hello(raw []byte) {
 		w.mu.Lock()
 		w.handshakeError = err
 		w.mu.Unlock()
-		w.progress("protocol-mismatch", "handshake", err.Error(), "当前加密 RPC 协议为第 2 版", "warning")
+		w.progress("protocol-mismatch", "handshake", err.Error(), "当前加密 RPC 协议为第 3 版", "warning")
 		w.close()
 		return
 	}

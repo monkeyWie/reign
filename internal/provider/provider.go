@@ -81,10 +81,13 @@ type SessionPage struct {
 }
 
 type Item struct {
-	ID               string       `json:"id"`
-	Type             string       `json:"type"`
-	Role             string       `json:"role"`
-	Text             string       `json:"text"`
+	ID   string `json:"id"`
+	Type string `json:"type"`
+	Role string `json:"role"`
+	Text string `json:"text"`
+	// TextOffset is a UTF-8 byte offset used only in progressive history parts.
+	// Assembled transcripts contain complete text and omit this field.
+	TextOffset       *int         `json:"textOffset,omitempty"`
 	Status           string       `json:"status,omitempty"`
 	Phase            string       `json:"phase,omitempty"`
 	ReasoningSummary string       `json:"reasoningSummary,omitempty"`
