@@ -35,12 +35,14 @@ type frame struct {
 	Body       []byte `json:"body"`
 }
 type chunk struct {
-	ID    string `json:"id"`
-	Index int    `json:"i"`
-	Total int    `json:"n"`
-	Data  []byte `json:"b"`
+	ID      string `json:"id"`
+	Index   int    `json:"i"`
+	Total   int    `json:"n"`
+	Data    []byte `json:"b"`
+	Request string `json:"r,omitempty"`
 }
 type assembly struct {
+	request     string
 	parts       [][]byte
 	count, size int
 	updated     time.Time
@@ -579,6 +581,15 @@ func (c *Client) receiveChunk(packet []byte) error {
 		return errors.New("无效分片")
 	}
 	c.mu.Lock()
+	if part.Request != "" && c.pending[part.Request] == nil {
+		for id, a := range c.chunks {
+			if a.request == part.Request {
+				delete(c.chunks, id)
+			}
+		}
+		c.mu.Unlock()
+		return nil
+	}
 	for k, a := range c.chunks {
 		if time.Since(a.updated) > 2*time.Minute {
 			delete(c.chunks, k)
@@ -586,11 +597,11 @@ func (c *Client) receiveChunk(packet []byte) error {
 	}
 	a := c.chunks[part.ID]
 	if a == nil {
-		if len(c.chunks) >= 8 {
+		if len(c.chunks) >= 64 {
 			c.mu.Unlock()
 			return errors.New("过多分片")
 		}
-		a = &assembly{parts: make([][]byte, part.Total), updated: time.Now()}
+		a = &assembly{parts: make([][]byte, part.Total), updated: time.Now(), request: part.Request}
 		c.chunks[part.ID] = a
 	}
 	if len(a.parts) != part.Total || a.parts[part.Index] != nil {
@@ -670,7 +681,16 @@ func (c *Client) Call(ctx context.Context, request Object) (any, error) {
 	}
 	c.pending[requestID] = &pendingCall{ctx: ctx, responses: pending}
 	c.mu.Unlock()
-	defer func() { c.mu.Lock(); delete(c.pending, requestID); c.mu.Unlock() }()
+	defer func() {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		delete(c.pending, requestID)
+		for id, a := range c.chunks {
+			if a.request == requestID {
+				delete(c.chunks, id)
+			}
+		}
+	}()
 	raw, _ = json.Marshal(r)
 	if len(raw) > 1<<20 {
 		return nil, errors.New("指令过长")
@@ -707,6 +727,12 @@ func (c *Client) Call(ctx context.Context, request Object) (any, error) {
 				continue
 			}
 		case <-ctx.Done():
+			if control.CancellableRead(method) {
+				go func() {
+					raw, _ := json.Marshal(Object{"id": id(), "method": control.CancelRead, "cancel": requestID, "provider": r["provider"], "session": r["session"]})
+					_ = c.send(raw)
+				}()
+			}
 			if read || method == "watch" || method == "attachment.read" {
 				return nil, ctx.Err()
 			}
@@ -777,8 +803,6 @@ func (c *Client) Call(ctx context.Context, request Object) (any, error) {
 	return result, nil
 }
 func (c *Client) send(raw []byte) error {
-	c.sending.Lock()
-	defer c.sending.Unlock()
 	c.mu.Lock()
 	pc, crypto := c.pc, c.crypto
 	c.mu.Unlock()
@@ -789,18 +813,26 @@ func (c *Client) send(raw []byte) error {
 	count := (len(raw) + 11999) / 12000
 	transfer := id()
 	for i := 0; i < count; i++ {
-		part, _ := json.Marshal(chunk{transfer, i, count, raw[i*12000 : min(len(raw), (i+1)*12000)]})
-		if direct {
-			packet, e := crypto.seal(c.aad("chunk", true), part)
-			if e != nil {
-				return e
-			}
-			if e = pc.Send(packet); e != nil {
-				return fmt.Errorf("直连发送失败，结果未确认，请先刷新：%w", e)
-			}
-		} else if e := c.relaySend("chunk", part); e != nil {
+		part, _ := json.Marshal(chunk{ID: transfer, Index: i, Total: count, Data: raw[i*12000 : min(len(raw), (i+1)*12000)]})
+		if err := c.sendPart(part, pc, crypto, direct); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+func (c *Client) sendPart(part []byte, pc peer, crypto *cryptor, direct bool) error {
+	c.sending.Lock()
+	defer c.sending.Unlock()
+	if direct {
+		packet, e := crypto.seal(c.aad("chunk", true), part)
+		if e != nil {
 			return e
 		}
+		if e = pc.Send(packet); e != nil {
+			return fmt.Errorf("直连发送失败，结果未确认，请先刷新：%w", e)
+		}
+	} else if e := c.relaySend("chunk", part); e != nil {
+		return e
 	}
 	return nil
 }

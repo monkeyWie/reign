@@ -72,14 +72,17 @@ type wire struct {
 	tcpKey            [32]byte
 	tcp               *tcpPath
 	onData            func([]byte)
+	wantsResponse     func(string) bool
 }
 type chunk struct {
-	ID    string `json:"id"`
-	Index int    `json:"i"`
-	Total int    `json:"n"`
-	Data  []byte `json:"b"`
+	Request string `json:"r,omitempty"`
+	ID      string `json:"id"`
+	Index   int    `json:"i"`
+	Total   int    `json:"n"`
+	Data    []byte `json:"b"`
 }
 type assembly struct {
+	request string
 	parts   [][]byte
 	count   int
 	updated time.Time
@@ -316,6 +319,24 @@ func (w *wire) sendContext(ctx context.Context, data []byte) error {
 	if len(data) > 16<<20 {
 		return errors.New("response exceeds 16 MiB")
 	}
+	// One lock acquisition per frame lets watch/command responses pass
+	// between fragments of a large history or catalogue response.
+	id := relay.ID()
+	total := max(1, (len(data)+11999)/12000)
+	for i := 0; i < total; i++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		start, end := i*12000, min((i+1)*12000, len(data))
+		request, _ := ctx.Value(responseRequestKey{}).(string)
+		part, _ := json.Marshal(chunk{ID: id, Index: i, Total: total, Data: data[start:end], Request: request})
+		if err := w.sendPart(ctx, part); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+func (w *wire) sendPart(ctx context.Context, part []byte) error {
 	w.sendMu.Lock()
 	defer w.sendMu.Unlock()
 	if err := w.waitPath(ctx); err != nil {
@@ -334,58 +355,53 @@ func (w *wire) sendContext(ctx context.Context, data []byte) error {
 	if !direct && tcp == nil && w.signalLost.Load() {
 		return errors.New("直连路径已断开，且信令尚未恢复")
 	}
-	// Small ordered chunks avoid SCTP message-size limits for large transcripts.
-	id := relay.ID()
-	total := (len(data) + 11999) / 12000
-	if total == 0 {
-		total = 1
+	if err := ctx.Err(); err != nil {
+		return err
 	}
-	for i := 0; i < total; i++ {
-		start, end := i*12000, min((i+1)*12000, len(data))
-		part, _ := json.Marshal(chunk{ID: id, Index: i, Total: total, Data: data[start:end]})
-		sealed, err := crypto.seal(w.aad("chunk", true), part)
+	sealed, err := crypto.seal(w.aad("chunk", true), part)
+	if err != nil {
+		return err
+	}
+	if !direct && tcp != nil {
+		if err = tcp.send(tcpChunk, sealed); err != nil {
+			tcp.close()
+			return fmt.Errorf("TCP P2P send failed; outcome uncertain, refresh before retrying: %w", err)
+		}
+		return nil
+	}
+	if !direct {
+		socket := w.relaySocket()
+		if socket == nil {
+			return errors.New("中继暂不可用，请等待连接恢复后刷新")
+		}
+		w.progress("path:relay", "relay", "正在使用加密中继", "直连尚未建立，先通过服务中继；后台继续尝试直连", "success")
+		frame, _ := json.Marshal(relay.Frame{Peer: w.peer, Kind: "chunk", Body: sealed})
+		sendCtx, cancel := context.WithTimeout(w.ctx, 10*time.Second)
+		err := socket.Write(sendCtx, websocket.MessageText, frame)
+		cancel()
 		if err != nil {
 			return err
 		}
-		if !direct && tcp != nil {
-			if err = tcp.send(tcpChunk, sealed); err != nil {
-				tcp.close()
-				return fmt.Errorf("TCP P2P send failed; outcome uncertain, refresh before retrying: %w", err)
-			}
-			continue
+		return nil
+	}
+	deadline := time.Now().Add(8 * time.Second)
+	for dc.BufferedAmount() > 512<<10 {
+		if time.Now().After(deadline) {
+			return errors.New("P2P backpressure timeout")
 		}
-		if !direct {
-			socket := w.relaySocket()
-			if socket == nil {
-				return errors.New("中继暂不可用，请等待连接恢复后刷新")
-			}
-			w.progress("path:relay", "relay", "正在使用加密中继", "直连尚未建立，先通过服务中继；后台继续尝试直连", "success")
-			frame, _ := json.Marshal(relay.Frame{Peer: w.peer, Kind: "chunk", Body: sealed})
-			sendCtx, cancel := context.WithTimeout(w.ctx, 10*time.Second)
-			err := socket.Write(sendCtx, websocket.MessageText, frame)
-			cancel()
-			if err != nil {
-				return err
-			}
-			continue
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-w.ctx.Done():
+			return w.ctx.Err()
+		case <-time.After(10 * time.Millisecond):
 		}
-		deadline := time.Now().Add(8 * time.Second)
-		for dc.BufferedAmount() > 512<<10 {
-			if time.Now().After(deadline) {
-				return errors.New("P2P backpressure timeout")
-			}
-			select {
-			case <-w.ctx.Done():
-				return w.ctx.Err()
-			case <-time.After(10 * time.Millisecond):
-			}
-		}
-		if err = dc.Send(sealed); err != nil {
-			w.mu.Lock()
-			w.direct = false
-			w.mu.Unlock()
-			return fmt.Errorf("P2P send failed; outcome uncertain, refresh before retrying: %w", err)
-		}
+	}
+	if err = dc.Send(sealed); err != nil {
+		w.mu.Lock()
+		w.direct = false
+		w.mu.Unlock()
+		return fmt.Errorf("P2P send failed; outcome uncertain, refresh before retrying: %w", err)
 	}
 	return nil
 }
@@ -402,6 +418,10 @@ func (w *wire) onChunk(data []byte) {
 	if json.Unmarshal(plain, &c) != nil || c.Total < 1 || c.Total > 1400 || c.Index < 0 || c.Index >= c.Total || len(c.Data) > 12000 {
 		return
 	}
+	if c.Request != "" && w.wantsResponse != nil && !w.wantsResponse(c.Request) {
+		w.discardResponse(c.Request)
+		return
+	}
 	w.mu.Lock()
 	for id, a := range w.chunks {
 		// Expire abandoned fragments by inactivity, never by total transfer
@@ -415,11 +435,11 @@ func (w *wire) onChunk(data []byte) {
 	}
 	a := w.chunks[c.ID]
 	if a == nil {
-		if len(w.chunks) >= 8 || w.chunkBytes > 20<<20 {
+		if len(w.chunks) >= 64 || w.chunkBytes > 20<<20 {
 			w.mu.Unlock()
 			return
 		}
-		a = &assembly{parts: make([][]byte, c.Total), updated: time.Now()}
+		a = &assembly{parts: make([][]byte, c.Total), updated: time.Now(), request: c.Request}
 		w.chunks[c.ID] = a
 	}
 	if len(a.parts) != c.Total || a.parts[c.Index] != nil {

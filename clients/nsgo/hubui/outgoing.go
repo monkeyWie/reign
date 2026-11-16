@@ -9,7 +9,12 @@ import (
 
 func (s *State) refreshAfterSend(key, target, provider, session string) {
 	if w := s.stream; w != nil && w.current() && w.key == key {
-		w.refreshSnapshot()
+		// A joined event stream already delivers the user item, turn state and
+		// assistant deltas. Resending the last 30 turns after every successful
+		// send needlessly competes with those small live updates on relays.
+		if !w.baseline {
+			w.refreshSnapshot()
+		}
 		return
 	}
 	started, generation := time.Now(), s.sessionGeneration

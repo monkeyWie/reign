@@ -129,3 +129,49 @@ func TestLivePresentationEventsAndUnicodeOffsets(t *testing.T) {
 		t.Fatal("incomplete live lifecycle", deltas, summaries, string(encoded))
 	}
 }
+
+func TestPlainUserItemDoesNotRedownloadHistory(t *testing.T) {
+	for _, tc := range []struct {
+		name, content string
+		snapshot      bool
+	}{
+		{"plain", `[{"type":"text","text":"hello🙂"}]`, false},
+		{"image", `[{"type":"localImage","path":"/tmp/picture.png"}]`, true},
+		{"file", `[{"type":"text","text":"# Files mentioned by the user:\n[file.apk](/tmp/file.apk)"}]`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := &Provider{}
+			base, _ := p.stream().log.Watch(context.Background(), "session", "", 0)
+			p.observeStream(rpc.Message{Method: "item/started", Params: json.RawMessage(`{"threadId":"session","turnId":"turn","item":{"id":"message","type":"userMessage","content":` + tc.content + `}}`)})
+			batch, err := p.Watch(context.Background(), "session", base.Epoch, base.Cursor)
+			if err != nil {
+				t.Fatal(err)
+			}
+			items, snapshots := 0, 0
+			for _, e := range batch.Events {
+				if e.Kind == "item" {
+					items++
+				}
+				if e.Kind == "snapshot" {
+					snapshots++
+				}
+			}
+			want := 0
+			if tc.snapshot {
+				want = 1
+			}
+			if items != 1 || snapshots != want {
+				t.Fatalf("items=%d snapshots=%d, want 1/%d", items, snapshots, want)
+			}
+		})
+	}
+}
+
+func TestSessionPreviewIsBoundedWithoutChangingSourceText(t *testing.T) {
+	text := strings.Repeat("长😀", 1000)
+	source := thread{ID: "session", Preview: text}
+	result := source.session()
+	if len([]rune(result.Preview)) != 241 || !strings.HasSuffix(result.Preview, "…") || source.Preview != text {
+		t.Fatal("preview truncated incorrectly")
+	}
+}

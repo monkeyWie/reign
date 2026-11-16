@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
-	"sync"
 	"time"
 
 	"github.com/coder/websocket"
@@ -130,8 +129,7 @@ func serveHostObserved(ctx context.Context, p Pairing, opts Options, d *control.
 			}
 			var peer *wire
 			limiter := make(chan struct{}, 8)
-			var watchMu sync.Mutex
-			var cancelWatch context.CancelFunc
+			var reads hostReads
 			peer, err = newWire(ctx, ws, f.Peer, key, true, opts, func(data []byte) {
 				if opts.ResolveKey != nil {
 					if _, ok := opts.ResolveKey(deviceID); !ok {
@@ -147,28 +145,38 @@ func serveHostObserved(ctx context.Context, p Pairing, opts Options, d *control.
 					go peer.send(encoded)
 					return
 				}
+				if req.Method == control.CancelRead {
+					reads.cancel(req.Cancel)
+					return
+				}
 				// Agent work can outlive a fixed RPC budget. Cancel with the peer
 				// instead; connection liveness is checked independently.
 				callCtx, stop := context.WithCancel(peer.ctx)
 				watch := req.Method == "watch"
-				if watch {
-					// One visible conversation per controller. Replacing its read
-					// cancels the old one without occupying command/interrupt slots.
-					watchMu.Lock()
-					if cancelWatch != nil {
-						cancelWatch()
-					}
-					cancelWatch = stop
-					watchMu.Unlock()
-				} else {
+				busy := func() {
+					stop()
+					encoded, _ := json.Marshal(control.Response{ID: req.ID, Code: "HOST_BUSY", Error: "设备读取繁忙，请稍后重试"})
+					go peer.send(encoded)
+				}
+				if !watch {
 					select {
 					case limiter <- struct{}{}:
 					default:
-						stop()
+						busy()
 						return
 					}
 				}
+				read, ok := reads.add(req, stop)
+				if !ok {
+					if !watch {
+						<-limiter
+					}
+					busy()
+					return
+				}
+				callCtx = context.WithValue(callCtx, responseRequestKey{}, req.ID)
 				go func() {
+					defer reads.remove(req.ID, read)
 					if !watch {
 						defer func() { <-limiter }()
 					}
@@ -241,7 +249,7 @@ func serveHostObserved(ctx context.Context, p Pairing, opts Options, d *control.
 					if len(encoded) > 16<<20 {
 						encoded, _ = json.Marshal(control.Response{ID: originalID, Error: "响应超过 16 MiB，请缩小查询范围"})
 					}
-					_ = peer.send(encoded)
+					_ = peer.sendContext(callCtx, encoded)
 				}()
 			})
 			if err != nil {

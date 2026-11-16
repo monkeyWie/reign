@@ -15,6 +15,7 @@ import (
 )
 
 type Request struct {
+	Cancel         string                 `json:"cancel,omitempty"`
 	Progress       bool                   `json:"progress,omitempty"`
 	Probe          bool                   `json:"probe,omitempty"`
 	Fresh          bool                   `json:"fresh,omitempty"`

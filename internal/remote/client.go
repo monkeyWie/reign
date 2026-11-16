@@ -81,6 +81,7 @@ func connectOnce(ctx context.Context, p Pairing, opts Options) (*Client, error) 
 		return nil, err
 	}
 	c.wire = w
+	w.wantsResponse = func(id string) bool { c.mu.Lock(); defer c.mu.Unlock(); return c.pending[id] != nil }
 	w.relayLink = &relayLink{}
 	w.relayLink.socket.Store(dataWS)
 	go func() {
@@ -261,7 +262,7 @@ func (c *Client) Call(ctx context.Context, r control.Request, out any) error {
 	c.mu.Lock()
 	c.pending[r.ID] = &pendingCall{ctx: ctx, responses: ch}
 	c.mu.Unlock()
-	defer func() { c.mu.Lock(); delete(c.pending, r.ID); c.mu.Unlock() }()
+	defer func() { c.mu.Lock(); delete(c.pending, r.ID); c.mu.Unlock(); c.wire.discardResponse(r.ID) }()
 	raw, err := json.Marshal(r)
 	if err != nil {
 		return err
@@ -329,6 +330,7 @@ func (c *Client) Call(ctx context.Context, r control.Request, out any) error {
 			}
 			return nil
 		case <-ctx.Done():
+			c.cancelRead(r)
 			if control.ReadOnly(r.Method) {
 				return fmt.Errorf("等待设备读取响应超时或已取消: %w", ctx.Err())
 			}

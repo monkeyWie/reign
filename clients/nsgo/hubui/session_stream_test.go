@@ -111,6 +111,19 @@ func TestLiveTextDoesNotWaitForSnapshotsOrApprovals(t *testing.T) {
 	if app.Exists("id:transcript-syncing") {
 		t.Fatal("caught-up session shows synchronization")
 	}
+	// Successful sends on the joined stream must keep using event deltas;
+	// requesting the recent history again would compete with every small reply.
+	var checked atomic.Bool
+	app.Post(func() {
+		s.cx.Post(func() {
+			s.refreshAfterSend(s.key(), s.target, s.stream.provider, s.stream.session)
+			if s.stream.snapshotInFlight || s.stream.snapshotAgain {
+				t.Error("successful send restarted a joined history snapshot")
+			}
+			checked.Store(true)
+		})
+	})
+	app.WaitUntil(time.Second, checked.Load)
 	app.Screenshot("sync-complete-live-reply")
 }
 

@@ -150,7 +150,7 @@ func (p *Provider) observeStream(m rpc.Message) {
 		}
 		event.Kind, event.ItemID, event.Item = "item", item.ID, &item
 		s.log.Publish(event)
-		if item.Role == "user" || item.Type == "imageGeneration" {
+		if item.Role == "user" && userAttachmentSnapshot(params.Item) || item.Type == "imageGeneration" {
 			event.Kind, event.Item = "snapshot", nil
 			s.log.Publish(event)
 		}
@@ -194,4 +194,22 @@ func (p *Provider) observeStream(m rpc.Message) {
 	event.Kind, event.Delta, event.Offset = "text", params.Delta, item.offset
 	item.offset += utf16Length(params.Delta)
 	s.log.Publish(event)
+}
+
+// Plain user messages are already complete in the item event. Only file/image
+// inputs need the attachment importer to reread history and preserve their bytes.
+func userAttachmentSnapshot(raw json.RawMessage) bool {
+	var item struct{ Content []struct{ Type, Text string } }
+	if json.Unmarshal(raw, &item) != nil {
+		return true
+	}
+	for _, content := range item.Content {
+		if content.Type == "localImage" || content.Type == "image" {
+			return true
+		}
+		if content.Type == "text" && (strings.Contains(content.Text, "# Files mentioned by the user:") || strings.Contains(content.Text, "](")) {
+			return true
+		}
+	}
+	return false
 }

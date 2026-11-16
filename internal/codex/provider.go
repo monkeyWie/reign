@@ -168,7 +168,11 @@ func (t thread) session() provider.Session {
 	if title == "" {
 		title = "未命名会话"
 	}
-	return provider.Session{ID: t.ID, ProviderID: "codex", Title: title, Preview: t.Preview, CWD: t.Cwd, UpdatedAt: t.UpdatedAt, Status: t.Status.Type, Source: string(t.Source), SourceKind: t.sourceKind(), Originator: t.Originator, Model: t.Model}
+	preview := []rune(t.Preview)
+	if len(preview) > 240 {
+		preview = append(preview[:240], '…')
+	}
+	return provider.Session{ID: t.ID, ProviderID: "codex", Title: title, Preview: string(preview), CWD: t.Cwd, UpdatedAt: t.UpdatedAt, Status: t.Status.Type, Source: string(t.Source), SourceKind: t.sourceKind(), Originator: t.Originator, Model: t.Model}
 }
 func (p *Provider) Sessions(ctx context.Context, cursor string) (provider.SessionPage, error) {
 	params := map[string]any{"limit": 50, "sortKey": "updated_at", "sortDirection": "desc", "sourceKinds": []string{"cli", "vscode", "appServer", "subAgent", "unknown"}, "modelProviders": []string{}}
