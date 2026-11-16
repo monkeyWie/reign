@@ -8,13 +8,26 @@ import (
 	"github.com/nsgo-dev/nsgo/icons/lucide"
 )
 
-type tones struct{ background, foreground, muted, mutedText, border core.Color }
+type tones struct {
+	background, foreground, muted, mutedText, border  core.Color
+	canvas, sidebar, elevated, selected, accent, code core.Color
+}
 
 func palette(cx *core.Scope) tones {
+	p := cx.Theme().Light
 	if cx.Dark() {
-		return tones{core.RGB(0x09090b), core.RGB(0xfafafa), core.RGB(0x27272a), core.RGB(0xa1a1aa), core.RGB(0x27272a)}
+		p = cx.Theme().Dark
 	}
-	return tones{core.RGB(0xffffff), core.RGB(0x09090b), core.RGB(0xf4f4f5), core.RGB(0x71717a), core.RGB(0xe4e4e7)}
+	role := func(name string, fallback core.Color) core.Color {
+		if c, ok := p.Colors[name]; ok {
+			return c
+		}
+		return fallback
+	}
+	return tones{background: p.Background, foreground: p.Text, muted: p.Surface,
+		mutedText: p.TextMuted, border: p.Border, canvas: role("canvas", p.Surface),
+		sidebar: role("sidebar", p.Surface), elevated: role("elevated", p.Background),
+		selected: role("selected", p.SurfacePressed), accent: p.Accent, code: role("codeSurface", p.Surface)}
 }
 
 var fill = core.Style{FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0), MinHeight: core.Pt(0)}
@@ -66,7 +79,7 @@ func button(cx *core.Scope, id, title string, icon func() *core.SVG, variant str
 		if onPress != nil {
 			onPress()
 		}
-	}, Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter, Gap: 8, Padding: core.Symmetric(8, 12), MinHeight: core.Pt(36), CornerRadius: 6, FlexShrink: 0}, StyleFunc: func() core.Style {
+	}, Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter, Gap: 8, Padding: core.Symmetric(8, 12), MinHeight: core.Pt(36), CornerRadius: 10, FlexShrink: 0}, StyleFunc: func() core.Style {
 		c := palette(cx)
 		st := core.Style{Color: c.foreground, Hover: &core.Style{Background: c.muted}, FocusVisible: &core.Style{OutlineWidth: 2, OutlineColor: c.mutedText}}
 		if variant == "outline" {
@@ -75,8 +88,11 @@ func button(cx *core.Scope, id, title string, icon func() *core.SVG, variant str
 			st.Background = c.background
 		}
 		if variant == "primary" {
-			st.Background = c.foreground
-			st.Color = c.background
+			st.Background = c.accent
+			st.Color = cx.Theme().Light.AccentText
+			if cx.Dark() {
+				st.Color = cx.Theme().Dark.AccentText
+			}
 			st.Hover = &core.Style{Opacity: core.Alpha(.88)}
 		}
 		return st
@@ -108,8 +124,8 @@ func heading(cx *core.Scope, title, subtitle string) core.Node {
 	return core.View{Style: core.Style{Gap: 6}, Children: []core.Node{t, label(cx, subtitle, 13, true)}}
 }
 func card(cx *core.Scope, nodes ...core.Node) core.Node {
-	return core.View{Style: core.Style{Padding: core.All(24), Gap: 14, CornerRadius: 10, BorderWidth: 1}, StyleFunc: func() core.Style {
-		return core.Style{Background: palette(cx).background, BorderColor: palette(cx).border}
+	return core.View{Style: core.Style{Padding: core.All(24), Gap: 14, CornerRadius: 16, BorderWidth: 1}, StyleFunc: func() core.Style {
+		return core.Style{Background: palette(cx).elevated, BorderColor: palette(cx).border}
 	}, Children: nodes}
 }
 
@@ -121,32 +137,10 @@ func Root(cx *core.Scope) core.Node {
 	return RootWithAPI(cx, api, true)
 }
 func RootWithAPI(cx *core.Scope, api API, start bool) core.Node {
-	theme := core.DefaultTheme()
-	theme.Light.Background = core.RGB(0xffffff)
-	theme.Light.Surface = core.RGB(0xf4f4f5)
-	theme.Light.Text = core.RGB(0x09090b)
-	theme.Light.TextMuted = core.RGB(0x71717a)
-	theme.Light.Accent = core.RGB(0x18181b)
-	theme.Light.AccentText = core.RGB(0xfafafa)
-	theme.Light.Border = core.RGB(0xe4e4e7)
-	theme.Dark.Background = core.RGB(0x09090b)
-	theme.Dark.Surface = core.RGB(0x27272a)
-	theme.Dark.Text = core.RGB(0xfafafa)
-	theme.Dark.TextMuted = core.RGB(0xa1a1aa)
-	theme.Dark.Accent = core.RGB(0xfafafa)
-	theme.Dark.AccentText = core.RGB(0x18181b)
-	theme.Dark.Border = core.RGB(0x27272a)
-	theme.Radius = 6
-	cx.SetTheme(theme)
 	s := newState(cx, api)
+	s.loadAppearance()
 	s.installWorkspaceNavigation()
 	s.observeNativeBackground()
-	if appearance, ok := cx.Storage().GetItem("appearance"); ok && appearance == "true" {
-		s.dark = true
-		cx.SetAppearance(core.AppearanceDark)
-	} else {
-		cx.SetAppearance(core.AppearanceLight)
-	}
 	if start {
 		s.initialize()
 	} else {
@@ -167,7 +161,7 @@ func RootWithAPI(cx *core.Scope, api API, start bool) core.Node {
 		return fmt.Sprintf("%s|%s|%s|%t", mode, s.target, str(s.selected, "id"), s.narrowChat)
 	})
 	return core.View{TestID: "agenthub", Style: fill.Merge(core.Style{PaddingEnv: core.EnvEdges{Top: core.EnvSafeArea, Bottom: core.EnvSafeArea}}), StyleFunc: func() core.Style {
-		return core.Style{Background: palette(cx).background, Color: palette(cx).foreground, FontSize: 13}
+		return core.Style{Background: palette(cx).canvas, Color: palette(cx).foreground, FontSize: 13}
 	}, OnLayout: func(b core.Bounds) { s.width.Set(b.Size.Width) }, Children: []core.Node{
 		core.Dynamic(func(cx *core.Scope) core.Node {
 			_ = page.Get()
@@ -225,7 +219,7 @@ func (s *State) resize(cx *core.Scope, devices bool) core.Node {
 			lo, hi = 175, 300
 		}
 		w.Set(min(hi, max(lo, initial+e.Translation.X)))
-	}, Children: []core.Node{divider(cx)}}
+	}, Children: []core.Node{core.View{Style: core.Style{Width: core.Pt(1), Height: core.Pct(100)}, StyleFunc: func() core.Style { return core.Style{Hover: &core.Style{Background: palette(cx).border}} }}}}
 }
 func (s *State) navigation(cx *core.Scope, compact bool) core.Node {
 	openConnect := func() { s.dialog.Set("connect") }
@@ -253,29 +247,29 @@ func (s *State) navigation(cx *core.Scope, compact bool) core.Node {
 		if compact {
 			return button(cx, "device-"+str(d(), "id"), "", lucide.Monitor, "ghost", func() { s.openDevice(str(d(), "id")) })
 		}
-		return core.View{TestID: "device-" + str(d(), "id"), Role: core.RoleButton, LabelFunc: func() string { return deviceName(d()) }, OnPress: func(core.PressEvent) { s.openDevice(str(d(), "id")) }, Style: core.Style{Margin: core.Edges{Bottom: 6}, Padding: core.All(12), Gap: 5, CornerRadius: 6, BorderWidth: 1}, StyleFunc: func() core.Style {
+		return core.View{TestID: "device-" + str(d(), "id"), Role: core.RoleButton, LabelFunc: func() string { return deviceName(d()) }, OnPress: func(core.PressEvent) { s.openDevice(str(d(), "id")) }, Style: core.Style{Margin: core.Edges{Bottom: 6}, Padding: core.All(12), Gap: 5, CornerRadius: 12}, StyleFunc: func() core.Style {
 			c := palette(cx)
-			bg := c.background
+			bg := c.sidebar
 			s.read()
 			if s.target == str(d(), "id") {
-				bg = c.muted
+				bg = c.selected
 			}
 			return core.Style{Background: bg, BorderColor: c.border, Hover: &core.Style{Background: c.muted}}
 		}, Children: []core.Node{row(core.View{Style: fill, Children: []core.Node{dynamicText(cx, func() string { return deviceName(d()) }, 13, false)}}, s.devicePresenceIndicator(cx, d)), dynamicText(cx, func() string { return s.deviceListStatus(d()) }, 10, true)}}
 	})}})
 	nodes = append(nodes, core.Show{When: func() bool { s.read(); return s.connectionProblem("") }, Then: func(cx *core.Scope) core.Node { return s.connectionIndicator(cx, func() string { return "" }) }}, button(cx, "account-menu", choose(compact, "", "账号与设备同步"), lucide.User, "ghost", func() { s.dialog.Set("account") }))
-	nodes = append(nodes, button(cx, "theme-toggle", choose(compact, "", "切换主题"), lucide.SunMoon, "ghost", s.toggleTheme))
-	if s.api.CanHost() && !compact {
-		nodes = append(nodes, button(cx, "server-settings", "服务设置", lucide.Settings, "ghost", func() { s.dialog.Set("settings") }))
-	}
+	themeButton := button(cx, "theme-toggle", "", lucide.SunMoon, "ghost", s.toggleTheme).(core.View)
+	themeButton.Label = "切换主题"
+	themeButton.Tooltip = label(cx, "切换主题", 12, false)
+	nodes = append(nodes, row(leftButton(button(cx, "server-settings", choose(compact, "", "设置"), lucide.Settings, "ghost", func() { s.openSettings("general") })), spacer(), themeButton))
 	return core.View{TestID: "device-sidebar", Style: core.Style{Padding: core.All(14), Gap: 8, FlexShrink: 0}, StyleFunc: func() core.Style {
 		w := s.deviceWidth.Get()
 		if compact {
 			w = 60
 		}
 		c := palette(cx)
-		return core.Style{Width: core.Pt(w), Background: c.muted.Faded(.32), Color: c.foreground}
-	}, Class: "dark:bg-zinc-900/40", Children: nodes}
+		return core.Style{Width: core.Pt(w), Background: c.sidebar, Color: c.foreground}
+	}, Children: nodes}
 }
 func choose[T any](condition bool, a, b T) T {
 	if condition {
@@ -289,7 +283,7 @@ func isMobile(cx *core.Scope) bool {
 
 func (s *State) local(cx *core.Scope) core.Node {
 	copyID := s.copyButton(cx, "copy-device-id", "复制 ID", "outline", func() string { return str(s.host, "connectionId") })
-	return core.Scroll{TestID: "local-dashboard", Style: fill, Children: []core.Node{core.View{Style: core.Style{Padding: core.All(32), Gap: 18}, Children: []core.Node{
+	return core.Scroll{TestID: "local-dashboard", Style: fill, StyleFunc: func() core.Style { return s.workspaceSurface(cx) }, Children: []core.Node{core.View{Style: core.Style{Padding: core.All(32), Gap: 18}, Children: []core.Node{
 		heading(cx, "这台电脑", "允许已授权设备访问本机 Agent，官方应用仍可照常使用。"),
 		card(cx, row(glyph(cx, lucide.Monitor, 22), dynamicText(cx, func() string {
 			s.read()
@@ -305,36 +299,17 @@ func (s *State) local(cx *core.Scope) core.Node {
 				return v[:3] + " " + v[3:]
 			}
 			return "尚未登记"
-		}, Selectable: core.SelectableOn, Style: core.Style{FontSize: 32, FontWeight: core.FontWeightSemibold, LetterSpacing: 2}}, row(copyID, button(cx, "show-qr", "设备二维码", nil, "outline", func() { s.dialog.Set("qr") }), button(cx, "configure-service", "配置服务", nil, "outline", func() { s.dialog.Set("settings") }))),
+		}, Selectable: core.SelectableOn, Style: core.Style{FontSize: 32, FontWeight: core.FontWeightSemibold, LetterSpacing: 2}}, row(copyID, button(cx, "show-qr", "设备二维码", nil, "outline", func() { s.dialog.Set("qr") }), button(cx, "configure-service", "配置服务", nil, "outline", func() { s.openSettings("connection") }))),
 		card(cx, label(cx, "访问授权", 14, false), label(cx, "首次连接需本机确认；配置密码后，输入正确密码可自动授权。", 13, true), row(button(cx, "set-password", "设置访问密码", nil, "outline", func() { s.dialog.Set("password") }), core.Show{When: func() bool { s.read(); return flag(s.host, "passwordEnabled") }, Then: func(cx *core.Scope) core.Node {
 			return button(cx, "clear-password", "关闭密码访问", nil, "ghost", func() { s.call("host.password", Object{"clearPassword": true}, nil) })
 		}}), core.Each(func() []Object { s.read(); return objects(s.host["grants"]) }, func(g Object) string { return str(g, "client") }, func(cx *core.Scope, g func() Object, _ func() int) core.Node {
 			return row(dynamicText(cx, func() string { return str(g(), "name") }, 13, false), spacer(), button(cx, "revoke-"+str(g(), "client"), "撤销授权", nil, "ghost", func() { s.call("host.revoke", Object{"client": g()["client"]}, nil) }))
 		})),
-		core.View{Style: core.Style{Margin: core.Edges{Top: 12}}, Children: []core.Node{row(heading(cx, "本机 Agent", "已就绪的 Agent 可供已授权设备远控；需要接入时点击启用。"), spacer(), button(cx, "add-agent", "添加 ACP Agent", nil, "outline", func() { s.dialog.Set("agent-config") }))}},
-		core.Each(func() []Object { s.read(); return s.localProviders }, func(p Object) string { return str(p, "id") }, func(cx *core.Scope, p func() Object, _ func() int) core.Node {
-			return card(cx, row(glyph(cx, lucide.Bot, 24), core.View{Style: core.Style{FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0), Gap: 6}, Children: []core.Node{dynamicText(cx, func() string { return str(p(), "name") }, 14, false), dynamicText(cx, func() string {
-				return choose(flag(p(), "installed"), "已安装", "未安装") + " · " + str(p(), "detail")
-			}, 12, true)}}, core.Show{When: func() bool { return str(p(), "id") != "codex-app" && str(p(), "id") != "codex-cli" }, Then: func(cx *core.Scope) core.Node {
-				return button(cx, "configure-agent-"+str(p(), "id"), "配置", nil, "ghost", func() {
-					s.call("host.agents", nil, func(v any) { s.agentDefinitions = object(v); s.dialog.Set("agent-config:" + str(p(), "id")) })
-				})
-			}}, core.Show{When: func() bool {
-				return flag(p(), "installed") && str(p(), "state") != "unsupported" && !providerReady(p())
-			}, Then: func(cx *core.Scope) core.Node {
-				return button(cx, "enable-"+str(p(), "id"), "启用", nil, "outline", func() {
-					if flag(object(p()["capabilities"]), "desktop") {
-						s.dialog.Set("activate:" + str(p(), "id"))
-					} else {
-						s.call("host.enable", Object{"provider": p()["id"]}, nil)
-					}
-				})
-			}}))
-		}),
+		card(cx, row(glyph(cx, lucide.Bot, 22), core.View{Style: fill, Children: []core.Node{label(cx, "本机 Agent", 14, false), label(cx, "管理已安装的 Agent 与自定义接入。", 13, true)}}, button(cx, "manage-agents", "管理 Agent", lucide.ArrowRight, "outline", func() { s.openSettings("agents") }))),
 	}}}}
 }
 func (s *State) welcome(cx *core.Scope) core.Node {
-	return core.View{Style: fill.Merge(core.Style{AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter, Padding: core.All(32), Gap: 20}), Children: []core.Node{glyph(cx, lucide.Network, 52), label(cx, "你的 Agent，随处连接", 26, false), label(cx, "输入设备 ID，连接电脑上的 Codex 与其它 Agent。", 13, true), button(cx, "welcome-connect", "连接你的电脑", nil, "primary", func() { s.dialog.Set("connect") })}}
+	return core.View{Style: fill.Merge(core.Style{AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter, Padding: core.All(32), Gap: 20}), StyleFunc: func() core.Style { return s.workspaceSurface(cx) }, Children: []core.Node{glyph(cx, lucide.Network, 52), label(cx, "你的 Agent，随处连接", 26, false), label(cx, "输入设备 ID，连接电脑上的 Codex 与其它 Agent。", 13, true), button(cx, "welcome-connect", "连接你的电脑", nil, "primary", func() { s.dialog.Set("connect") })}}
 }
 
 type directoryRow struct {
@@ -368,8 +343,8 @@ func (s *State) directory(cx *core.Scope) core.Node {
 	rows := core.NewMemoFunc(cx, s.directoryRows, nil)
 	return core.View{TestID: "session-sidebar", Style: fill, StyleFunc: func() core.Style {
 		c := palette(cx)
-		return core.Style{Background: c.muted.Faded(.25), Color: c.foreground}
-	}, Class: "dark:bg-zinc-950", Children: []core.Node{
+		return core.Style{Background: c.sidebar, Color: c.foreground}
+	}, Children: []core.Node{
 		core.View{Style: core.Style{Padding: core.Edges{Top: 20, Left: 18, Right: 12, Bottom: 6}}, Children: []core.Node{row(core.Show{When: func() bool { return s.width.Get() < compactBreakpoint }, Then: func(cx *core.Scope) core.Node {
 			return button(cx, "back-devices", "设备", lucide.ArrowLeft, "ghost", s.backDevices)
 		}}, core.View{Style: fill, Children: []core.Node{singleLine(cx, func() string { s.read(); return deviceName(s.device()) }, 14, false), singleLine(cx, func() string { s.read(); return s.deviceListStatus(s.device()) }, 11, true)}}, s.connectionIndicator(cx, func() string { return s.target }), button(cx, "refresh-sessions", "", lucide.RefreshCw, "ghost", s.poll))}},
@@ -408,7 +383,7 @@ func (s *State) directory(cx *core.Scope) core.Node {
 					c := palette(cx)
 					st := core.Style{Hover: &core.Style{Background: c.muted}}
 					if str(s.selected, "id") == str(item().Session, "id") && str(s.selected, "providerId") == str(item().Session, "providerId") {
-						st.Background = c.muted
+						st.Background = c.selected
 					}
 					return st
 				}, Children: []core.Node{row(core.Icon{SVG: sessionIcon(data.Session)(), Style: core.Style{Width: core.Pt(14), Height: core.Pt(14)}, StyleFunc: func() core.Style { return core.Style{Color: palette(cx).mutedText} }}, core.Text{ContentFunc: func() string { return item().Title }, MaxLines: 1, Style: core.Style{FontSize: 13, FlexShrink: 1, MinWidth: core.Pt(0)}})}}

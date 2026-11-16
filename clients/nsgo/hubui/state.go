@@ -88,6 +88,8 @@ type State struct {
 	pendingNativeSession                                    Object
 	nativeTasks                                             map[string]Object
 	nativeTaskMonitors                                      map[string]*nativeTaskMonitor
+
+	appearance, lightScheme, darkScheme, settingsReturn, settingsSection string
 }
 
 func newState(cx *core.Scope, api API) *State {
@@ -620,15 +622,9 @@ func (s *State) copy(value string) {
 	})
 }
 func (s *State) toggleTheme() {
-	s.dark = !s.dark
-	if s.dark {
-		s.cx.SetAppearance(core.AppearanceDark)
-	} else {
-		s.cx.SetAppearance(core.AppearanceLight)
-	}
-	_ = s.cx.Storage().SetItem("appearance", fmt.Sprint(s.dark))
-	s.changed()
+	s.setAppearance(choose(s.cx.Dark(), "light", "dark"))
 }
+
 func pairingCode(v Object) string { b, _ := json.Marshal(v); return "agenthub2:" + base64URL(b) }
 
 func (s *State) agentCapabilities() Object {

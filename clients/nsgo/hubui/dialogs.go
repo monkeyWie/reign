@@ -20,6 +20,9 @@ import (
 )
 
 func (s *State) dialogView(cx *core.Scope, kind string) core.Node {
+	if kind == "settings" || strings.HasPrefix(kind, "settings:") {
+		return s.preferences(cx, strings.TrimPrefix(kind, "settings:"))
+	}
 	if kind == "connection-status" {
 		mode := core.NewMemo(cx, func() string {
 			s.read()
@@ -47,7 +50,7 @@ func (s *State) dialogView(cx *core.Scope, kind string) core.Node {
 	if kind == "" {
 		return nil
 	}
-	close := func() { s.dialog.Set("") }
+	close := s.closeDialog
 	title := ""
 	children := []core.Node{}
 	footer := []core.Node{button(cx, "dialog-cancel", "取消", nil, "outline", close)}
@@ -163,7 +166,7 @@ func (s *State) dialogView(cx *core.Scope, kind string) core.Node {
 			close()
 			s.connect(p)
 		}))
-	case kind == "settings" || kind == "password":
+	case kind == "service-settings" || kind == "password":
 		url := str(s.host, "serviceUrl")
 		if url == "" {
 			url = serviceOrigin()

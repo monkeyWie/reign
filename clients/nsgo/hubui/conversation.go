@@ -27,7 +27,7 @@ func (s *State) conversation(cx *core.Scope, narrow bool) core.Node {
 	header = append(header, core.View{Style: core.Style{FlexGrow: 1, FlexShrink: 1, Gap: 4}, Children: []core.Node{singleLine(cx, func() string { s.read(); return str(s.selected, "title") }, 14, false), singleLine(cx, func() string { s.read(); return str(s.selected, "cwd") }, 11, true)}})
 	header = append(header, s.connectionIndicator(cx, func() string { return s.target }), glyph(cx, sessionIcon(s.selected), 18), button(cx, "attachment-cache", "", lucide.HardDrive, "ghost", func() { s.dialog.Set("clear-cache") }))
 	if !floatingHeader {
-		children = append(children, core.View{TestID: "conversation-header", Style: core.Style{Padding: core.All(18), Borders: core.Edges{Bottom: 1}}, StyleFunc: func() core.Style { return core.Style{BorderColor: palette(cx).border} }, Children: []core.Node{row(header...)}})
+		children = append(children, core.View{TestID: "conversation-header", Style: core.Style{Padding: core.Symmetric(16, 20)}, StyleFunc: func() core.Style { return core.Style{BorderColor: palette(cx).border} }, Children: []core.Node{row(header...)}})
 	}
 	listRef := s.timeline
 	atBottom := core.NewSignal(cx, true)
@@ -115,7 +115,7 @@ func (s *State) conversation(cx *core.Scope, narrow bool) core.Node {
 	}
 	children = append(children, core.View{TestID: "timeline", Style: fill, Children: timelineChildren})
 	children = append(children, s.syncIndicator(cx), s.composer(cx))
-	return core.View{TestID: "conversation", Style: fill, Children: children}
+	return core.View{TestID: "conversation", Style: fill, StyleFunc: func() core.Style { return s.workspaceSurface(cx) }, Children: children}
 }
 
 // The narrow-layout toolbar floats over the recycled list. Only the beginning of the
@@ -204,9 +204,17 @@ func (s *State) message(cx *core.Scope, get func() Message) core.Node {
 			}
 		}
 		return label(cx, choose(im.Alt != "", im.Alt, "图片不可用"), 13, true)
-	}, Selectable: true, OpenLinks: false, OnLinkPress: func(e textview.LinkPressEvent) { s.openLink(cx, get(), e.URL) }, CodeBlockActions: []textview.CodeAction{{ID: textview.CopyAction, Label: "复制"}}, Styles: textview.Styles{textview.PartRoot: core.Style{FontSize: 14, LineHeight: 23, MinWidth: core.Pt(0), Width: bodyWidth}}, StyleOf: func(p textview.Part) core.Style {
-		if p == textview.PartRoot || p == textview.PartParagraph {
-			return core.Style{Color: palette(cx).foreground}
+	}, Selectable: true, OpenLinks: false, OnLinkPress: func(e textview.LinkPressEvent) { s.openLink(cx, get(), e.URL) }, CodeBlockActions: []textview.CodeAction{{ID: textview.CopyAction, Label: "复制"}}, Styles: textview.Styles{textview.PartRoot: core.Style{FontSize: 15, LineHeight: 25, MinWidth: core.Pt(0), Width: bodyWidth}}, StyleOf: func(p textview.Part) core.Style {
+		c := palette(cx)
+		switch p {
+		case textview.PartRoot, textview.PartParagraph, textview.PartHeading:
+			return core.Style{Color: c.foreground}
+		case textview.PartCodeBlock:
+			return core.Style{Background: c.code, BorderWidth: 1, BorderColor: c.border, CornerRadius: 12, Overflow: core.Hidden}
+		case textview.PartCodeBlockScroll:
+			return core.Style{Background: c.code, Padding: core.All(18)}
+		case textview.PartCode:
+			return core.Style{Color: c.accent, Background: c.code, CornerRadius: 4}
 		}
 		return core.Style{}
 	}}
@@ -229,7 +237,7 @@ func (s *State) message(cx *core.Scope, get func() Message) core.Node {
 	}
 	bubble := core.View{TestID: "message-body-" + m.ID, Selectable: true, Style: core.Style{Width: bodyWidth, FlexShrink: 1, MinWidth: core.Pt(0), MaxWidth: core.Pt(choose(user, core.Points(680), core.Points(820)))}, StyleFunc: func() core.Style {
 		if user {
-			return core.Style{Background: palette(cx).muted, CornerRadius: 20, Padding: core.All(16)}
+			return core.Style{Background: palette(cx).muted, CornerRadius: 16, Padding: core.Symmetric(10, 16)}
 		}
 		return core.Style{}
 	}, Children: []core.Node{core.Show{When: func() bool { return strings.TrimSpace(displayText(get())) != "" }, Then: func(*core.Scope) core.Node { return bodyContent }}, core.Each(func() []Object {
@@ -335,10 +343,10 @@ func (s *State) composer(cx *core.Scope) core.Node {
 		if !isMobile(cx) {
 			s.drop(cx, uris)
 		}
-	}, Style: core.Style{Width: core.Pct(100), MaxWidth: core.Pt(860), Padding: core.All(12), CornerRadius: 22, BorderWidth: 1, Gap: 10}, StyleFunc: func() core.Style {
+	}, Style: core.Style{Width: core.Pct(100), MaxWidth: core.Pt(860), Padding: core.All(12), CornerRadius: 18, BorderWidth: 1, Gap: 10}, StyleFunc: func() core.Style {
 		c := palette(cx)
-		return core.Style{Background: c.muted.Faded(.45), BorderColor: c.border, Color: c.foreground}
-	}, Class: "dark:bg-zinc-900/60", Children: []core.Node{
+		return core.Style{Background: c.elevated, BorderColor: c.border, Color: c.foreground, Shadows: []core.BoxShadow{{Offset: core.Point{Y: 5}, Blur: 20, Color: core.RGB(0x102338).Faded(choose(cx.Dark(), float32(.18), float32(.07)))}}}
+	}, Children: []core.Node{
 		core.Show{When: func() bool { s.read(); return len(s.uploads) > 0 }, Then: func(cx *core.Scope) core.Node { return s.uploadPreviews(cx) }},
 		core.Input{TestID: "chat-input", Label: "消息", Placeholder: "发送消息…", Value: s.draft.Get, OnChange: s.draft.Set, Multiline: true, SubmitBehavior: submit, OnSubmit: func(string) { s.send(choose(running(), "steer", "send")) }, OnPaste: func(e core.PasteEvent) {
 			if !isMobile(cx) {
@@ -485,4 +493,13 @@ func (s *State) openLink(cx *core.Scope, m Message, url string) {
 	if strings.HasPrefix(url, "https://") || strings.HasPrefix(url, "http://") {
 		cx.OpenURL(url, nil)
 	}
+}
+
+func (s *State) workspaceSurface(cx *core.Scope) core.Style {
+	c := palette(cx)
+	st := core.Style{Background: c.background}
+	if s.width.Get() >= wideBreakpoint {
+		st = st.Merge(core.Style{Margin: core.Edges{Top: 8, Right: 8, Bottom: 8}, CornerRadius: 20, BorderWidth: 1, BorderColor: c.border, Overflow: core.Hidden, Shadows: []core.BoxShadow{{Offset: core.Point{Y: 2}, Blur: 12, Color: core.RGB(0x152d45).Faded(.05)}}})
+	}
+	return st
 }

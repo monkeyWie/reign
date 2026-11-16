@@ -113,7 +113,7 @@ func deviceStatus(d Object) string {
 func (s *State) phoneDevices(cx *core.Scope) core.Node {
 	nodes := []core.Node{
 		core.View{Style: core.Style{Padding: core.All(20), Gap: 16}, Children: []core.Node{
-			row(s.brand(cx, 24, false), spacer(), core.Show{When: func() bool { s.read(); return s.connectionProblem("") }, Then: func(cx *core.Scope) core.Node { return s.connectionIndicator(cx, func() string { return "" }) }}, button(cx, "mobile-account", "", lucide.User, "ghost", func() { s.dialog.Set("account") }), button(cx, "theme-toggle", "", lucide.SunMoon, "ghost", s.toggleTheme)),
+			row(s.brand(cx, 24, false), spacer(), core.Show{When: func() bool { s.read(); return s.connectionProblem("") }, Then: func(cx *core.Scope) core.Node { return s.connectionIndicator(cx, func() string { return "" }) }}, button(cx, "mobile-account", "", lucide.User, "ghost", func() { s.dialog.Set("account") }), button(cx, "server-settings", "", lucide.Settings, "ghost", func() { s.openSettings("general") })),
 			label(cx, "选择设备，查看与管理它的 Agent 会话", 13, true),
 			row(button(cx, "connect-device", "连接设备", lucide.Plus, "primary", func() { s.scanned = nil; s.dialog.Set("connect") }), core.Show{When: func() bool { return isMobile(cx) }, Then: func(cx *core.Scope) core.Node {
 				return button(cx, "scan-qr", "扫一扫", lucide.ScanLine, "outline", func() { s.scan(cx) })
@@ -121,7 +121,7 @@ func (s *State) phoneDevices(cx *core.Scope) core.Node {
 		}},
 	}
 	if s.api.CanHost() {
-		nodes = append(nodes, button(cx, "home", "这台电脑的 Agent 与服务设置", lucide.Monitor, "outline", func() { s.phoneNav.Push("local") }))
+		nodes = append(nodes, button(cx, "home", "这台电脑", lucide.Monitor, "outline", func() { s.phoneNav.Push("local") }))
 	}
 	nodes = append(nodes, core.Scroll{Style: fill, Children: []core.Node{core.View{Style: core.Style{Padding: core.Symmetric(4, 16), Gap: 10}, Children: []core.Node{
 		core.Show{When: func() bool { s.read(); return len(s.devices) == 0 }, Then: func(cx *core.Scope) core.Node {

@@ -33,10 +33,10 @@ func checkUnsupportedApp(t *testing.T, width, height core.Points, name string) {
 	t.Helper()
 	api := &unsupportedAppAPI{newDemoAPI()}
 	app := nsgotest.Start(t, func(cx *core.Scope) core.Node { return RootWithAPI(cx, api, true) }, nsgotest.Size(width, height))
-	if width < 650 {
-		app.WaitFor("id:home", 3*time.Second)
-		app.Press("id:home")
-	}
+	app.WaitFor("id:server-settings", 3*time.Second)
+	app.Press("id:server-settings")
+	app.WaitFor("id:settings-nav-agents", 3*time.Second)
+	app.Press("id:settings-nav-agents")
 	app.WaitFor("text:已安装 · Windows 已支持 Codex App 检测，暂不支持接入远控", 3*time.Second)
 	status := app.Find("text:已安装 · Windows 已支持 Codex App 检测，暂不支持接入远控")
 	if status.Frame.Size.Width > width {
