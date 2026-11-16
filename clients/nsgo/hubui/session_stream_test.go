@@ -7,11 +7,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/monkeyWie/reignhub/internal/provider"
+
 	"github.com/nsgo-dev/nsgo/core"
 	"github.com/nsgo-dev/nsgo/nsgotest"
 )
 
-type snapshotRequest struct{ reply chan Object }
+type snapshotRequest struct {
+	reply     chan Object
+	fragments chan provider.Transcript
+}
 type independentStreamAPI struct {
 	*demoAPI
 	snapshots        chan snapshotRequest
@@ -26,17 +31,23 @@ func (f *independentStreamAPI) Call(ctx context.Context, method string, p Object
 		switch str(r, "method") {
 		case "transcript":
 			f.reads.Add(1)
-			request := snapshotRequest{reply: make(chan Object, 1)}
+			request := snapshotRequest{reply: make(chan Object, 1), fragments: make(chan provider.Transcript, 8)}
 			select {
 			case <-ctx.Done():
 				return nil, ctx.Err()
 			case f.snapshots <- request:
 			}
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case t := <-request.reply:
-				return t, nil
+			for {
+				select {
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				case fragment := <-request.fragments:
+					if err := provider.ObserveTranscript(ctx, fragment); err != nil {
+						return nil, err
+					}
+				case t := <-request.reply:
+					return t, nil
+				}
 			}
 		case "approvals":
 			if f.approvalOnce.CompareAndSwap(false, true) {
@@ -101,6 +112,49 @@ func TestLiveTextDoesNotWaitForSnapshotsOrApprovals(t *testing.T) {
 		t.Fatal("caught-up session shows synchronization")
 	}
 	app.Screenshot("sync-complete-live-reply")
+}
+
+func TestFirstHistoryDisplaysMessagesBeforeTheFinalResponse(t *testing.T) {
+	f := &independentStreamAPI{demoAPI: newDemoAPI(), snapshots: make(chan snapshotRequest, 4), events: make(chan Object, 8), approvalsStarted: make(chan struct{})}
+	app, s := conversationFixture(t, f, 390, Object{}, true)
+	app.Post(func() { s.cx.Post(s.startSessionWatch) })
+	app.WaitUntil(time.Second, func() bool { return len(f.snapshots) > 0 })
+	var request snapshotRequest
+	select {
+	case request = <-f.snapshots:
+	case <-time.After(time.Second):
+		t.Fatal("history did not start")
+	}
+	fragment := provider.Transcript{StreamEpoch: "live", Session: provider.Session{ID: "chat"}, Turns: []provider.Turn{{ID: "history", Status: "completed", Items: []provider.Item{{ID: "one", Role: "user", Text: "历史第一条"}}}}}
+	request.fragments <- fragment
+	app.WaitFor("text:历史第一条", time.Second)
+	app.WaitFor("id:transcript-syncing", time.Second)
+	// A second message in a completed turn is additive until the final response.
+	fragment.Turns = []provider.Turn{{ID: "history", Status: "completed", Items: []provider.Item{{ID: "two", Role: "assistant", Text: "历史第二条"}}}}
+	request.fragments <- fragment
+	app.WaitFor("text:历史第二条", time.Second)
+	app.Find("text:历史第一条")
+	f.events <- Object{"epoch": "live", "cursor": 1, "events": []Object{{"id": 1, "kind": "text", "turnId": "live-reply", "itemId": "answer", "offset": 0, "delta": "同步期间的实时回复"}}}
+	app.WaitFor("text:同步期间的实时回复", time.Second)
+	// The final history can be older than the live text already rendered.
+	request.reply <- Object{"streamEpoch": "live", "streamCursor": 0, "turns": []Object{{"id": "history", "status": "completed", "items": []Object{{"id": "one", "role": "user", "text": "历史第一条"}, {"id": "two", "role": "assistant", "text": "历史第二条"}}}}}
+	app.WaitUntil(time.Second, func() bool { return !app.Exists("id:transcript-syncing") })
+	app.Find("text:历史第一条")
+	app.Find("text:历史第二条")
+	app.Find("text:同步期间的实时回复")
+	app.Screenshot("progressive-first-history-complete")
+}
+
+func TestPartialHistoryPreservesCacheUntilAuthoritativeCompletion(t *testing.T) {
+	old := Object{"turns": []Object{{"id": "older", "status": "completed", "items": []Object{{"id": "a", "text": "缓存旧消息"}}}, {"id": "current", "status": "completed", "items": []Object{{"id": "b", "text": "缓存第一条"}, {"id": "c", "text": "缓存第二条"}}}, {"id": "live", "status": "inProgress", "items": []Object{{"id": "d", "text": "新的实时回复"}}}}}
+	partial := Object{"turns": []Object{{"id": "current", "status": "completed", "items": []Object{{"id": "b", "text": "服务器修正第一条"}}}}}
+	for range 2 {
+		old = previewTranscript(old, partial)
+	}
+	turns := objects(old["turns"])
+	if len(turns) != 3 || str(turns[0], "id") != "older" || str(turns[1], "id") != "current" || str(turns[2], "id") != "live" || len(objects(turns[1]["items"])) != 2 || str(objects(turns[1]["items"])[0], "text") != "服务器修正第一条" {
+		t.Fatalf("partial history erased or duplicated cache: %+v", old)
+	}
 }
 
 func TestSmoothReplyOnlyAnimatesNewLiveSuffix(t *testing.T) {

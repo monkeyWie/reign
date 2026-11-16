@@ -12,6 +12,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/monkeyWie/reignhub/internal/connectivity"
 	"github.com/monkeyWie/reignhub/internal/control"
+	"github.com/monkeyWie/reignhub/internal/provider"
 	"github.com/monkeyWie/reignhub/internal/relay"
 	"github.com/pion/webrtc/v4"
 )
@@ -19,10 +20,15 @@ import (
 type Client struct {
 	wire       *wire
 	mu         sync.Mutex
-	pending    map[string]chan control.Response
+	pending    map[string]*pendingCall
 	done       chan struct{}
 	cache      map[string]snapshot
 	cacheBytes int
+}
+
+type pendingCall struct {
+	ctx       context.Context
+	responses chan control.Response
 }
 
 func Connect(ctx context.Context, p Pairing, opts Options) (*Client, error) {
@@ -53,7 +59,7 @@ func connectOnce(ctx context.Context, p Pairing, opts Options) (*Client, error) 
 	if err != nil {
 		return nil, err
 	}
-	c := &Client{pending: make(map[string]chan control.Response), done: make(chan struct{})}
+	c := &Client{pending: make(map[string]*pendingCall), done: make(chan struct{})}
 	w, err := newWire(context.Background(), ws, peer, p.Key, false, opts, func(data []byte) {
 		var r control.Response
 		if json.Unmarshal(data, &r) != nil {
@@ -64,8 +70,9 @@ func connectOnce(ctx context.Context, p Pairing, opts Options) (*Client, error) 
 		c.mu.Unlock()
 		if ch != nil {
 			select {
-			case ch <- r:
-			default:
+			case ch.responses <- r:
+			case <-ch.ctx.Done():
+			case <-c.done:
 			}
 		}
 	})
@@ -229,6 +236,8 @@ func (c *Client) Close() error {
 	return c.wire.ws.CloseNow()
 }
 func (c *Client) Call(ctx context.Context, r control.Request, out any) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	cacheKey := ""
 	var cached snapshot
 	if control.ReadOnly(r.Method) {
@@ -239,14 +248,16 @@ func (c *Client) Call(ctx context.Context, r control.Request, out any) error {
 		c.mu.Lock()
 		cached = c.cache[cacheKey]
 		c.mu.Unlock()
-		r.Revision = cached.revision
+		if !r.Progress {
+			r.Revision = cached.revision
+		}
 	}
 	if r.ID == "" {
 		r.ID = fmt.Sprintf("%s-%d", relay.ID(), nextRequest.Add(1))
 	}
-	ch := make(chan control.Response, 1)
+	ch := make(chan control.Response, 8)
 	c.mu.Lock()
-	c.pending[r.ID] = ch
+	c.pending[r.ID] = &pendingCall{ctx: ctx, responses: ch}
 	c.mu.Unlock()
 	defer func() { c.mu.Lock(); delete(c.pending, r.ID); c.mu.Unlock() }()
 	raw, err := json.Marshal(r)
@@ -259,30 +270,63 @@ func (c *Client) Call(ctx context.Context, r control.Request, out any) error {
 	if err = c.wire.sendContext(ctx, raw); err != nil {
 		return err
 	}
-	select {
-	case result := <-ch:
-		if result.Error != "" {
-			return errors.New(result.Error)
-		}
-		if result.NotModified {
-			if cacheKey == "" || cached.revision == "" || result.Revision != cached.revision {
-				return errors.New("invalid conditional response")
+	var history provider.TranscriptBuffer
+	historyBytes := 0
+	for {
+		select {
+		case result := <-ch:
+			if result.Partial {
+				if !r.Progress || r.Method != "transcript" {
+					return errors.New("unexpected partial response")
+				}
+				historyBytes += len(result.Result)
+				if historyBytes > 16<<20 {
+					return errors.New("消息历史超过 16 MiB，请缩小查询范围")
+				}
+				var fragment provider.Transcript
+				if err := json.Unmarshal(result.Result, &fragment); err != nil {
+					return err
+				}
+				history.Add(fragment)
+				if err := provider.ObserveTranscript(ctx, fragment); err != nil {
+					return err
+				}
+				continue
 			}
-			result.Result = cached.data
-		} else if cacheKey != "" && result.Revision != "" {
-			c.remember(cacheKey, snapshot{revision: result.Revision, data: result.Result})
+			if result.Error != "" {
+				return errors.New(result.Error)
+			}
+			if history.Seen {
+				var metadata provider.Transcript
+				if err := json.Unmarshal(result.Result, &metadata); err != nil {
+					return err
+				}
+				history.Add(metadata)
+				result.Result, err = json.Marshal(history.Transcript)
+				if err != nil {
+					return err
+				}
+			}
+			if result.NotModified {
+				if cacheKey == "" || cached.revision == "" || result.Revision != cached.revision {
+					return errors.New("invalid conditional response")
+				}
+				result.Result = cached.data
+			} else if cacheKey != "" && result.Revision != "" {
+				c.remember(cacheKey, snapshot{revision: result.Revision, data: result.Result})
+			}
+			if out != nil {
+				return json.Unmarshal(result.Result, out)
+			}
+			return nil
+		case <-ctx.Done():
+			if control.ReadOnly(r.Method) {
+				return fmt.Errorf("等待设备读取响应超时或已取消: %w", ctx.Err())
+			}
+			return fmt.Errorf("请求超时或取消；操作结果可能尚未返回，请刷新后再决定是否重试: %w", ctx.Err())
+		case <-c.done:
+			return errors.New("relay 已断开；请重新连接，刷新后再重试操作")
 		}
-		if out != nil {
-			return json.Unmarshal(result.Result, out)
-		}
-		return nil
-	case <-ctx.Done():
-		if control.ReadOnly(r.Method) {
-			return fmt.Errorf("等待设备读取响应超时或已取消: %w", ctx.Err())
-		}
-		return fmt.Errorf("请求超时或取消；操作结果可能尚未返回，请刷新后再决定是否重试: %w", ctx.Err())
-	case <-c.done:
-		return errors.New("relay 已断开；请重新连接，刷新后再重试操作")
 	}
 }
 

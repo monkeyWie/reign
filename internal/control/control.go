@@ -15,6 +15,7 @@ import (
 )
 
 type Request struct {
+	Progress       bool                   `json:"progress,omitempty"`
 	Probe          bool                   `json:"probe,omitempty"`
 	Fresh          bool                   `json:"fresh,omitempty"`
 	Params         json.RawMessage        `json:"params,omitempty"`
@@ -38,6 +39,7 @@ type Request struct {
 }
 
 type Response struct {
+	Partial     bool            `json:"partial,omitempty"`
 	ID          string          `json:"id"`
 	Result      json.RawMessage `json:"result,omitempty"`
 	Error       string          `json:"error,omitempty"`
@@ -173,7 +175,23 @@ func (d *Dispatcher) dispatch(ctx context.Context, r Request) (any, error) {
 	case "sessions":
 		return p.Sessions(ctx, r.Cursor)
 	case "transcript":
-		return p.Transcript(ctx, r.Session, r.Cursor)
+		if !r.Progress {
+			return p.Transcript(ctx, r.Session, r.Cursor)
+		}
+		parent, observed := ctx, false
+		ctx = provider.WithTranscriptObserver(ctx, func(fragment provider.Transcript) error {
+			observed = true
+			return provider.ObserveTranscript(parent, fragment)
+		})
+		transcript, err := p.Transcript(ctx, r.Session, r.Cursor)
+		if err == nil && !observed {
+			for _, turn := range transcript.Turns {
+				if err = provider.EmitTranscriptTurn(ctx, transcript, turn); err != nil {
+					break
+				}
+			}
+		}
+		return transcript, err
 	case "create":
 		return p.Create(ctx, r.Options)
 	case "send":

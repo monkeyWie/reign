@@ -215,10 +215,16 @@ func (p *Provider) Transcript(ctx context.Context, id, cursor string) (provider.
 		}
 	}
 	out := provider.Transcript{StreamEpoch: epoch, StreamCursor: boundary, Session: p.session(metadata.Thread), Turns: []provider.Turn{}, NextCursor: turns.NextCursor}
+	if err := provider.ObserveTranscript(ctx, out); err != nil {
+		return provider.Transcript{}, err
+	}
 	for i := len(turns.Data) - 1; i >= 0; i-- {
 		normalized := normalizeTurn(turns.Data[i])
 		p.attachments(ctx, id, metadata.Thread.Cwd, &normalized, turns.Data[i])
 		out.Turns = append(out.Turns, normalized)
+		if err := provider.EmitTranscriptTurn(ctx, out, normalized); err != nil {
+			return provider.Transcript{}, err
+		}
 	}
 	// Historical turns may retain inProgress after a client restart or a
 	// superseding turn. Only the newest turn on the latest page is actionable.

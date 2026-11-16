@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"time"
+
+	"github.com/monkeyWie/reignhub/internal/provider"
 )
 
 // All presentation state belongs to the UI loop. Watch, snapshots and approval
@@ -72,7 +74,37 @@ func (w *sessionStream) startSnapshot() {
 	w.syncing(true)
 	started, epoch := time.Now(), w.epoch
 	go func() {
-		v, err := rpc(w.ctx, w.s.api, w.target, w.provider, w.session, "transcript", Object{"fresh": true})
+		var history provider.TranscriptBuffer
+		var published time.Time
+		ctx := provider.WithTranscriptObserver(w.ctx, func(fragment provider.Transcript) error {
+			history.Add(fragment)
+			if len(history.Turns) == 0 || !published.IsZero() && time.Since(published) < 16*time.Millisecond {
+				return w.ctx.Err()
+			}
+			published = time.Now()
+			// Copy before posting: the receiver continues assembling the snapshot.
+			raw, err := json.Marshal(history.Transcript)
+			if err != nil {
+				return err
+			}
+			partial := Object{}
+			if err := json.Unmarshal(raw, &partial); err != nil {
+				return err
+			}
+			w.s.cx.Post(func() {
+				if !w.current() || w.invalid || epoch != w.epoch || str(partial, "streamEpoch") != "" && str(partial, "streamEpoch") != w.epoch {
+					return
+				}
+				if len(objects(partial["turns"])) == 0 {
+					return
+				}
+				preview := previewTranscript(w.s.transcript, partial)
+				preview, _ = applyEvents(preview, w.replayAfter(partial))
+				w.s.setTranscript(preview)
+			})
+			return w.ctx.Err()
+		})
+		v, err := rpc(ctx, w.s.api, w.target, w.provider, w.session, "transcript", Object{"fresh": true, "progress": true})
 		w.s.cx.Post(func() {
 			if !w.current() {
 				return
@@ -99,17 +131,8 @@ func (w *sessionStream) startSnapshot() {
 			// A completed history response may predate live text already on screen.
 			// Replay everything received since the request began; UTF-16 offsets make
 			// overlapping snapshot/delta content idempotent.
-			replay := w.journal
-			if str(t, "streamEpoch") != "" {
-				replay = nil
-				for _, event := range w.journal {
-					if number(event, "id") > number(t, "streamCursor") {
-						replay = append(replay, event)
-					}
-				}
-			}
 			var refresh bool
-			t, refresh = applyEvents(t, replay)
+			t, refresh = applyEvents(t, w.replayAfter(t))
 			w.snapshotAgain = w.snapshotAgain || refresh
 			w.journal = nil
 			w.baseline = true
@@ -126,6 +149,62 @@ func (w *sessionStream) startSnapshot() {
 			}
 		})
 	}()
+}
+
+func (w *sessionStream) replayAfter(t Object) []Object {
+	if str(t, "streamEpoch") == "" {
+		return w.journal
+	}
+	events := []Object{}
+	for _, event := range w.journal {
+		if number(event, "id") > number(t, "streamCursor") {
+			events = append(events, event)
+		}
+	}
+	return events
+}
+
+// A fragment is an addition, never an authoritative deletion. Keep cached
+// messages and the live tail until the complete snapshot can reconcile them.
+func previewTranscript(old, partial Object) Object {
+	previous := map[string]Object{}
+	for _, turn := range objects(old["turns"]) {
+		previous[str(turn, "id")] = turn
+	}
+	next := copyObject(partial)
+	turns := []Object{}
+	for _, turn := range objects(partial["turns"]) {
+		value := copyObject(turn)
+		items := append([]Object{}, objects(previous[str(turn, "id")]["items"])...)
+		indices := map[string]int{}
+		for i, item := range items {
+			indices[str(item, "id")] = i
+		}
+		for _, item := range objects(turn["items"]) {
+			if i, ok := indices[str(item, "id")]; ok {
+				items[i] = item
+			} else {
+				indices[str(item, "id")] = len(items)
+				items = append(items, item)
+			}
+		}
+		value["items"] = items
+		turns = append(turns, value)
+	}
+	next["turns"] = turns
+	next = mergeLatest(old, next)
+	turns = append([]Object{}, objects(next["turns"])...)
+	seen := map[string]bool{}
+	for _, turn := range turns {
+		seen[str(turn, "id")] = true
+	}
+	for _, turn := range objects(old["turns"]) {
+		if !seen[str(turn, "id")] {
+			turns = append(turns, turn)
+		}
+	}
+	next["turns"] = turns
+	return next
 }
 func (w *sessionStream) batch(b Object) {
 	if !w.current() {

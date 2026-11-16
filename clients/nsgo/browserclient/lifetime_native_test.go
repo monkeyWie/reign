@@ -37,7 +37,7 @@ func TestBusinessReadHasNoTotalTimeout(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		crypto, _ := newCryptor(strings.Repeat("ab", 32))
-		c := &Client{ctx: ctx, cancel: cancel, crypto: crypto, pending: map[string]chan Object{}, cache: map[string]cached{}, chunks: map[string]*assembly{}}
+		c := &Client{ctx: ctx, cancel: cancel, crypto: crypto, pending: map[string]*pendingCall{}, cache: map[string]cached{}, chunks: map[string]*assembly{}}
 		c.pc = &delayedPeer{client: c}
 		defer c.Close()
 		value, err := c.Call(ctx, Object{"method": "transcript"})

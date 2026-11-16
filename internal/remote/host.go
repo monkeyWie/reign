@@ -3,6 +3,7 @@ package remote
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log"
 	"sync"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/monkeyWie/reignhub/internal/connectivity"
 	"github.com/monkeyWie/reignhub/internal/control"
+	"github.com/monkeyWie/reignhub/internal/provider"
 	"github.com/monkeyWie/reignhub/internal/relay"
 )
 
@@ -172,7 +174,43 @@ func serveHostObserved(ctx context.Context, p Pairing, opts Options, d *control.
 					if deviceID != "" {
 						req.ID = deviceID + "/" + req.ID
 					}
+					partialSent := false
+					if req.Progress && req.Method == "transcript" {
+						callCtx = provider.WithTranscriptObserver(callCtx, func(fragment provider.Transcript) error {
+							if opts.ResolveKey != nil {
+								if _, ok := opts.ResolveKey(deviceID); !ok {
+									return errors.New("远控授权已过期")
+								}
+							}
+							if err := peer.authorize(p.Host, deviceID, req); err != nil {
+								return err
+							}
+							raw, err := json.Marshal(fragment)
+							if err != nil {
+								return err
+							}
+							encoded, err := json.Marshal(control.Response{ID: originalID, Partial: true, Result: raw})
+							if err != nil {
+								return err
+							}
+							if len(encoded) > 16<<20 {
+								return errors.New("消息超过 16 MiB")
+							}
+							if err := peer.sendContext(callCtx, encoded); err != nil {
+								return err
+							}
+							partialSent = true
+							return nil
+						})
+					}
 					result := d.HandleRemote(callCtx, req)
+					if partialSent && result.Error == "" {
+						var metadata provider.Transcript
+						if json.Unmarshal(result.Result, &metadata) == nil {
+							metadata.Turns = nil
+							result.Result, _ = json.Marshal(metadata)
+						}
+					}
 					result.ID = originalID
 					if opts.ResolveKey != nil {
 						if _, ok := opts.ResolveKey(deviceID); !ok {

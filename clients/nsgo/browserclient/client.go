@@ -18,6 +18,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/monkeyWie/reignhub/internal/connectivity"
 	"github.com/monkeyWie/reignhub/internal/control"
+	"github.com/monkeyWie/reignhub/internal/provider"
 )
 
 type Object = map[string]any
@@ -73,10 +74,15 @@ type Client struct {
 	signalLost   atomic.Bool
 	progress     func(connectivity.Progress)
 	pc           peer
-	pending      map[string]chan Object
+	pending      map[string]*pendingCall
 	chunks       map[string]*assembly
 	cache        map[string]cached
 	cacheBytes   int
+}
+
+type pendingCall struct {
+	ctx       context.Context
+	responses chan Object
 }
 
 func id() string {
@@ -112,7 +118,7 @@ func connectOnce(ctx context.Context, p Pairing) (*Client, error) {
 	connectivity.Note(ctx, "signal", "signal", "信令连接已建立", u.Host, "success")
 	// Connection lifetime outlives pairing and all ordinary business requests.
 	life, cancel := context.WithCancel(context.Background())
-	c := &Client{ctx: life, cancel: cancel, ws: ws, p: p, id: welcome.Peer, nonce: id() + id(), ready: make(chan struct{}), pending: map[string]chan Object{}, chunks: map[string]*assembly{}, cache: map[string]cached{}, progress: connectivity.Observer(ctx)}
+	c := &Client{ctx: life, cancel: cancel, ws: ws, p: p, id: welcome.Peer, nonce: id() + id(), ready: make(chan struct{}), pending: map[string]*pendingCall{}, chunks: map[string]*assembly{}, cache: map[string]cached{}, progress: connectivity.Observer(ctx)}
 	c.heartbeat.Store(time.Now().UnixNano())
 	c.base, e = newCryptor(sum("reign/p2p/peer/" + c.id + "/" + p.Key))
 	if e != nil {
@@ -628,12 +634,15 @@ func (c *Client) response(b []byte) {
 	c.mu.Unlock()
 	if pending != nil {
 		select {
-		case pending <- v:
-		default:
+		case pending.responses <- v:
+		case <-pending.ctx.Done():
+		case <-c.ctx.Done():
 		}
 	}
 }
 func (c *Client) Call(ctx context.Context, request Object) (any, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	r := Object{}
 	for k, v := range request {
 		r[k] = v
@@ -645,7 +654,7 @@ func (c *Client) Call(ctx context.Context, request Object) (any, error) {
 	c.mu.Lock()
 	previous := c.cache[cacheKey]
 	c.mu.Unlock()
-	if read && previous.revision != "" {
+	if read && previous.revision != "" && r["progress"] != true {
 		r["revision"] = previous.revision
 	}
 	requestID, _ := r["id"].(string)
@@ -653,13 +662,13 @@ func (c *Client) Call(ctx context.Context, request Object) (any, error) {
 		requestID = id()
 		r["id"] = requestID
 	}
-	pending := make(chan Object, 1)
+	pending := make(chan Object, 8)
 	c.mu.Lock()
 	if c.pending[requestID] != nil {
 		c.mu.Unlock()
 		return nil, errors.New("重复的指令 ID")
 	}
-	c.pending[requestID] = pending
+	c.pending[requestID] = &pendingCall{ctx: ctx, responses: pending}
 	c.mu.Unlock()
 	defer func() { c.mu.Lock(); delete(c.pending, requestID); c.mu.Unlock() }()
 	raw, _ = json.Marshal(r)
@@ -670,18 +679,45 @@ func (c *Client) Call(ctx context.Context, request Object) (any, error) {
 		return nil, e
 	}
 	var response Object
-	select {
-	case response = <-pending:
-	case <-ctx.Done():
-		if read || method == "watch" || method == "attachment.read" {
-			return nil, ctx.Err()
+	var history provider.TranscriptBuffer
+	historyBytes := 0
+	for {
+		select {
+		case response = <-pending:
+			if response["partial"] == true {
+				if method != "transcript" || r["progress"] != true {
+					return nil, errors.New("unexpected partial response")
+				}
+				raw, err := json.Marshal(response["result"])
+				if err != nil {
+					return nil, err
+				}
+				historyBytes += len(raw)
+				if historyBytes > 16<<20 {
+					return nil, errors.New("消息历史超过 16 MiB，请缩小查询范围")
+				}
+				var fragment provider.Transcript
+				if err := json.Unmarshal(raw, &fragment); err != nil {
+					return nil, err
+				}
+				history.Add(fragment)
+				if err := provider.ObserveTranscript(ctx, fragment); err != nil {
+					return nil, err
+				}
+				continue
+			}
+		case <-ctx.Done():
+			if read || method == "watch" || method == "attachment.read" {
+				return nil, ctx.Err()
+			}
+			return nil, fmt.Errorf("结果尚未确认，请刷新后再决定是否重试: %w", ctx.Err())
+		case <-c.ctx.Done():
+			if read {
+				return nil, errors.New("连接已断开，请重新连接")
+			}
+			return nil, errors.New("连接已断开，指令结果尚未确认")
 		}
-		return nil, fmt.Errorf("结果尚未确认，请刷新后再决定是否重试: %w", ctx.Err())
-	case <-c.ctx.Done():
-		if read {
-			return nil, errors.New("连接已断开，请重新连接")
-		}
-		return nil, errors.New("连接已断开，指令结果尚未确认")
+		break
 	}
 	if e, _ := response["error"].(string); e != "" {
 		return nil, errors.New(e)
@@ -693,6 +729,24 @@ func (c *Client) Call(ctx context.Context, request Object) (any, error) {
 		return previous.result, nil
 	}
 	result := response["result"]
+	if history.Seen {
+		raw, err := json.Marshal(result)
+		if err != nil {
+			return nil, err
+		}
+		var metadata provider.Transcript
+		if err := json.Unmarshal(raw, &metadata); err != nil {
+			return nil, err
+		}
+		history.Add(metadata)
+		raw, err = json.Marshal(history.Transcript)
+		if err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(raw, &result); err != nil {
+			return nil, err
+		}
+	}
 	if read {
 		revision, _ := response["revision"].(string)
 		b, _ := json.Marshal(result)
