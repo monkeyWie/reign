@@ -64,8 +64,23 @@ func (s *State) restoreOutgoing(t Object) {
 
 func (s *State) snapshotProjection() Object {
 	t := copyObject(s.transcript)
-	t["localMessages"] = s.outgoing[s.key()]
+	t["localMessages"] = snapshotOutgoing(s.outgoing[s.key()])
 	return t
+}
+
+func snapshotOutgoing(messages []*outgoingMessage) []*outgoingMessage {
+	// Outgoing delivery status is mutable; history objects are immutable.
+	// Capture the small local overlay so the writer can serialize off the UI loop.
+	pending := make([]*outgoingMessage, 0, len(messages))
+	for _, message := range messages {
+		value := *message
+		value.Known = make(map[string]bool, len(message.Known))
+		for id, known := range message.Known {
+			value.Known[id] = known
+		}
+		pending = append(pending, &value)
+	}
+	return pending
 }
 
 func (s *State) queueOutgoing(body string, uploads []*Upload) *outgoingMessage {
@@ -122,7 +137,7 @@ func matchesOutgoing(m *outgoingMessage, row Message) bool {
 }
 
 func (s *State) reconcileOutgoing(freshSince time.Time) {
-	if _, exists := s.outgoing[s.key()]; !exists {
+	if len(s.outgoing[s.key()]) == 0 {
 		return
 	}
 	rows := messages(s.transcript)

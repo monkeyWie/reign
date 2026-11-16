@@ -109,39 +109,41 @@ func (s *State) cataloguePending() bool {
 }
 
 func (s *State) emptyCatalogue(cx *core.Scope) core.Node {
-	return core.Dynamic(func(cx *core.Scope) core.Node {
-		s.read()
-		if len(s.sessions) > 0 {
-			return core.View{}
-		}
-		children := []core.Node{}
-		text := "暂无本地会话，连接后会自动同步。"
-		if s.cataloguePending() {
-			children = append(children, ui.Spinner{TestID: "sessions-loading", Label: "正在加载会话", Size: 18})
-			text = "正在同步会话…"
-			if s.cacheLoading {
-				text = "正在读取本地会话…"
-			}
-		} else if s.connected() {
-			text = "暂无会话，可以新建聊天。"
-		}
-		children = append(children, label(cx, text, 12, true))
-		return core.View{TestID: "session-list-placeholder", Style: core.Style{Padding: core.All(24), Gap: 12, AlignItems: core.AlignCenter}, Children: children}
-	})
+	return core.Show{When: func() bool { s.read(); return len(s.sessions) == 0 }, Then: func(cx *core.Scope) core.Node {
+		return core.View{TestID: "session-list-placeholder", Style: core.Style{Padding: core.All(24), Gap: 12, AlignItems: core.AlignCenter}, Children: []core.Node{
+			core.Show{When: func() bool { s.read(); return s.cataloguePending() }, Then: func(*core.Scope) core.Node {
+				return ui.Spinner{TestID: "sessions-loading", Label: "正在加载会话", Size: 18}
+			}},
+			dynamicText(cx, func() string {
+				s.read()
+				if s.cacheLoading {
+					return "正在读取本地会话…"
+				}
+				if s.cataloguePending() {
+					return "正在同步会话…"
+				}
+				if s.connected() {
+					return "暂无会话，可以新建聊天。"
+				}
+				return "暂无本地会话，连接后会自动同步。"
+			}, 12, true),
+		}}
+	}}
 }
 
 func (s *State) emptyTranscript(cx *core.Scope) core.Node {
 	return core.Show{When: func() bool { s.read(); return s.selected != nil && s.transcript == nil }, Then: func(cx *core.Scope) core.Node {
-		return core.Dynamic(func(cx *core.Scope) core.Node {
+		pending := func() bool {
 			s.read()
-			children := []core.Node{}
-			text := "此会话尚无本地消息，连接后会自动加载。"
-			if s.transcriptLoading || s.transcriptSyncing || s.connection(s.target).reconnecting {
-				children = append(children, ui.Spinner{TestID: "transcript-loading", Label: "正在加载消息", Size: 20})
-				text = "正在加载消息…"
-			}
-			children = append(children, label(cx, text, 13, true))
-			return core.View{TestID: "transcript-placeholder", Style: core.Style{Position: core.Absolute, Top: core.Pct(40), Left: core.Pt(24), Right: core.Pt(24), Gap: 12, AlignItems: core.AlignCenter}, Children: children}
-		})
+			return s.transcriptLoading || s.transcriptSyncing || s.connection(s.target).reconnecting
+		}
+		return core.View{TestID: "transcript-placeholder", Style: core.Style{Position: core.Absolute, Top: core.Pct(40), Left: core.Pt(24), Right: core.Pt(24), Gap: 12, AlignItems: core.AlignCenter}, Children: []core.Node{
+			core.Show{When: pending, Then: func(*core.Scope) core.Node {
+				return ui.Spinner{TestID: "transcript-loading", Label: "正在加载消息", Size: 20}
+			}},
+			dynamicText(cx, func() string {
+				return choose(pending(), "正在加载消息…", "此会话尚无本地消息，连接后会自动加载。")
+			}, 13, true),
+		}}
 	}}
 }

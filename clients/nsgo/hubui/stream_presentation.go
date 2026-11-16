@@ -75,6 +75,6 @@ func (s *State) syncIndicator(cx *core.Scope) core.Node {
 				return core.Style{Background: palette(cx).mutedText, Animated: &core.AnimatedStyle{Opacity: opacity}}
 			}})
 		}
-		return core.View{TestID: "transcript-syncing", Role: core.RoleGroup, Label: "正在同步消息", Style: core.Style{Height: core.Pt(22), Direction: core.Row, Gap: 5, AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter}, Children: dots}
+		return core.View{TestID: "transcript-syncing", Role: core.RoleGroup, Label: "正在同步消息", PointerEvents: core.PointerEventsNone, Style: core.Style{Position: core.Absolute, Bottom: core.Pt(0), Left: core.Pt(0), Right: core.Pt(0), Height: core.Pt(22), ZIndex: 2, Direction: core.Row, Gap: 5, AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter}, Children: dots}
 	}}
 }

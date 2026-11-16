@@ -1,7 +1,6 @@
 package hubui
 
 import (
-	"encoding/json"
 	"fmt"
 	"regexp"
 	"sort"
@@ -320,10 +319,18 @@ func mergeLatest(old, latest Object) Object {
 // Event offsets are UTF-16, matching Codex and the existing Flutter client.
 // Snapshots can already contain an event; overlap must be idempotent.
 func applyEvents(source Object, events []Object) (Object, bool) {
-	encoded, _ := json.Marshal(source)
-	out := Object{}
-	_ = json.Unmarshal(encoded, &out)
-	turns := objects(out["turns"])
+	if len(events) == 0 {
+		return source, false
+	}
+	// Copy only the paths changed by this batch. Serializing the entire history
+	// for every live delta blocks the UI loop on large conversations.
+	out := copyObject(source)
+	turns := append([]Object(nil), objects(source["turns"])...)
+	indices := make(map[string]int, len(turns))
+	for i, turn := range turns {
+		indices[str(turn, "id")] = i
+	}
+	editable := map[string]bool{}
 	reset := false
 	for _, e := range events {
 		kind := str(e, "kind")
@@ -335,17 +342,18 @@ func applyEvents(source Object, events []Object) (Object, bool) {
 		if id == "" {
 			continue
 		}
-		var turn Object
-		for _, t := range turns {
-			if str(t, "id") == id {
-				turn = t
-				break
-			}
+		i, exists := indices[id]
+		if !exists {
+			i = len(turns)
+			indices[id] = i
+			turns = append(turns, Object{"id": id, "status": "inProgress", "items": []Object{}})
 		}
-		if turn == nil {
-			turn = Object{"id": id, "status": "inProgress", "items": []Object{}}
-			turns = append(turns, turn)
+		if !editable[id] {
+			turns[i] = copyObject(turns[i])
+			turns[i]["items"] = append([]Object(nil), objects(turns[i]["items"])...)
+			editable[id] = true
 		}
+		turn := turns[i]
 		terminal := str(turn, "status") == "completed" || str(turn, "status") == "failed" || str(turn, "status") == "interrupted"
 		if kind == "turn" {
 			if !terminal || str(e, "status") != "inProgress" {

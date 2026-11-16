@@ -465,6 +465,7 @@ func (s *State) older() {
 				older = append(older, t)
 			}
 		}
+		s.transcript = copyObject(s.transcript)
 		s.transcript["turns"] = append(older, current...)
 		s.transcript["nextCursor"] = page["nextCursor"]
 		s.rebuildMessages()

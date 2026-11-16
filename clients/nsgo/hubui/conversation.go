@@ -32,10 +32,15 @@ func (s *State) conversation(cx *core.Scope, narrow bool) core.Node {
 	listRef := s.timeline
 	atBottom := core.NewSignal(cx, true)
 	viewport := core.NewSignal(cx, core.Size{})
+	// Connection/approval polling must not rebuild the entire list's data and
+	// navigation index. Message projections are replaced, never edited in place.
+	source := core.NewMemoFunc(cx, func() []Message { s.read(); return s.messageRows }, func(a, b []Message) bool {
+		return len(a) == len(b) && (len(a) == 0 || &a[0] == &b[0])
+	})
 	rows := core.NewMemoFunc(cx, func() []Message {
-		s.read()
-		out := make([]Message, len(s.messageRows))
-		for i, m := range s.messageRows {
+		messages := source.Get()
+		out := make([]Message, len(messages))
+		for i, m := range messages {
 			out[len(out)-1-i] = m
 		}
 		return out
@@ -107,14 +112,14 @@ func (s *State) conversation(cx *core.Scope, narrow bool) core.Node {
 			return button(cx, "load-older", "加载更早消息", nil, "ghost", s.older)
 		}}}},
 	}
-	timelineChildren := []core.Node{list, s.emptyTranscript(cx), core.Show{When: func() bool { return !s.narrowLayout() }, Then: func(cx *core.Scope) core.Node { return s.messageNavigation(cx, rows, listRef, viewport, tailCount) }}, core.Show{When: func() bool { return !atBottom.Get() }, Then: func(cx *core.Scope) core.Node {
+	timelineChildren := []core.Node{list, s.emptyTranscript(cx), s.syncIndicator(cx), core.Show{When: func() bool { return !s.narrowLayout() }, Then: func(cx *core.Scope) core.Node { return s.messageNavigation(cx, rows, listRef, viewport, tailCount) }}, core.Show{When: func() bool { return !atBottom.Get() }, Then: func(cx *core.Scope) core.Node {
 		return core.View{Style: core.Style{Position: core.Absolute, Bottom: core.Pt(12), Right: core.Pt(40)}, Children: []core.Node{button(cx, "jump-to-latest", "回到最新", lucide.ArrowDown, "outline", func() { listRef.ScrollToIndexAt(0, 1, 0, true) })}}
 	}}}
 	if floatingHeader {
 		timelineChildren = append(timelineChildren, s.compactConversationHeader(cx, narrow))
 	}
 	children = append(children, core.View{TestID: "timeline", Style: fill, Children: timelineChildren})
-	children = append(children, s.syncIndicator(cx), s.composer(cx))
+	children = append(children, s.composer(cx))
 	return core.View{TestID: "conversation", Style: fill, StyleFunc: func() core.Style { return s.workspaceSurface(cx) }, Children: children}
 }
 

@@ -74,37 +74,22 @@ func (w *sessionStream) startSnapshot() {
 	w.syncing(true)
 	started, epoch := time.Now(), w.epoch
 	go func() {
-		var history provider.TranscriptBuffer
-		var published time.Time
-		ctx := provider.WithTranscriptObserver(w.ctx, func(fragment provider.Transcript) error {
-			history.Add(fragment)
-			if len(history.Turns) == 0 || !published.IsZero() && time.Since(published) < 16*time.Millisecond {
-				return w.ctx.Err()
+		previewCtx, stopPreviews := context.WithCancel(w.ctx)
+		defer stopPreviews()
+		observe := observeTranscriptPreviews(previewCtx, w.s.cx.Post, func(partial Object) {
+			if !w.current() || w.invalid || epoch != w.epoch || str(partial, "streamEpoch") != "" && str(partial, "streamEpoch") != w.epoch {
+				return
 			}
-			published = time.Now()
-			// Copy before posting: the receiver continues assembling the snapshot.
-			raw, err := json.Marshal(history.Transcript)
-			if err != nil {
-				return err
+			if len(objects(partial["turns"])) == 0 {
+				return
 			}
-			partial := Object{}
-			if err := json.Unmarshal(raw, &partial); err != nil {
-				return err
-			}
-			w.s.cx.Post(func() {
-				if !w.current() || w.invalid || epoch != w.epoch || str(partial, "streamEpoch") != "" && str(partial, "streamEpoch") != w.epoch {
-					return
-				}
-				if len(objects(partial["turns"])) == 0 {
-					return
-				}
-				preview := previewTranscript(w.s.transcript, partial)
-				preview, _ = applyEvents(preview, w.replayAfter(partial))
-				w.s.setTranscript(preview)
-			})
-			return w.ctx.Err()
+			preview := previewTranscript(w.s.transcript, partial)
+			preview, _ = applyEvents(preview, w.replayAfter(partial))
+			w.s.setTranscript(preview)
 		})
+		ctx := provider.WithTranscriptObserver(w.ctx, observe)
 		v, err := rpc(ctx, w.s.api, w.target, w.provider, w.session, "transcript", Object{"fresh": true, "progress": true})
+		stopPreviews()
 		w.s.cx.Post(func() {
 			if !w.current() {
 				return

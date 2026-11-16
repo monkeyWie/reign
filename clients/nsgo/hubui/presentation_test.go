@@ -1,9 +1,45 @@
 package hubui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
+
+func TestLiveDeltaDoesNotMutateEarlierHistoryOrCachedSnapshot(t *testing.T) {
+	source := Object{"turns": []Object{
+		{"id": "history", "status": "completed", "items": []Object{{"id": "old", "role": "assistant", "text": "已缓存历史"}}},
+		{"id": "live", "status": "inProgress", "items": []Object{{"id": "answer", "role": "assistant", "text": "正在"}}},
+	}}
+	got, refresh := applyEvents(source, []Object{
+		{"kind": "text", "turnId": "live", "itemId": "answer", "offset": 2, "delta": "回复"},
+		{"kind": "item", "turnId": "live", "itemId": "new", "item": Object{"id": "new", "role": "assistant", "text": "下一条"}},
+		{"kind": "turn", "turnId": "live", "status": "completed"},
+	})
+	oldTurn := objects(source["turns"])[1]
+	if str(oldTurn, "status") != "inProgress" || len(objects(oldTurn["items"])) != 1 || str(objects(oldTurn["items"])[0], "text") != "正在" {
+		t.Fatal("live event modified a cached snapshot", source)
+	}
+	rows := messages(got)
+	if !refresh || len(rows) != 3 || rows[0].Text != "已缓存历史" || rows[1].Text != "正在回复" || rows[2].Text != "下一条" {
+		t.Fatal("copy-on-write lost event ordering or history", got)
+	}
+}
+
+func BenchmarkApplyLiveDeltaLargeHistory(b *testing.B) {
+	turns := make([]Object, 3000)
+	for i := range turns {
+		turns[i] = Object{"id": fmt.Sprint(i), "status": "completed", "items": []Object{{"id": "answer", "role": "assistant", "text": strings.Repeat("历史消息", 512)}}}
+	}
+	turns = append(turns, Object{"id": "live", "status": "inProgress", "items": []Object{}})
+	source := Object{"turns": turns}
+	events := []Object{{"kind": "text", "turnId": "live", "itemId": "answer", "offset": 0, "delta": "实时回复"}}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		applyEvents(source, events)
+	}
+}
 
 func TestQuestionReplyPresentationKeepsOriginalMessage(t *testing.T) {
 	source := "<send_user_message_question_reply>\n[{\"questionItemId\":\"internal\",\"question\":\"允许吗？\",\"answer\":\"允许\"}]\n</send_user_message_question_reply>"

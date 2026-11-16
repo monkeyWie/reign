@@ -9,7 +9,7 @@ import (
 
 type snapshotWrite struct {
 	target, provider, session string
-	data                      []byte
+	transcript                Object
 }
 
 // A single writer preserves ordering. Coalesce repeated streaming updates so
@@ -38,7 +38,8 @@ func newSnapshotWriter(ctx context.Context, api API) *snapshotWriter {
 					return
 				}
 				var transcript any
-				if json.Unmarshal(item.data, &transcript) == nil {
+				data, err := json.Marshal(item.transcript)
+				if err == nil && json.Unmarshal(data, &transcript) == nil {
 					_, _ = api.Call(ctx, "client.snapshot", Object{"provider": item.provider, "session": item.session, "transcript": transcript}, item.target, nil)
 				}
 			}
@@ -58,13 +59,13 @@ func (s *State) writeSnapshot(target, provider, session string, transcript Objec
 	if s.snapshots == nil {
 		return
 	}
-	b, err := json.Marshal(transcript)
-	if err != nil {
-		return
+	transcript = copyObject(transcript)
+	if pending, ok := transcript["localMessages"].([]*outgoingMessage); ok {
+		transcript["localMessages"] = snapshotOutgoing(pending)
 	}
 	w := s.snapshots
 	w.mu.Lock()
-	w.pending[target+"|"+provider+"|"+session] = snapshotWrite{target, provider, session, b}
+	w.pending[target+"|"+provider+"|"+session] = snapshotWrite{target, provider, session, transcript}
 	w.mu.Unlock()
 	select {
 	case w.wake <- struct{}{}:
