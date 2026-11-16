@@ -48,6 +48,7 @@ type State struct {
 	models                                                  []Object
 	messageRows                                             []Message
 	uploads                                                 []*Upload
+	downloadTask                                            *attachmentDownload
 	images                                                  map[string][]byte
 	loadingImages                                           map[string]bool
 	preview                                                 []Object

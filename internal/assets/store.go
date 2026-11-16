@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/monkeyWie/reignhub/internal/provider"
+	"github.com/monkeyWie/reignhub/pkg/attachmentmime"
 	"golang.org/x/image/draw"
 	_ "golang.org/x/image/webp"
 )
@@ -202,7 +203,7 @@ func (s *Store) preserve(ctx context.Context, scope, id, name string, in io.Read
 	defer file.Close()
 	head := make([]byte, 512)
 	used, _ := file.Read(head)
-	r.Meta.MIME = http.DetectContentType(head[:used])
+	r.Meta.MIME = attachmentmime.ForFile(r.Meta.Name, http.DetectContentType(head[:used]))
 	if strings.HasPrefix(r.Meta.MIME, "image/") && r.Meta.MIME != "image/svg+xml" {
 		r.Meta.Kind = "image"
 		_, _ = file.Seek(0, io.SeekStart)

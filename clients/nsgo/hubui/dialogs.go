@@ -20,6 +20,9 @@ import (
 )
 
 func (s *State) dialogView(cx *core.Scope, kind string) core.Node {
+	if kind == "attachment-download" {
+		return s.downloadView(cx)
+	}
 	if kind == "settings" || strings.HasPrefix(kind, "settings:") {
 		return s.preferences(cx, strings.TrimPrefix(kind, "settings:"))
 	}

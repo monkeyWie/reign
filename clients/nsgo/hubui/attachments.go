@@ -11,7 +11,10 @@ import (
 	"net/http"
 	"path"
 	"strings"
+	"sync"
 	"sync/atomic"
+
+	"golang.org/x/sync/errgroup"
 
 	"github.com/nsgo-dev/nsgo/core"
 	"github.com/nsgo-dev/nsgo/icons/lucide"
@@ -227,60 +230,113 @@ func (s *State) uploadPreviews(cx *core.Scope) core.Node {
 }
 
 func (s *State) attachmentBytes(ctx context.Context, target, p, session string, a Object, thumbnail bool) ([]byte, error) {
+	return s.attachmentBytesProgress(ctx, target, p, session, a, thumbnail, nil)
+}
+
+// Read immutable chunks with bounded concurrency, checking every offset and the
+// final digest. Progress counts bytes actually received, never queued requests.
+func (s *State) attachmentBytesProgress(ctx context.Context, target, p, session string, a Object, thumbnail bool, progress func(int64, int64)) ([]byte, error) {
 	key := p + "|" + session + "|" + str(a, "id") + fmt.Sprint("|", thumbnail)
 	cached, _ := s.api.Call(ctx, "client.assetCache.get", Object{"key": key}, target, nil)
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
 	if b, e := base64.StdEncoding.DecodeString(str(object(cached), "data")); e == nil && len(b) > 0 && (thumbnail || hashBytes(b) == str(a, "sha256")) {
+		if progress != nil {
+			progress(int64(len(b)), int64(len(b)))
+		}
 		return b, nil
 	}
 	if str(a, "state") != "ready" {
 		return nil, fmt.Errorf("源文件已失效")
 	}
-	var out []byte
-	var expected string
-	var size int64
-	for {
+	const chunkSize = 48 << 10
+	read := func(ctx context.Context, offset int64) (Object, []byte, error) {
 		var v any
-		var e error
+		var err error
 		for attempt := 0; attempt < 3; attempt++ {
-			v, e = rpc(ctx, s.api, target, p, session, "attachment.read", Object{"params": Object{"id": a["id"], "offset": len(out), "thumbnail": thumbnail}})
-			if e == nil {
+			if ctx.Err() != nil {
+				return nil, nil, ctx.Err()
+			}
+			v, err = rpc(ctx, s.api, target, p, session, "attachment.read", Object{"params": Object{"id": a["id"], "offset": offset, "thumbnail": thumbnail}})
+			if err == nil {
 				break
 			}
-			if ctx.Err() != nil {
-				return nil, ctx.Err()
-			}
 		}
-		if e != nil {
-			return nil, e
+		if err != nil {
+			return nil, nil, err
 		}
 		r := object(v)
-		if len(out) == 0 {
-			size = number(r, "size")
-			expected = str(r, "sha256")
-			if size < 0 || size > 50<<20 {
-				return nil, fmt.Errorf("附件大小无效")
-			}
+		chunk, err := base64.StdEncoding.DecodeString(str(r, "data"))
+		if err != nil {
+			return nil, nil, err
 		}
-		if number(r, "offset") != int64(len(out)) || number(r, "size") != size || str(r, "sha256") != expected {
-			return nil, fmt.Errorf("附件传输发生变化")
+		return r, chunk, nil
+	}
+	first, chunk, err := read(ctx, 0)
+	if err != nil {
+		return nil, err
+	}
+	size, expected := number(first, "size"), str(first, "sha256")
+	if size < 0 || size > 50<<20 {
+		return nil, fmt.Errorf("附件大小无效")
+	}
+	if !thumbnail && expected != str(a, "sha256") {
+		return nil, fmt.Errorf("附件完整性校验失败")
+	}
+	out := make([]byte, int(size))
+	accept := func(r Object, chunk []byte, offset int64) error {
+		if number(r, "offset") != offset || number(r, "size") != size || str(r, "sha256") != expected {
+			return fmt.Errorf("附件传输发生变化")
 		}
-		chunk, e := base64.StdEncoding.DecodeString(str(r, "data"))
-		if e != nil {
-			return nil, e
+		end := offset + int64(len(chunk))
+		if int64(len(chunk)) != min(int64(chunkSize), size-offset) || end > size || flag(r, "eof") != (end == size) {
+			return fmt.Errorf("附件分片无效")
 		}
-		if len(chunk) > 48<<10 || int64(len(out)+len(chunk)) > size {
-			return nil, fmt.Errorf("附件分片无效")
-		}
-		out = append(out, chunk...)
-		if flag(r, "eof") {
-			if int64(len(out)) != size || hashBytes(out) != expected || !thumbnail && expected != str(a, "sha256") {
-				return nil, fmt.Errorf("附件完整性校验失败")
-			}
+		copy(out[offset:end], chunk)
+		return nil
+	}
+	if err = accept(first, chunk, 0); err != nil {
+		return nil, err
+	}
+	var progressMu sync.Mutex
+	received := int64(len(chunk))
+	if progress != nil {
+		progress(received, size)
+	}
+	group, downloadCtx := errgroup.WithContext(ctx)
+	// One metadata chunk, then at most four in-flight reads. Keep capacity for
+	// session watch and foreground commands on the host's eight RPC slots.
+	group.SetLimit(4)
+	for offset := int64(len(chunk)); offset < size; offset += chunkSize {
+		if downloadCtx.Err() != nil {
 			break
 		}
-		if len(chunk) == 0 {
-			return nil, fmt.Errorf("附件传输未继续")
-		}
+		group.Go(func() error {
+			r, b, err := read(downloadCtx, offset)
+			if err != nil {
+				return err
+			}
+			if err = accept(r, b, offset); err != nil {
+				return err
+			}
+			progressMu.Lock()
+			received += int64(len(b))
+			if progress != nil {
+				progress(received, size)
+			}
+			progressMu.Unlock()
+			return nil
+		})
+	}
+	if err = group.Wait(); err != nil {
+		return nil, err
+	}
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	if hashBytes(out) != expected {
+		return nil, fmt.Errorf("附件完整性校验失败")
 	}
 	_, _ = s.api.Call(ctx, "client.assetCache.put", Object{"key": key, "data": base64.StdEncoding.EncodeToString(out)}, target, nil)
 	return out, nil
@@ -324,29 +380,4 @@ func (s *State) imageTile(cx *core.Scope, message func() Message, get func() Obj
 }
 func (s *State) fileTile(cx *core.Scope, a Object) core.Node {
 	return core.View{Style: core.Style{Padding: core.Edges{Top: 8}}, Children: []core.Node{button(cx, "download-"+str(a, "id"), str(a, "name"), lucide.FileDown, "outline", func() { s.download(cx, a) })}}
-}
-func (s *State) download(cx *core.Scope, a Object) {
-	target, p, id := s.target, str(s.selected, "providerId"), str(s.selected, "id")
-	s.notice = "正在读取附件…"
-	s.changed()
-	go func() {
-		b, e := s.attachmentBytes(s.ctx, target, p, id, a, false)
-		cx.Post(func() {
-			if e != nil {
-				s.error = e.Error()
-				s.notice = ""
-				s.changed()
-				return
-			}
-			cx.SaveFile(core.SaveOptions{Name: str(a, "name"), MIME: str(a, "mime"), Data: b}, func(saved bool, _ string, err error) {
-				s.notice = ""
-				if err != nil {
-					s.error = err.Error()
-				} else if saved {
-					s.notice = "文件已保存"
-				}
-				s.changed()
-			})
-		})
-	}()
 }
