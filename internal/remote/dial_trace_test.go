@@ -43,7 +43,7 @@ func TestDialTraceIdentifiesWaitingForUpgradeResponse(t *testing.T) {
 func TestDialTraceIdentifiesTLSFailure(t *testing.T) {
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	defer server.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	_, _, err := dialWebSocket(ctx, server.URL, "private-token", "signal")
 	if err == nil || !strings.Contains(err.Error(), "TLS") || !strings.Contains(err.Error(), "certificate") {

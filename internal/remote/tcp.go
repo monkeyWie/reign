@@ -180,16 +180,21 @@ func (w *wire) onTCPConn(c net.Conn) {
 	}
 	// The controller selects ONE of the simultaneously established sockets.
 	// Without this step opposite ends could choose different crossing dials.
+	marker := make([]byte, 4)
+	if w.host {
+		// Crossing dials may authenticate in different orders at each end.
+		// Wait for the controller's choice without blocking another socket
+		// that already carries USE1 from acquiring the selection lock.
+		if _, err := io.ReadFull(c, marker); err != nil || string(marker) != "USE1" {
+			return
+		}
+	}
 	w.tcpSelectMu.Lock()
 	defer w.tcpSelectMu.Unlock()
 	if w.ctx.Err() != nil || w.tcpSnapshot() != nil {
 		return
 	}
-	marker := make([]byte, 4)
 	if w.host {
-		if _, err := io.ReadFull(c, marker); err != nil || string(marker) != "USE1" {
-			return
-		}
 		if tcpWriteAll(c, []byte("ACK1")) != nil {
 			return
 		}

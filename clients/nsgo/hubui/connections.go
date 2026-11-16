@@ -89,6 +89,10 @@ func (s *State) connectionReady(id string) bool {
 }
 func (s *State) connectionProblem(id string) bool { return !s.connectionReady(id) }
 func (s *State) connectionRecovering(id string) bool {
+	if id == "" && s.api.CanHost() {
+		state := str(object(s.host["network"]), "state")
+		return state == "connecting" || state == "error"
+	}
 	h := s.connection(id)
 	if s.deviceOffline(id) {
 		return false

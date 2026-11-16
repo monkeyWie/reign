@@ -183,7 +183,7 @@ export class ReignHubRoom extends DurableObject<CoreEnv> {
           if (this.state(old)?.peer === state.peer)
             this.disconnect(old, 1000, "replaced");
       } else {
-        if (role === "host" && currentHost)
+        if (role === "host" && currentHost && this.state(currentHost)?.device !== deviceID)
           throw new APIError("HOST_ALREADY_CONNECTED", "设备已连接", 409);
         if (role === "client" && !currentHost)
           throw new APIError("HOST_OFFLINE", "被控设备离线", 503);
@@ -201,6 +201,10 @@ export class ReignHubRoom extends DurableObject<CoreEnv> {
           role,
           decision,
         );
+        // Only a fully authenticated and admitted owner may replace its own
+        // lingering host socket. A lost close frame must not block restarts.
+        if (role === "host" && currentHost)
+          this.disconnect(currentHost, 1012, "host connection replaced");
         state = {
           role,
           route: "signal",

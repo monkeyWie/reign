@@ -329,13 +329,17 @@ describe("device authorization and separated ingress", () => {
     expect((await reply).error).toBe("SIGNAL_ONLY");
     host.close();
   });
-  it("serializes duplicate host admission", async () => {
+  it("allows the authenticated host to replace its lingering connection", async () => {
     const h = await register(true);
     const responses = await Promise.all([
       socket(h.id, h.token, "host"),
       socket(h.id, h.token, "host"),
     ]);
-    expect(responses.map((r) => r.status).sort()).toEqual([101, 409]);
+    expect(responses.map((r) => r.status)).toEqual([101, 101]);
+    // Invalid credentials cannot replace the new host.
+    expect((await socket(h.id, "wrong-token", "host")).status).toBe(401);
+    const status = await post(routes.resolve, { connectionId: h.connectionId }, h.token);
+    expect(((await status.json()) as { online: boolean }).online).toBe(true);
     for (const r of responses)
       if (r.webSocket) {
         r.webSocket.accept();

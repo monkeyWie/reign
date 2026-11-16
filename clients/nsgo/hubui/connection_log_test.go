@@ -100,3 +100,14 @@ func TestLocalHostDiagnosticsIncludeServiceFailure(t *testing.T) {
 		t.Fatal("host diagnostics leaked credentials")
 	}
 }
+
+func TestHostConnectionIndicatorReflectsAutomaticServiceRecovery(t *testing.T) {
+	s := &State{api: newDemoAPI(), host: Object{}}
+	for _, state := range []string{"connecting", "error", "connected", "stopped"} {
+		s.host["network"] = Object{"state": state}
+		want := state == "connecting" || state == "error"
+		if s.connectionRecovering("") != want {
+			t.Fatalf("host state %s has wrong recovery indicator", state)
+		}
+	}
+}
