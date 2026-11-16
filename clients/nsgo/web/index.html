@@ -95,9 +95,7 @@
           aria-valuemax="100"
           aria-valuenow="0"
         >
-          <span class="console-download-track" aria-hidden="true">
-            <span class="console-download-fill"></span>
-          </span>
+          <span id="boot-track" class="console-download-track" aria-hidden="true"></span>
           <span id="boot-percent" class="console-download-value" aria-hidden="true"
             >0%</span
           >
@@ -116,6 +114,23 @@
       const phase = document.getElementById("boot-phase");
       const progress = document.getElementById("boot-progress");
       const percentLabel = document.getElementById("boot-percent");
+      const track = document.getElementById("boot-track");
+      const segments = (config.wasmParts?.length ? config.wasmParts : [null]).map((part) => {
+        const segment = document.createElement("span");
+        segment.className = "console-download-part";
+        segment.style.flexGrow = String(part?.size || 1);
+        const fill = document.createElement("span");
+        fill.className = "console-download-fill";
+        segment.append(fill);
+        track.append(segment);
+        return { segment, fill };
+      });
+      const showPartProgress = (index, loaded, total, active = false) => {
+        const value = total ? Math.max(0, Math.min(100, loaded / total * 100)) : 0;
+        const { segment, fill } = segments[index];
+        segment.dataset.active = String(active && value < 100);
+        fill.style.setProperty("--part-progress", `${value}%`);
+      };
       const zh = (
         document.cookie.match(/(?:^|; )reignhub_locale=([^;]+)/)?.[1] ||
         navigator.language
@@ -130,7 +145,7 @@
         const percent = total
           ? Math.max(0, Math.min(100, Math.floor((loaded / total) * 100)))
           : 0;
-        progress.style.setProperty("--download-progress", `${percent}%`);
+        if (!config.wasmParts?.length) showPartProgress(0, loaded, total);
         progress.setAttribute("aria-valuenow", String(percent));
         percentLabel.textContent = `${percent}%`;
       };
@@ -149,6 +164,7 @@
         const bytes = await downloadWasm("/assets/chat/" + config.wasm, {
           size: config.wasmSize,
           parts: config.wasmParts,
+          onPartProgress: showPartProgress,
           onProgress(loaded, total) {
             phase.textContent = text("Downloading workspace", "正在下载工作区");
             showProgress(loaded, total);

@@ -71,11 +71,16 @@ test("workspace parts download concurrently with a bound and assemble in manifes
   const pending: (() => void)[] = [];
   const finished: number[] = [];
   const progress: number[] = [];
+  const partProgress = [0, 0, 0];
   const download = downloadWasm("https://example.com/assets/app.wasm.gz", {
     size: 6,
     concurrency: 2,
     parts: [0, 1, 2].map((i) => ({ file: `app.part-${i}.bin`, size: 2 })),
     onProgress: (n: number) => progress.push(n),
+    onPartProgress: (i: number, loaded: number, total: number) => {
+      assert.equal(total, 2);
+      partProgress[i] = loaded;
+    },
     fetcher: async (url: URL) => {
       const i = Number(url.pathname.match(/part-(\d+)/)![1]);
       peak = Math.max(peak, ++active);
@@ -92,9 +97,11 @@ test("workspace parts download concurrently with a bound and assemble in manifes
   assert.equal(active, 2);
   pending[1]();
   await tick();
+  assert.deepEqual(partProgress, [0, 2, 0]);
   assert.equal(active, 2);
   pending[2]();
   await tick();
+  assert.deepEqual(partProgress, [0, 2, 2]);
   pending[0]();
   const blob = await download;
   assert.equal(peak, 2);
@@ -104,6 +111,7 @@ test("workspace parts download concurrently with a bound and assemble in manifes
     [1, 2, 3, 4, 5, 6],
   );
   assert.equal(progress.at(-1), 6);
+  assert.deepEqual(partProgress, [2, 2, 2]);
 });
 
 test("an interrupted part retries independently without redownloading completed parts", async () => {

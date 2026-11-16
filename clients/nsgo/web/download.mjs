@@ -17,6 +17,7 @@ export async function downloadWasm(
   const progress = () => loaded.reduce((a, b) => a + b, 0);
   let next = 0;
   options.onProgress?.(0, total);
+  parts.forEach((part, i) => options.onPartProgress?.(i, 0, part.size));
   const worker = async () => {
     while (next < parts.length && !controller.signal.aborted) {
       const i = next++;
@@ -29,9 +30,11 @@ export async function downloadWasm(
           signal: controller.signal,
           onProgress(bytes) {
             loaded[i] = bytes;
+            options.onPartProgress?.(i, bytes, part.size, bytes < part.size);
             options.onProgress?.(progress(), total);
           },
           onRetry(attempt) {
+            options.onPartProgress?.(i, loaded[i], part.size, false);
             options.onRetry?.(attempt, progress(), total);
           },
         },
