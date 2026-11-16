@@ -341,7 +341,24 @@ func (s *State) directoryRows() []directoryRow {
 	return rows
 }
 func (s *State) directory(cx *core.Scope) core.Node {
-	rows := core.NewMemoFunc(cx, s.directoryRows, nil)
+	// Connection timers and streaming text do not change the session catalogue.
+	// Avoid regrouping/sorting it on every unrelated revision while scrolling.
+	type catalogueStamp struct {
+		Target  string
+		Version uint64
+		Count   int
+	}
+	stamp := core.NewMemo(cx, func() catalogueStamp {
+		s.read()
+		return catalogueStamp{s.target, s.catalogueVersion, len(s.sessions)}
+	})
+	groups := core.NewSignal(cx, 0)
+	rows := core.NewMemoFunc(cx, func() []directoryRow {
+		stamp.Get()
+		groups.Get()
+		return core.Untracked(cx, s.directoryRows)
+	}, nil)
+	brake := &listTouchBrake{enabled: !isWeb() && cx.Env().OS() == core.OSAndroid}
 	return core.View{TestID: "session-sidebar", Style: fill, StyleFunc: func() core.Style {
 		c := palette(cx)
 		return core.Style{Background: c.sidebar, Color: c.foreground}
@@ -352,7 +369,7 @@ func (s *State) directory(cx *core.Scope) core.Node {
 		core.View{Style: core.Style{Padding: core.Symmetric(6, 12)}, Children: []core.Node{leftButton(button(cx, "new-session", "新聊天", lucide.SquarePen, "ghost", func() { s.createDirectory = ""; s.dialog.Set("create") }))}},
 		core.View{Style: core.Style{Padding: core.Edges{Left: 22, Top: 16, Right: 16}}, Children: []core.Node{label(cx, "项目", 12, true)}},
 		s.emptyCatalogue(cx),
-		core.List{TestID: "session-list", Style: fill, Count: func() int { return len(rows.Get()) }, Key: func(i int) any { return rows.Get()[i].ID }, EstimatedSize: 36, Row: func(cx *core.Scope, r core.ListRow) core.Node {
+		brake.wrap(core.List{TestID: "session-list", Style: fill, Count: func() int { return len(rows.Get()) }, Key: func(i int) any { return rows.Get()[i].ID }, EstimatedSize: 38, Row: func(cx *core.Scope, r core.ListRow) core.Node {
 			item := func() directoryRow {
 				v := rows.Get()
 				i := r.Index()
@@ -367,7 +384,11 @@ func (s *State) directory(cx *core.Scope) core.Node {
 				data := core.Untracked(cx, item)
 				groupKey := s.target + "|" + data.Path
 				if data.More {
-					return core.View{Style: core.Style{Padding: core.Edges{Left: 43, Right: 12}}, Children: []core.Node{leftButton(button(cx, "more-"+data.Path, choose(s.expanded[groupKey], "收起", "展开显示"), nil, "ghost", func() { s.expanded[groupKey] = !s.expanded[groupKey]; s.changed() }))}}
+					return core.View{Style: core.Style{Padding: core.Edges{Left: 43, Right: 12}}, Children: []core.Node{leftButton(button(cx, "more-"+data.Path, choose(s.expanded[groupKey], "收起", "展开显示"), nil, "ghost", brake.action(func() {
+						s.expanded[groupKey] = !s.expanded[groupKey]
+						groups.Update(func(v int) int { return v + 1 })
+						s.changed()
+					})))}}
 				}
 				if data.Header {
 					folder := core.Icon{SVGFunc: func() *core.SVG {
@@ -377,9 +398,15 @@ func (s *State) directory(cx *core.Scope) core.Node {
 						}
 						return lucide.FolderOpen()
 					}, Style: core.Style{Width: core.Pt(18), Height: core.Pt(18)}}
-					return core.View{TestID: data.ID, Style: core.Style{Padding: core.Edges{Top: 18, Bottom: 3, Left: 10, Right: 10}}, Children: []core.Node{row(core.View{Role: core.RoleButton, Label: data.Title, OnPress: func(core.PressEvent) { s.collapsed[groupKey] = !s.collapsed[groupKey]; s.changed() }, Style: core.Style{FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0), Direction: core.Row, AlignItems: core.AlignCenter, Gap: 10, Padding: core.Symmetric(8, 12)}, Children: []core.Node{folder, singleLine(cx, func() string { return item().Title }, 14, false)}}, button(cx, "directory-info-"+data.Path, "", lucide.Ellipsis, "ghost", func() { s.directoryInfo = data.Path; s.dialog.Set("directory") }), button(cx, "directory-create-"+data.Path, "", lucide.SquarePen, "ghost", func() { s.createDirectory = data.Path; s.dialog.Set("create") }))}}
+					return core.View{TestID: data.ID, Style: core.Style{Padding: core.Edges{Top: 18, Bottom: 3, Left: 10, Right: 10}}, Children: []core.Node{row(core.View{Role: core.RoleButton, Label: data.Title, OnPress: func(core.PressEvent) {
+						brake.action(func() {
+							s.collapsed[groupKey] = !s.collapsed[groupKey]
+							groups.Update(func(v int) int { return v + 1 })
+							s.changed()
+						})()
+					}, Style: core.Style{FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0), Direction: core.Row, AlignItems: core.AlignCenter, Gap: 10, Padding: core.Symmetric(8, 12)}, Children: []core.Node{folder, singleLine(cx, func() string { return item().Title }, 14, false)}}, button(cx, "directory-info-"+data.Path, "", lucide.Ellipsis, "ghost", brake.action(func() { s.directoryInfo = data.Path; s.dialog.Set("directory") })), button(cx, "directory-create-"+data.Path, "", lucide.SquarePen, "ghost", brake.action(func() { s.createDirectory = data.Path; s.dialog.Set("create") })))}}
 				}
-				return core.View{TestID: "session-" + str(data.Session, "id"), Role: core.RoleButton, LabelFunc: func() string { return item().Title }, OnPress: func(core.PressEvent) { s.selectSession(item().Session) }, Style: core.Style{MinHeight: core.Pt(36), Padding: core.Edges{Top: 8, Bottom: 8, Left: 34, Right: 12}, Margin: core.Symmetric(1, 10), CornerRadius: 12}, StyleFunc: func() core.Style {
+				return core.View{TestID: "session-" + str(data.Session, "id"), Role: core.RoleButton, LabelFunc: func() string { return item().Title }, OnPress: func(core.PressEvent) { brake.action(func() { s.selectSession(item().Session) })() }, Style: core.Style{MinHeight: core.Pt(36), Padding: core.Edges{Top: 8, Bottom: 8, Left: 34, Right: 12}, Margin: core.Symmetric(1, 10), CornerRadius: 12}, StyleFunc: func() core.Style {
 					s.read()
 					c := palette(cx)
 					st := core.Style{Hover: &core.Style{Background: c.muted}}
@@ -389,7 +416,7 @@ func (s *State) directory(cx *core.Scope) core.Node {
 					return st
 				}, Children: []core.Node{row(core.Icon{SVG: sessionIcon(data.Session)(), Style: core.Style{Width: core.Pt(14), Height: core.Pt(14)}, StyleFunc: func() core.Style { return core.Style{Color: palette(cx).mutedText} }}, core.Text{ContentFunc: func() string { return item().Title }, MaxLines: 1, Style: core.Style{FontSize: 13, FlexShrink: 1, MinWidth: core.Pt(0)}})}}
 			})
-		}},
+		}}),
 		core.View{Style: core.Style{Padding: core.All(8)}, Children: []core.Node{row(button(cx, "reconnect-device", "重连", nil, "ghost", func() { s.reconnectDevice(s.target) }), button(cx, "disconnect-device", "断开", nil, "ghost", func() { s.call("client.disconnect", Object{"id": s.target}, nil) }), spacer(), button(cx, "forget-device", "", lucide.Trash, "ghost", func() { s.dialog.Set("forget") }))}},
 	}}
 }
