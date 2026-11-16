@@ -32,7 +32,7 @@ func TestSettingsThemePreservesWorkspace(t *testing.T) {
 	app.Screenshot("workspace-new-light")
 	app.Press("id:server-settings")
 	app.Press("id:settings-nav-agents")
-	app.WaitFor("id:configure-agent-claude-code", 3*time.Second)
+	app.WaitFor("id:agent-settings-list", 3*time.Second)
 	app.Press("id:add-agent")
 	app.Find("id:dialog-agent-config")
 	app.Press("id:dialog-cancel")
