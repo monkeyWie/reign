@@ -81,3 +81,65 @@ func TestTranscriptMessagesArriveBeforeSnapshotCompletes(t *testing.T) {
 		t.Fatalf("history fragments were dropped or reordered: fragments=%d transcript=%+v", len(fragments), out)
 	}
 }
+
+type rapidHistoryProvider struct {
+	*progressiveProvider
+	sent chan struct{}
+}
+
+func (p *rapidHistoryProvider) Transcript(ctx context.Context, session, cursor string) (provider.Transcript, error) {
+	out, err := p.progressiveProvider.Transcript(ctx, session, cursor)
+	close(p.sent)
+	return out, err
+}
+func TestSlowHistoryConsumerCannotBlockOtherRelayResponses(t *testing.T) {
+	token := strings.Repeat("r", 32)
+	server := httptest.NewServer(relay.New(token))
+	defer server.Close()
+	pair := Pairing{Relay: "ws" + strings.TrimPrefix(server.URL, "http"), Host: relay.ID(), Key: strings.Repeat("ab", 32), RelayToken: token}
+	ready := make(chan struct{})
+	close(ready)
+	p := &rapidHistoryProvider{progressiveProvider: &progressiveProvider{testProvider: &testProvider{}, release: ready}, sent: make(chan struct{})}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	monitor := NewHostStatus(pair.Relay)
+	go RunHostObserved(ctx, pair, Options{RelayOnly: true}, &control.Dispatcher{Providers: map[string]provider.Provider{"test": p}}, monitor)
+	waitFor(t, func() bool { return monitor.Snapshot().State == "connected" })
+	c, err := Connect(ctx, pair, Options{RelayOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	consume := make(chan struct{})
+	requestCtx := provider.WithTranscriptObserver(ctx, func(provider.Transcript) error {
+		select {
+		case <-consume:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	})
+	done := make(chan error, 1)
+	go func() {
+		done <- c.Call(requestCtx, control.Request{Method: "transcript", Provider: "test", Session: "session", Progress: true}, nil)
+	}()
+	select {
+	case <-p.sent:
+	case <-ctx.Done():
+		t.Fatal("host did not send the history")
+	}
+	probe, stop := context.WithTimeout(ctx, time.Second)
+	defer stop()
+	if err := c.Call(probe, control.Request{Method: "network"}, nil); err != nil {
+		t.Fatal("slow history consumer blocked unrelated response", err)
+	}
+	close(consume)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-ctx.Done():
+		t.Fatal("history did not finish")
+	}
+}

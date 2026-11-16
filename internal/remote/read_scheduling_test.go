@@ -3,7 +3,9 @@ package remote
 import (
 	"bufio"
 	"context"
+	"crypto/rand"
 	"encoding/json"
+	"github.com/monkeyWie/reignhub/internal/transport"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -127,7 +129,7 @@ func TestCancelledResponseDropsFragmentsAndAcceptsLiveMessage(t *testing.T) {
 	w := &wire{crypto: receiver, peer: "peer", chunks: map[string]*assembly{}, wantsResponse: func(id string) bool { return pending[id] }, onData: func(b []byte) { result = string(b) }}
 	receive := func(request, id string, index, total int, data string) {
 		t.Helper()
-		raw, _ := json.Marshal(chunk{Request: request, ID: id, Index: index, Total: total, Data: []byte(data)})
+		raw, _ := json.Marshal(chunk{Encoding: transport.Identity, RawSize: len(data), Request: request, ID: id, Index: index, Total: total, Data: []byte(data)})
 		sealed, err := sender.seal(w.aad("chunk", false), raw)
 		if err != nil {
 			t.Fatal(err)
@@ -145,10 +147,9 @@ func TestCancelledResponseDropsFragmentsAndAcceptsLiveMessage(t *testing.T) {
 	if result != "new user message" {
 		t.Fatal("live response did not arrive", result)
 	}
-	// Old peers omit the optional request label and remain compatible.
-	receive("", "legacy", 0, 1, "old protocol")
-	if result != "old protocol" {
-		t.Fatal("legacy fragments rejected")
+	receive("", "unscoped", 0, 1, "invalid response")
+	if result != "new user message" {
+		t.Fatal("unscoped fragment was accepted")
 	}
 }
 
@@ -164,7 +165,7 @@ func (c *pacedConn) Write(b []byte) (int, error) {
 	case c.started <- struct{}{}:
 	default:
 	}
-	time.Sleep(2 * time.Millisecond)
+	time.Sleep(time.Duration(len(b)) * time.Second / (32 << 10))
 	return c.Conn.Write(b)
 }
 
@@ -212,11 +213,17 @@ func TestSmallRelayResponsePassesLargeHistory(t *testing.T) {
 	receiver, _ := newCryptor(secret)
 	w := &wire{ctx: ctx, crypto: crypto, host: true, peer: "peer", relayLink: &relayLink{}}
 	w.relayLink.socket.Store(hostWS)
+	history := make([]byte, 2<<20)
+	if _, err := rand.Read(history); err != nil {
+		t.Fatal(err)
+	}
+	totalFrames := (len(history) + transport.ChunkSize - 1) / transport.ChunkSize
 	largeDone := make(chan error, 1)
-	go func() { largeDone <- w.send([]byte(strings.Repeat("h", 2<<20))) }()
+	go func() { largeDone <- w.sendContext(ctx, "history", history) }()
 	<-started
+	begin := time.Now()
 	smallDone := make(chan error, 1)
-	go func() { smallDone <- w.send([]byte("live update")) }()
+	go func() { smallDone <- w.sendContext(ctx, "live", []byte("live update")) }()
 	parts := 0
 	sawSmall := false
 	for !sawSmall {
@@ -238,14 +245,17 @@ func TestSmallRelayResponsePassesLargeHistory(t *testing.T) {
 		if string(c.Data) == "live update" {
 			sawSmall = true
 		}
-		if parts >= 175 {
+		if parts >= totalFrames {
 			t.Fatal("small response queued behind the whole history")
 		}
 	}
 	if err := <-smallDone; err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("live message arrived after %d frames, before the 175-frame history finished", parts)
+	if time.Since(begin) > time.Second {
+		t.Fatalf("live message delayed %s on simulated 32 KiB/s relay", time.Since(begin))
+	}
+	t.Logf("32 KiB/s relay: live message arrived in %s after %d frames, before the %d-frame history finished", time.Since(begin), parts, totalFrames)
 	// Stop the unfinished history without closing a shared socket mid-frame.
 	cancel()
 	select {

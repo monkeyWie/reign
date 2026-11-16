@@ -45,40 +45,32 @@ func TestSignedLeaseEnforcedOnDirectRPC(t *testing.T) {
 }
 
 func TestExpiredConnectionResponseClosesClientWithoutReplaying(t *testing.T) {
-	for _, legacy := range []bool{false, true} {
-		t.Run(map[bool]string{false: "coded", true: "older-host"}[legacy], func(t *testing.T) {
-			token := strings.Repeat("r", 32)
-			server := httptest.NewServer(relay.New(token))
-			defer server.Close()
-			pair := Pairing{Relay: "ws" + strings.TrimPrefix(server.URL, "http"), Host: relay.ID(), Key: strings.Repeat("ab", 32), RelayToken: token}
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-			var calls atomic.Int32
-			d := &control.Dispatcher{Execute: func(req control.Request, _ func() control.Response) control.Response {
-				calls.Add(1)
-				response := authorizationFailure(req.ID, errConnectionAuthorization)
-				if legacy {
-					response.Code = ""
-					response.Error = "远控授权已过期，请重新连接或登录"
-				}
-				return response
-			}}
-			monitor := NewHostStatus(pair.Relay)
-			go RunHostObserved(ctx, pair, Options{RelayOnly: true}, d, monitor)
-			waitFor(t, func() bool { return monitor.Snapshot().State == "connected" })
-			c, err := Connect(ctx, pair, Options{RelayOnly: true})
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer c.Close()
-			err = c.Call(ctx, control.Request{Method: "send", Provider: "fixture", Session: "fixture"}, nil)
-			if err == nil || strings.Contains(err.Error(), "登录") || !strings.Contains(err.Error(), "续期") {
-				t.Fatal("misleading expiry error", err)
-			}
-			waitFor(t, func() bool { return c.Path() == "Disconnected" })
-			if calls.Load() != 1 {
-				t.Fatal("command replayed", calls.Load())
-			}
-		})
+	token := strings.Repeat("r", 32)
+	server := httptest.NewServer(relay.New(token))
+	defer server.Close()
+	pair := Pairing{Relay: "ws" + strings.TrimPrefix(server.URL, "http"), Host: relay.ID(), Key: strings.Repeat("ab", 32), RelayToken: token}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var calls atomic.Int32
+	d := &control.Dispatcher{Execute: func(req control.Request, _ func() control.Response) control.Response {
+		calls.Add(1)
+		response := authorizationFailure(req.ID, errConnectionAuthorization)
+		return response
+	}}
+	monitor := NewHostStatus(pair.Relay)
+	go RunHostObserved(ctx, pair, Options{RelayOnly: true}, d, monitor)
+	waitFor(t, func() bool { return monitor.Snapshot().State == "connected" })
+	c, err := Connect(ctx, pair, Options{RelayOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	err = c.Call(ctx, control.Request{Method: "send", Provider: "fixture", Session: "fixture"}, nil)
+	if err == nil || strings.Contains(err.Error(), "登录") || !strings.Contains(err.Error(), "续期") {
+		t.Fatal("misleading expiry error", err)
+	}
+	waitFor(t, func() bool { return c.Path() == "Disconnected" })
+	if calls.Load() != 1 {
+		t.Fatal("command replayed", calls.Load())
 	}
 }

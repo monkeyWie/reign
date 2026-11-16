@@ -26,6 +26,7 @@ import {
 } from "./progress";
 import type { SavedDevice } from "./cache";
 interface Reply {
+  code?: string;
   id: string;
   result: unknown;
   error?: string;
@@ -33,6 +34,7 @@ interface Reply {
   notModified?: boolean;
 }
 interface Pending {
+  touch?: () => void;
   resolve: (v: unknown) => void;
   reject: (e: Error) => void;
   timer?: ReturnType<typeof setTimeout>;
@@ -54,11 +56,25 @@ export class Connection extends EventTarget {
   private snapshots = new Map<string, { revision: string; value: unknown }>();
   private chunks = new Map<
     string,
-    { parts: (Uint8Array | undefined)[]; size: number; updated: number }
+    {
+      request: string;
+      encoding: string;
+      rawSize: number;
+      parts: (Uint8Array | undefined)[];
+      size: number;
+      updated: number;
+    }
   >();
   private candidates: RTCIceCandidateInit[] = [];
   private chain = Promise.resolve();
-  private sendChain = Promise.resolve();
+  private frameQueues: {
+    run: () => Promise<void>;
+    resolve: () => void;
+    reject: (error: unknown) => void;
+  }[][] = [[], [], []];
+  private sending = false;
+  private urgentFrames = 0;
+  private otherFrames = 0;
   private tick?: ReturnType<typeof setInterval>;
   private closed = false;
   private established = false;
@@ -253,7 +269,7 @@ export class Connection extends EventTarget {
         CONNECTION_STAGE_TIMEOUT,
       );
       this.report("handshake", "handshake", "与被控设备建立加密握手");
-      await this.sendFrame("hello", { clientNonce: this.nonce });
+      await this.sendFrame("hello", { rpc: 2, clientNonce: this.nonce });
       try {
         await ready;
         this.report(
@@ -328,9 +344,12 @@ export class Connection extends EventTarget {
     if (f.kind === "hello") {
       if (this.cipher) return;
       const h = JSON.parse(decode(plain)) as {
+        rpc: number;
         clientNonce: string;
         hostNonce: string;
       };
+      if (h.rpc !== 2)
+        throw Error("设备协议版本不一致，请同时更新控制端和被控端");
       if (h.clientNonce !== this.nonce || !/^[a-f0-9]{64}$/.test(h.hostNonce))
         throw Error("无效配对握手");
       this.cipher = await Cipher.create(
@@ -368,7 +387,7 @@ export class Connection extends EventTarget {
       }
       return;
     }
-    if (f.kind === "chunk") this.assemble(plain);
+    if (f.kind === "chunk") await this.assemble(plain);
     else if (f.kind === "data") this.response(plain);
   }
   private async offer() {
@@ -519,7 +538,7 @@ export class Connection extends EventTarget {
       this.chain = this.chain
         .then(async () => {
           if (e.data instanceof ArrayBuffer && this.cipher)
-            this.assemble(
+            await this.assemble(
               await this.cipher.open(
                 this.aad("chunk", false),
                 new Uint8Array(e.data),
@@ -531,34 +550,63 @@ export class Connection extends EventTarget {
     await pc.setLocalDescription(await pc.createOffer());
     await this.sendFrame("signal", pc.localDescription!.toJSON());
   }
-  private assemble(plain: Uint8Array) {
+  private async assemble(plain: Uint8Array) {
     const c = JSON.parse(decode(plain)) as {
+      r: string;
+      e: string;
+      s: number;
       id: string;
       i: number;
       n: number;
       b: string;
     };
     if (
+      typeof c.r !== "string" ||
+      !c.r ||
+      c.r.length > 256 ||
+      !["identity", "gzip"].includes(c.e) ||
+      !Number.isInteger(c.s) ||
+      c.s < 1 ||
+      c.s > 16 * 1024 * 1024 ||
       !Number.isInteger(c.n) ||
       c.n < 1 ||
-      c.n > 1400 ||
+      c.n > 4096 ||
       !Number.isInteger(c.i) ||
       c.i < 0 ||
       c.i >= c.n
     )
       return;
     const part = un64(c.b);
-    if (part.length > 12000) return;
+    if (part.length > 4096) return;
+    if (!this.pending.has(c.r)) {
+      this.discardResponse(c.r);
+      return;
+    }
+    this.pending.get(c.r)?.touch?.();
     for (const [k, v] of this.chunks)
       if (Date.now() - v.updated > CONNECTION_STAGE_TIMEOUT)
         this.chunks.delete(k);
     let a = this.chunks.get(c.id);
     if (!a) {
-      if (this.chunks.size >= 8) return;
-      a = { parts: Array(c.n), size: 0, updated: Date.now() };
+      if (this.chunks.size >= 64) return;
+      a = {
+        request: c.r,
+        encoding: c.e,
+        rawSize: c.s,
+        parts: Array(c.n),
+        size: 0,
+        updated: Date.now(),
+      };
       this.chunks.set(c.id, a);
     }
-    if (a.parts.length !== c.n || a.parts[c.i]) return;
+    if (
+      a.request !== c.r ||
+      a.encoding !== c.e ||
+      a.rawSize !== c.s ||
+      a.parts.length !== c.n ||
+      a.parts[c.i]
+    )
+      return;
     a.updated = Date.now();
     a.parts[c.i] = part;
     a.size += part.length;
@@ -574,7 +622,38 @@ export class Connection extends EventTarget {
       at += p!.length;
     }
     this.chunks.delete(c.id);
-    this.response(full);
+    let raw = full;
+    if (a.encoding === "gzip") {
+      const reader = new Blob([full.buffer])
+        .stream()
+        .pipeThrough(new DecompressionStream("gzip"))
+        .getReader();
+      const parts: Uint8Array[] = [];
+      let size = 0;
+      try {
+        for (;;) {
+          const part = await reader.read();
+          if (part.done) break;
+          size += part.value.byteLength;
+          if (size > a.rawSize) throw Error("解压后的响应超过限制");
+          parts.push(part.value);
+        }
+      } finally {
+        await reader.cancel();
+      }
+      raw = new Uint8Array(size);
+      let offset = 0;
+      for (const part of parts) {
+        raw.set(part, offset);
+        offset += part.length;
+      }
+    }
+    if (raw.byteLength !== a.rawSize) throw Error("响应长度不匹配");
+    this.response(raw);
+  }
+  private discardResponse(request: string) {
+    for (const [id, value] of this.chunks)
+      if (value.request === request) this.chunks.delete(id);
   }
   private response(raw: Uint8Array) {
     const r = JSON.parse(decode(raw)) as Reply;
@@ -584,6 +663,11 @@ export class Connection extends EventTarget {
     p.cleanup?.();
     this.pending.delete(r.id);
     if (r.error) {
+      if (r.code === "CONNECTION_AUTH_EXPIRED") {
+        this.close("连接授权需要续期，请重新连接");
+        p.reject(Error("连接授权需要续期，请重新连接"));
+        return;
+      }
       p.reject(Error(r.error));
       return;
     }
@@ -617,43 +701,124 @@ export class Connection extends EventTarget {
     }
     if (this.closed) throw Error("连接已断开");
   }
-  private async send(raw: Uint8Array) {
+  private enqueueFrame(priority: number, run: () => Promise<void>) {
+    return new Promise<void>((resolve, reject) => {
+      this.frameQueues[priority].push({ run, resolve, reject });
+      if (!this.sending) void this.flushFrames();
+    });
+  }
+  private async flushFrames() {
+    this.sending = true;
+    try {
+      for (;;) {
+        let priority =
+          this.urgentFrames < 8 && this.frameQueues[0].length ? 0 : -1;
+        if (priority < 0 && this.otherFrames >= 8 && this.frameQueues[2].length)
+          priority = 2;
+        if (priority < 0)
+          priority = this.frameQueues[1].length
+            ? 1
+            : this.frameQueues[0].length
+              ? 0
+              : this.frameQueues[2].length
+                ? 2
+                : -1;
+        if (priority < 0) break;
+        const job = this.frameQueues[priority].shift()!;
+        if (this.closed) {
+          job.reject(Error("连接已关闭"));
+          continue;
+        }
+        this.urgentFrames = priority === 0 ? this.urgentFrames + 1 : 0;
+        this.otherFrames = priority === 2 ? 0 : this.otherFrames + 1;
+        try {
+          await job.run();
+          job.resolve();
+        } catch (error) {
+          job.reject(error);
+        }
+      }
+    } finally {
+      this.sending = false;
+    }
+  }
+  private async send(
+    raw: Uint8Array,
+    requestID: string,
+    method: string,
+    active = () => true,
+  ) {
     if (raw.length > 1024 * 1024) throw Error("请求过大");
     await this.waitPath();
     if (this.closed || !this.cipher) throw Error("连接已断开");
+    const rawSize = raw.length;
+    let encoding = "identity";
+    if (rawSize >= 16384) {
+      const compressed = new Uint8Array(
+        await new Response(
+          new Blob([raw.slice().buffer])
+            .stream()
+            .pipeThrough(new CompressionStream("gzip")),
+        ).arrayBuffer(),
+      );
+      if (compressed.length * 8 <= rawSize * 7) {
+        raw = compressed;
+        encoding = "gzip";
+      }
+    }
+    const priority = [
+      "transcript",
+      "attachment.read",
+      "attachment.write",
+    ].includes(method)
+      ? 2
+      : ["providers", "sessions", "sync", "models"].includes(method)
+        ? 1
+        : 0;
     const id = hex(random(16));
-    const n = Math.max(1, Math.ceil(raw.length / 12000));
+    const n = Math.max(1, Math.ceil(raw.length / 4096));
     for (let i = 0; i < n; i++) {
       const part = utf8(
         JSON.stringify({
+          r: requestID,
+          e: encoding,
+          s: rawSize,
           id,
           i,
           n,
-          b: b64(raw.slice(i * 12000, (i + 1) * 12000)),
+          b: b64(raw.slice(i * 4096, (i + 1) * 4096)),
         }),
       );
-      const sealed = await this.cipher.seal(this.aad("chunk"), part);
-      if (this.dc?.readyState === "open") {
-        const until = Date.now() + 8000;
-        while (this.dc.bufferedAmount > 512 * 1024) {
-          if (Date.now() > until || this.closed)
-            throw Error("直连发送阻塞，请刷新确认结果后再重试");
-          await new Promise((r) => setTimeout(r, 10));
-        }
-        this.dc.send(sealed as unknown as ArrayBuffer);
-      } else if (this.relay?.readyState === WebSocket.OPEN) {
-        this.update("Relay · encrypted");
-        this.report(
-          "path:relay",
-          "relay",
-          "正在使用加密中继",
-          "直连尚未建立，先通过服务中继；后台继续尝试直连",
-          "success",
-        );
-        this.relay.send(
-          JSON.stringify({ peer: this.peer, kind: "chunk", body: b64(sealed) }),
-        );
-      } else throw Error("发送中断，请刷新确认结果后再重试");
+      if (!active()) return;
+      await this.enqueueFrame(priority, async () => {
+        if (!active() || this.closed || !this.cipher) return;
+        const sealed = await this.cipher.seal(this.aad("chunk"), part);
+        if (this.dc?.readyState === "open") {
+          const until = Date.now() + 8000;
+          while (this.dc.bufferedAmount > 512 * 1024) {
+            if (Date.now() > until || this.closed)
+              throw Error("直连发送阻塞，请刷新确认结果后再重试");
+            await new Promise((r) => setTimeout(r, 10));
+          }
+          this.dc.send(sealed as unknown as ArrayBuffer);
+        } else if (this.relay?.readyState === WebSocket.OPEN) {
+          this.update("Relay · encrypted");
+          this.report(
+            "path:relay",
+            "relay",
+            "正在使用加密中继",
+            "直连尚未建立，先通过服务中继；后台继续尝试直连",
+            "success",
+          );
+          this.relay.send(
+            JSON.stringify({
+              peer: this.peer,
+              kind: "chunk",
+              body: b64(sealed),
+            }),
+          );
+        } else throw Error("发送中断，请刷新确认结果后再重试");
+      });
     }
   }
   async call<T = unknown>(
@@ -675,27 +840,62 @@ export class Connection extends EventTarget {
       "approvals",
       "sync",
       "models",
+      "turn.status",
     ].includes(r.method);
+    const cancelRead = () => {
+      this.discardResponse(r.id);
+      if (!readOnly && !["watch", "attachment.read"].includes(r.method)) return;
+      const request = {
+        id: crypto.randomUUID(),
+        method: "request.cancel",
+        cancel: r.id,
+        provider: r.provider,
+        session: r.session,
+      };
+      void this.send(
+        utf8(JSON.stringify(request)),
+        request.id,
+        request.method,
+      ).catch(() => {});
+    };
     const key = readOnly
       ? JSON.stringify({ ...r, id: undefined, revision: undefined })
       : "";
     const cached = this.snapshots.get(key);
     if (cached) r.revision = cached.revision;
     const result = new Promise<T>((resolve, reject) => {
-      // Ordinary RPCs wait for the result, cancellation or connection loss.
-      // Only setup verification passes an explicit deadline.
+      // Bound silence per read, while allowing a progressing transfer to run
+      // longer. Explicit setup deadlines remain absolute.
       const timer =
         timeout === undefined
           ? undefined
           : setTimeout(() => {
               this.pending.get(r.id)?.cleanup?.();
               this.pending.delete(r.id);
+              cancelRead();
               reject(Error("请求超时，请刷新确认操作结果后再重试"));
             }, timeout);
+      let idleTimer: ReturnType<typeof setTimeout> | undefined;
+      const touch =
+        readOnly || ["watch", "attachment.read"].includes(r.method)
+          ? () => {
+              clearTimeout(idleTimer);
+              idleTimer = setTimeout(() => {
+                clearTimeout(timer);
+                this.pending.get(r.id)?.cleanup?.();
+                this.pending.delete(r.id);
+                cancelRead();
+                reject(
+                  Error("设备读取连续 30 秒没有进展，已取消本次读取，请重试"),
+                );
+              }, 30000);
+            }
+          : undefined;
       const abort = () => {
         clearTimeout(timer);
         this.pending.get(r.id)?.cleanup?.();
         this.pending.delete(r.id);
+        cancelRead();
         reject(signal?.reason ?? new DOMException("请求已取消", "AbortError"));
       };
       signal?.addEventListener("abort", abort, { once: true });
@@ -703,17 +903,19 @@ export class Connection extends EventTarget {
         resolve: resolve as (v: unknown) => void,
         reject,
         timer,
-        cleanup: () => signal?.removeEventListener("abort", abort),
+        cleanup: () => {
+          clearTimeout(idleTimer);
+          signal?.removeEventListener("abort", abort);
+        },
+        touch,
         key,
         cached,
       });
+      touch?.();
     });
-    this.sendChain = this.sendChain
-      .catch(() => {})
-      .then(() => {
-        if (this.pending.has(r.id)) return this.send(utf8(JSON.stringify(r)));
-      });
-    void this.sendChain.catch((e) => {
+    void this.send(utf8(JSON.stringify(r)), r.id, r.method, () =>
+      this.pending.has(r.id),
+    ).catch((e) => {
       const p = this.pending.get(r.id);
       if (p) {
         clearTimeout(p.timer);

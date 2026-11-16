@@ -72,8 +72,6 @@ func (r *hostReads) cancel(id string) {
 	}
 }
 
-type responseRequestKey struct{}
-
 func (w *wire) discardResponse(request string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -94,7 +92,8 @@ func (c *Client) cancelRead(r control.Request) {
 	go func() {
 		ctx, stop := context.WithTimeout(c.wire.ctx, 3*time.Second)
 		defer stop()
-		raw, _ := json.Marshal(control.Request{ID: relay.ID(), Method: control.CancelRead, Cancel: r.ID, Provider: r.Provider, Session: r.Session})
-		_ = c.wire.sendContext(ctx, raw)
+		cancelID := relay.ID()
+		raw, _ := json.Marshal(control.Request{ID: cancelID, Method: control.CancelRead, Cancel: r.ID, Provider: r.Provider, Session: r.Session})
+		_ = c.wire.sendContext(ctx, cancelID, raw)
 	}()
 }

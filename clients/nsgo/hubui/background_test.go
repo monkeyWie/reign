@@ -2,7 +2,6 @@ package hubui
 
 import (
 	"context"
-	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -18,7 +17,6 @@ type backgroundTaskFixture struct {
 	stateReads   atomic.Int32
 	watchReads   atomic.Int32
 	heartbeats   chan struct{}
-	legacy       bool
 }
 
 func (f *backgroundTaskFixture) Call(ctx context.Context, method string, p Object, target string, request Object) (any, error) {
@@ -26,9 +24,6 @@ func (f *backgroundTaskFixture) Call(ctx context.Context, method string, p Objec
 		switch str(request, "method") {
 		case "turn.status":
 			f.stateReads.Add(1)
-			if f.legacy {
-				return nil, fmt.Errorf("unknown method %q", "turn.status")
-			}
 			status := "inProgress"
 			select {
 			case <-f.finished:
@@ -71,15 +66,7 @@ func TestAndroidTaskCompletesAfterSwitchingChats(t *testing.T) {
 	if isWeb() || nsgotest.Target() != "" {
 		t.Skip("native host injection")
 	}
-	for _, legacy := range []bool{false, true} {
-		t.Run(fmt.Sprint("legacy=", legacy), func(t *testing.T) {
-			testTaskAfterSwitchingChats(t, legacy)
-		})
-	}
-}
-
-func testTaskAfterSwitchingChats(t *testing.T, legacy bool) {
-	f := &backgroundTaskFixture{demoAPI: newDemoAPI(), finished: make(chan struct{}), heartbeats: make(chan struct{}, 1), legacy: legacy}
+	f := &backgroundTaskFixture{demoAPI: newDemoAPI(), finished: make(chan struct{}), heartbeats: make(chan struct{}, 1)}
 	host := core.NewHost()
 	var latest atomic.Value
 	host.Handle("ras.background", func(call *core.HostCall) {
@@ -108,18 +95,13 @@ func testTaskAfterSwitchingChats(t *testing.T, legacy bool) {
 	app.Press("id:back-sessions")
 	app.Press("id:session-demo-cli")
 	app.WaitUntil(time.Second, func() bool { return f.stateReads.Load() > before })
-	if legacy {
-		app.WaitUntil(time.Second, func() bool { return f.monitorReads.Load() >= 2 })
-	}
 	historyReads := f.monitorReads.Load()
 	for range 3 {
 		before := f.stateReads.Load()
 		watches := f.watchReads.Load()
 		f.heartbeats <- struct{}{}
 		app.WaitUntil(time.Second, func() bool { return f.watchReads.Load() > watches })
-		if !legacy {
-			app.WaitUntil(time.Second, func() bool { return f.stateReads.Load() > before })
-		}
+		app.WaitUntil(time.Second, func() bool { return f.stateReads.Load() > before })
 	}
 	if f.monitorReads.Load() != historyReads {
 		t.Fatal("background heartbeat downloaded conversation history")

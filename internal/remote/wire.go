@@ -17,6 +17,7 @@ import (
 	"github.com/monkeyWie/reignhub/internal/connectivity"
 	"github.com/monkeyWie/reignhub/internal/device"
 	"github.com/monkeyWie/reignhub/internal/relay"
+	"github.com/monkeyWie/reignhub/internal/transport"
 	"github.com/pion/webrtc/v4"
 )
 
@@ -49,6 +50,7 @@ type wire struct {
 	base              *cryptor
 	key, clientNonce  string
 	ready             chan struct{}
+	handshakeError    error
 	device            string
 	peer              string
 	host              bool
@@ -62,7 +64,7 @@ type wire struct {
 	direct            bool
 	chunks            map[string]*assembly
 	chunkBytes        int
-	sendMu            sync.Mutex
+	sender            transport.Sender
 	signalMu          sync.Mutex
 	candidates        []webrtc.ICECandidateInit
 	tcpMu             sync.Mutex
@@ -74,18 +76,14 @@ type wire struct {
 	onData            func([]byte)
 	wantsResponse     func(string) bool
 }
-type chunk struct {
-	Request string `json:"r,omitempty"`
-	ID      string `json:"id"`
-	Index   int    `json:"i"`
-	Total   int    `json:"n"`
-	Data    []byte `json:"b"`
-}
+type chunk = transport.Chunk
 type assembly struct {
-	request string
-	parts   [][]byte
-	count   int
-	updated time.Time
+	encoding string
+	rawSize  int
+	request  string
+	parts    [][]byte
+	count    int
+	updated  time.Time
 }
 
 func dial(ctx context.Context, p Pairing, role string) (*websocket.Conn, *websocket.Conn, string, error) {
@@ -311,34 +309,38 @@ func (w *wire) waitPath(ctx context.Context) error {
 	}
 	return nil
 }
-func (w *wire) send(data []byte) error { return w.sendContext(w.ctx, data) }
-func (w *wire) sendContext(ctx context.Context, data []byte) error {
+func (w *wire) sendContext(ctx context.Context, request string, data []byte) error {
+	if request == "" {
+		return errors.New("missing RPC request ID")
+	}
 	if err := w.ctx.Err(); err != nil {
 		return err
 	}
 	if len(data) > 16<<20 {
 		return errors.New("response exceeds 16 MiB")
 	}
-	// One lock acquisition per frame lets watch/command responses pass
-	// between fragments of a large history or catalogue response.
+	priority := transport.PriorityFor(ctx, len(data))
+	rawSize := len(data)
+	data, encoding, err := transport.Encode(data)
+	if err != nil {
+		return err
+	}
 	id := relay.ID()
-	total := max(1, (len(data)+11999)/12000)
+	total := max(1, (len(data)+transport.ChunkSize-1)/transport.ChunkSize)
 	for i := 0; i < total; i++ {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		start, end := i*12000, min((i+1)*12000, len(data))
-		request, _ := ctx.Value(responseRequestKey{}).(string)
-		part, _ := json.Marshal(chunk{ID: id, Index: i, Total: total, Data: data[start:end], Request: request})
-		if err := w.sendPart(ctx, part); err != nil {
+		start, end := i*transport.ChunkSize, min((i+1)*transport.ChunkSize, len(data))
+		part, _ := json.Marshal(chunk{Request: request, ID: id, Index: i, Total: total, Encoding: encoding, RawSize: rawSize, Data: data[start:end]})
+		if err := w.sender.Send(ctx, w.ctx, priority, func() error { return w.sendPart(ctx, part) }); err != nil {
 			return err
 		}
 	}
 	return nil
 }
+
 func (w *wire) sendPart(ctx context.Context, part []byte) error {
-	w.sendMu.Lock()
-	defer w.sendMu.Unlock()
 	if err := w.waitPath(ctx); err != nil {
 		return err
 	}
@@ -415,10 +417,10 @@ func (w *wire) onChunk(data []byte) {
 		return
 	}
 	var c chunk
-	if json.Unmarshal(plain, &c) != nil || c.Total < 1 || c.Total > 1400 || c.Index < 0 || c.Index >= c.Total || len(c.Data) > 12000 {
+	if json.Unmarshal(plain, &c) != nil || !c.Valid() {
 		return
 	}
-	if c.Request != "" && w.wantsResponse != nil && !w.wantsResponse(c.Request) {
+	if w.wantsResponse != nil && !w.wantsResponse(c.Request) {
 		w.discardResponse(c.Request)
 		return
 	}
@@ -439,10 +441,10 @@ func (w *wire) onChunk(data []byte) {
 			w.mu.Unlock()
 			return
 		}
-		a = &assembly{parts: make([][]byte, c.Total), updated: time.Now(), request: c.Request}
+		a = &assembly{parts: make([][]byte, c.Total), updated: time.Now(), request: c.Request, encoding: c.Encoding, rawSize: c.RawSize}
 		w.chunks[c.ID] = a
 	}
-	if len(a.parts) != c.Total || a.parts[c.Index] != nil {
+	if a.encoding != c.Encoding || a.rawSize != c.RawSize || a.request != c.Request || len(a.parts) != c.Total || a.parts[c.Index] != nil {
 		w.mu.Unlock()
 		return
 	}
@@ -461,7 +463,10 @@ func (w *wire) onChunk(data []byte) {
 	}
 	delete(w.chunks, c.ID)
 	w.mu.Unlock()
-	w.onData(full)
+	decoded, err := transport.Decode(full, a.encoding, a.rawSize)
+	if err == nil {
+		w.onData(decoded)
+	}
 }
 func (w *wire) setup() (*webrtc.PeerConnection, error) {
 	w.mu.Lock()
@@ -648,6 +653,7 @@ func (w *wire) signal(raw []byte) {
 var nextRequest atomic.Uint64
 
 type helloMessage struct {
+	RPC         int    `json:"rpc"`
 	ClientNonce string `json:"clientNonce"`
 	HostNonce   string `json:"hostNonce,omitempty"`
 }
@@ -661,7 +667,7 @@ func (w *wire) cipher(kind string) *cryptor {
 	return w.crypto
 }
 func (w *wire) handshake(ctx context.Context) error {
-	raw, _ := json.Marshal(helloMessage{ClientNonce: w.clientNonce})
+	raw, _ := json.Marshal(helloMessage{RPC: transport.Version, ClientNonce: w.clientNonce})
 	if err := w.relaySendContext(ctx, "hello", raw); err != nil {
 		return err
 	}
@@ -671,12 +677,27 @@ func (w *wire) handshake(ctx context.Context) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-w.ctx.Done():
+		w.mu.Lock()
+		err := w.handshakeError
+		w.mu.Unlock()
+		if err != nil {
+			return err
+		}
 		return w.ctx.Err()
 	}
 }
 func (w *wire) hello(raw []byte) {
 	var hello helloMessage
 	if json.Unmarshal(raw, &hello) != nil {
+		return
+	}
+	if hello.RPC != transport.Version {
+		err := errors.New("设备协议版本不一致，请同时更新控制端和被控端")
+		w.mu.Lock()
+		w.handshakeError = err
+		w.mu.Unlock()
+		w.progress("protocol-mismatch", "handshake", err.Error(), "当前加密 RPC 协议为第 2 版", "warning")
+		w.close()
 		return
 	}
 	clientBytes, err := hex.DecodeString(hello.ClientNonce)

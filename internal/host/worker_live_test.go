@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -31,7 +32,10 @@ func TestDeployedWorkerNativeRelay(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg.ServiceURL, cfg.DeviceName = origin, "Isolated relay test host"
-	d := &control.Dispatcher{Providers: map[string]provider.Provider{"codex-cli": testagent.New()}}
+	agent := testagent.New()
+	text := strings.Repeat("隔离测试历史消息🙂 with repeated JSON content.\n", 20000)
+	agent.Turns["existing"] = []provider.Turn{{ID: "history", Status: "completed", Items: []provider.Item{{ID: "message", Role: "assistant", Text: text}}}}
+	d := &control.Dispatcher{Providers: map[string]provider.Provider{"codex-cli": agent}}
 	m := host.New(cfg, d, func(config.Config) remote.Options { return remote.Options{RelayOnly: true} })
 	done := make(chan struct{})
 	go func() { defer close(done); m.Run(ctx) }()
@@ -55,13 +59,20 @@ func TestDeployedWorkerNativeRelay(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, req := range []control.Request{{Method: "providers"}, {Method: "sessions", Provider: "codex-cli"}} {
+	for _, req := range []control.Request{{Method: "providers"}, {Method: "sessions", Provider: "codex-cli"}, {Method: "transcript", Provider: "codex-cli", Session: "existing"}} {
+		started := time.Now()
 		result, err := hub.Call(ctx, saved.ID, req)
 		if err != nil {
 			t.Fatal(err)
 		}
 		raw, _ := json.Marshal(result)
-		t.Log(req.Method, "response bytes:", len(raw))
+		t.Log(req.Method, "response bytes:", len(raw), "roundtrip including cache:", time.Since(started))
+		if req.Method == "transcript" {
+			var transcript provider.Transcript
+			if json.Unmarshal(raw, &transcript) != nil || len(transcript.Turns) != 1 || transcript.Turns[0].Items[0].Text != text {
+				t.Fatal("compressed transcript changed its message content")
+			}
+		}
 	}
 	// Keep the real relay alive across several heartbeats and a lease renewal.
 	// Short connect/read tests miss sockets closed by the first liveness probe.

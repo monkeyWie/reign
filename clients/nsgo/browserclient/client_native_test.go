@@ -44,7 +44,7 @@ func (*fixtureProvider) Transcript(ctx context.Context, _, _ string) (provider.T
 	out.Turns = []provider.Turn{turn}
 	return out, nil
 }
-func TestLegacyHostEncryptedInterop(t *testing.T) {
+func TestHostEncryptedInterop(t *testing.T) {
 	token := strings.Repeat("r", 32)
 	srv := httptest.NewServer(relay.New(token))
 	defer srv.Close()

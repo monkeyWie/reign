@@ -2,7 +2,6 @@ package hubui
 
 import (
 	"context"
-	"strings"
 	"time"
 )
 
@@ -53,34 +52,11 @@ func (s *State) watchNativeTask(ctx context.Context, key string, task Object, mo
 		})
 		return status != "inProgress"
 	}
-	legacy := false
-	check := func(allowLegacyHistory bool) bool {
-		if !legacy {
-			value, err := rpc(ctx, s.api, target, provider, session, "turn.status", Object{"turn": task["turnId"], "fresh": true})
-			if err == nil {
-				return post(object(value))
-			}
-			if !strings.Contains(err.Error(), `unknown method "turn.status"`) {
-				return false
-			}
-			legacy = true
-		}
-		// Old hosts can still supply one baseline/reset, but an idle heartbeat
-		// must never trigger another recent-history download in the background.
-		if !allowLegacyHistory {
-			return false
-		}
-		value, err := rpc(ctx, s.api, target, provider, session, "transcript", Object{"fresh": true})
-		if err == nil {
-			for _, turn := range objects(object(value)["turns"]) {
-				if post(turn) {
-					return true
-				}
-			}
-		}
-		return false
+	check := func() bool {
+		value, err := rpc(ctx, s.api, target, provider, session, "turn.status", Object{"turn": task["turnId"], "fresh": true})
+		return err == nil && post(object(value))
 	}
-	if check(true) {
+	if check() {
 		return
 	}
 	epoch, cursor := "", int64(0)
@@ -103,7 +79,7 @@ func (s *State) watchNativeTask(ctx context.Context, key string, task Object, mo
 				return
 			}
 		}
-		if (flag(batch, "reset") || flag(batch, "heartbeat")) && check(flag(batch, "reset")) {
+		if (flag(batch, "reset") || flag(batch, "heartbeat")) && check() {
 			return
 		}
 		epoch, cursor = str(batch, "epoch"), number(batch, "cursor")

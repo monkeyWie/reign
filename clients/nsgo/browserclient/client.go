@@ -19,6 +19,7 @@ import (
 	"github.com/monkeyWie/reignhub/internal/connectivity"
 	"github.com/monkeyWie/reignhub/internal/control"
 	"github.com/monkeyWie/reignhub/internal/provider"
+	"github.com/monkeyWie/reignhub/internal/transport"
 )
 
 type Object = map[string]any
@@ -34,14 +35,10 @@ type frame struct {
 	Kind       string `json:"kind"`
 	Body       []byte `json:"body"`
 }
-type chunk struct {
-	ID      string `json:"id"`
-	Index   int    `json:"i"`
-	Total   int    `json:"n"`
-	Data    []byte `json:"b"`
-	Request string `json:"r,omitempty"`
-}
+type chunk = transport.Chunk
 type assembly struct {
+	encoding    string
+	rawSize     int
 	request     string
 	parts       [][]byte
 	count, size int
@@ -60,7 +57,8 @@ type cached struct {
 	bytes    int
 }
 type Client struct {
-	mu, sending  sync.Mutex
+	mu           sync.Mutex
+	sender       transport.Sender
 	ctx          context.Context
 	cancel       context.CancelFunc
 	ws           *websocket.Conn
@@ -83,8 +81,9 @@ type Client struct {
 }
 
 type pendingCall struct {
+	idle      *transport.ReadIdle
 	ctx       context.Context
-	responses chan Object
+	responses *transport.Inbox[Object]
 }
 
 func id() string {
@@ -155,7 +154,7 @@ func connectOnce(ctx context.Context, p Pairing) (*Client, error) {
 	}
 	connectivity.Report(ctx, "handshake", "正在与被控设备建立加密握手", connectivity.StageTimeout)
 	handshake, stop := context.WithTimeout(ctx, connectivity.StageTimeout)
-	hello, _ := json.Marshal(Object{"clientNonce": c.nonce})
+	hello, _ := json.Marshal(Object{"rpc": transport.Version, "clientNonce": c.nonce})
 	e = c.relaySend("hello", hello)
 	if e == nil {
 		select {
@@ -518,9 +517,17 @@ func (c *Client) readLoop() {
 			if e != nil {
 				continue
 			}
-			var hello struct{ ClientNonce, HostNonce string }
+			var hello struct {
+				RPC                    int
+				ClientNonce, HostNonce string
+			}
 			if json.Unmarshal(plain, &hello) != nil || hello.ClientNonce != c.nonce || len(hello.HostNonce) != 64 {
 				continue
+			}
+			if hello.RPC != transport.Version {
+				c.note("protocol-mismatch", "handshake", "设备协议版本不一致，请同时更新控制端和被控端", "当前加密 RPC 协议为第 2 版", "warning")
+				c.Close()
+				return
 			}
 			if _, e = hex.DecodeString(hello.HostNonce); e != nil {
 				continue
@@ -577,11 +584,11 @@ func (c *Client) receiveChunk(packet []byte) error {
 		return e
 	}
 	var part chunk
-	if json.Unmarshal(plain, &part) != nil || part.Total < 1 || part.Total > 1400 || part.Index < 0 || part.Index >= part.Total || len(part.Data) > 12000 || len(part.ID) != 32 {
+	if json.Unmarshal(plain, &part) != nil || !part.Valid() {
 		return errors.New("无效分片")
 	}
 	c.mu.Lock()
-	if part.Request != "" && c.pending[part.Request] == nil {
+	if c.pending[part.Request] == nil {
 		for id, a := range c.chunks {
 			if a.request == part.Request {
 				delete(c.chunks, id)
@@ -590,6 +597,7 @@ func (c *Client) receiveChunk(packet []byte) error {
 		c.mu.Unlock()
 		return nil
 	}
+	c.pending[part.Request].idle.Touch()
 	for k, a := range c.chunks {
 		if time.Since(a.updated) > 2*time.Minute {
 			delete(c.chunks, k)
@@ -601,10 +609,10 @@ func (c *Client) receiveChunk(packet []byte) error {
 			c.mu.Unlock()
 			return errors.New("过多分片")
 		}
-		a = &assembly{parts: make([][]byte, part.Total), updated: time.Now(), request: part.Request}
+		a = &assembly{parts: make([][]byte, part.Total), updated: time.Now(), request: part.Request, encoding: part.Encoding, rawSize: part.RawSize}
 		c.chunks[part.ID] = a
 	}
-	if len(a.parts) != part.Total || a.parts[part.Index] != nil {
+	if a.encoding != part.Encoding || a.rawSize != part.RawSize || a.request != part.Request || len(a.parts) != part.Total || a.parts[part.Index] != nil {
 		c.mu.Unlock()
 		return nil
 	}
@@ -631,7 +639,11 @@ func (c *Client) receiveChunk(packet []byte) error {
 		out = append(out, p...)
 	}
 	c.mu.Unlock()
-	c.response(out)
+	decoded, err := transport.Decode(out, a.encoding, a.rawSize)
+	if err != nil {
+		return err
+	}
+	c.response(decoded)
 	return nil
 }
 func (c *Client) response(b []byte) {
@@ -643,13 +655,10 @@ func (c *Client) response(b []byte) {
 	c.mu.Lock()
 	pending := c.pending[id]
 	c.mu.Unlock()
-	if pending != nil {
-		select {
-		case pending.responses <- v:
-		case <-pending.ctx.Done():
-		case <-c.ctx.Done():
-		}
+	if pending != nil && pending.ctx.Err() == nil {
+		pending.responses.Push(v, len(b))
 	}
+
 }
 func (c *Client) Call(ctx context.Context, request Object) (any, error) {
 	ctx, cancel := context.WithCancel(ctx)
@@ -673,13 +682,16 @@ func (c *Client) Call(ctx context.Context, request Object) (any, error) {
 		requestID = id()
 		r["id"] = requestID
 	}
-	pending := make(chan Object, 8)
+	idle := transport.NewReadIdle(control.CancellableRead(method))
+	defer idle.Stop()
+	pending := transport.NewInbox[Object]()
+	defer pending.Close()
 	c.mu.Lock()
 	if c.pending[requestID] != nil {
 		c.mu.Unlock()
 		return nil, errors.New("重复的指令 ID")
 	}
-	c.pending[requestID] = &pendingCall{ctx: ctx, responses: pending}
+	c.pending[requestID] = &pendingCall{ctx: ctx, responses: pending, idle: idle}
 	c.mu.Unlock()
 	defer func() {
 		c.mu.Lock()
@@ -695,15 +707,36 @@ func (c *Client) Call(ctx context.Context, request Object) (any, error) {
 	if len(raw) > 1<<20 {
 		return nil, errors.New("指令过长")
 	}
-	if e := c.send(raw); e != nil {
+	if e := c.send(ctx, requestID, method, raw); e != nil {
 		return nil, e
+	}
+	idle.Touch()
+	cancelRead := func() {
+		if !control.CancellableRead(method) {
+			return
+		}
+		go func() {
+			cancelID := id()
+			raw, _ := json.Marshal(Object{"id": cancelID, "method": control.CancelRead, "cancel": requestID, "provider": r["provider"], "session": r["session"]})
+			_ = c.send(c.ctx, cancelID, control.CancelRead, raw)
+		}()
 	}
 	var response Object
 	var history provider.TranscriptBuffer
 	historyBytes := 0
 	for {
 		select {
-		case response = <-pending:
+		case <-pending.Ready:
+			var ok bool
+			var err error
+			response, ok, err = pending.Take()
+			if err != nil {
+				cancelRead()
+				return nil, err
+			}
+			if !ok {
+				continue
+			}
 			if response["partial"] == true {
 				if method != "transcript" || r["progress"] != true {
 					return nil, errors.New("unexpected partial response")
@@ -726,13 +759,14 @@ func (c *Client) Call(ctx context.Context, request Object) (any, error) {
 				}
 				continue
 			}
-		case <-ctx.Done():
-			if control.CancellableRead(method) {
-				go func() {
-					raw, _ := json.Marshal(Object{"id": id(), "method": control.CancelRead, "cancel": requestID, "provider": r["provider"], "session": r["session"]})
-					_ = c.send(raw)
-				}()
+		case <-idle.C:
+			if !idle.Expired() {
+				continue
 			}
+			cancelRead()
+			return nil, errors.New("设备读取连续 30 秒没有进展，已取消本次读取，请重试")
+		case <-ctx.Done():
+			cancelRead()
 			if read || method == "watch" || method == "attachment.read" {
 				return nil, ctx.Err()
 			}
@@ -747,7 +781,7 @@ func (c *Client) Call(ctx context.Context, request Object) (any, error) {
 	}
 	if e, _ := response["error"].(string); e != "" {
 		code, _ := response["code"].(string)
-		if control.NeedsConnectionRenewal(code, e) {
+		if code == control.ConnectionAuthorizationExpired {
 			c.note("authorization-renewal", "retry", "连接授权需要续期，重新建立连接", "复用设备配对，无需重新登录", "warning")
 			c.Close()
 			return nil, errors.New("连接授权需要续期，请在连接恢复后重试")
@@ -802,7 +836,7 @@ func (c *Client) Call(ctx context.Context, request Object) (any, error) {
 	}
 	return result, nil
 }
-func (c *Client) send(raw []byte) error {
+func (c *Client) send(ctx context.Context, requestID, method string, raw []byte) error {
 	c.mu.Lock()
 	pc, crypto := c.pc, c.crypto
 	c.mu.Unlock()
@@ -810,19 +844,24 @@ func (c *Client) send(raw []byte) error {
 		return errors.New("连接已关闭")
 	}
 	direct := pc != nil && pc.Direct()
-	count := (len(raw) + 11999) / 12000
+	priority := transport.PriorityFor(transport.WithMethod(ctx, method), len(raw))
+	rawSize := len(raw)
+	raw, encoding, err := transport.Encode(raw)
+	if err != nil {
+		return err
+	}
+	count := max(1, (len(raw)+transport.ChunkSize-1)/transport.ChunkSize)
 	transfer := id()
 	for i := 0; i < count; i++ {
-		part, _ := json.Marshal(chunk{ID: transfer, Index: i, Total: count, Data: raw[i*12000 : min(len(raw), (i+1)*12000)]})
-		if err := c.sendPart(part, pc, crypto, direct); err != nil {
+		part, _ := json.Marshal(chunk{Request: requestID, ID: transfer, Index: i, Total: count, Encoding: encoding, RawSize: rawSize, Data: raw[i*transport.ChunkSize : min(len(raw), (i+1)*transport.ChunkSize)]})
+		if err := c.sender.Send(ctx, c.ctx, priority, func() error { return c.sendPart(part, pc, crypto, direct) }); err != nil {
 			return err
 		}
 	}
 	return nil
 }
+
 func (c *Client) sendPart(part []byte, pc peer, crypto *cryptor, direct bool) error {
-	c.sending.Lock()
-	defer c.sending.Unlock()
 	if direct {
 		packet, e := crypto.seal(c.aad("chunk", true), part)
 		if e != nil {

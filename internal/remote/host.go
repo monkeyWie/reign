@@ -13,6 +13,7 @@ import (
 	"github.com/monkeyWie/reignhub/internal/device"
 	"github.com/monkeyWie/reignhub/internal/provider"
 	"github.com/monkeyWie/reignhub/internal/relay"
+	"github.com/monkeyWie/reignhub/internal/transport"
 )
 
 // RunHost reconnects the authenticated signal lease independently of existing
@@ -142,7 +143,7 @@ func serveHostObserved(ctx context.Context, p Pairing, opts Options, d *control.
 				}
 				if err := peer.authorize(p.Host, deviceID, req); err != nil {
 					encoded, _ := json.Marshal(authorizationFailure(req.ID, err))
-					go peer.send(encoded)
+					go peer.sendContext(peer.ctx, req.ID, encoded)
 					return
 				}
 				if req.Method == control.CancelRead {
@@ -152,11 +153,12 @@ func serveHostObserved(ctx context.Context, p Pairing, opts Options, d *control.
 				// Agent work can outlive a fixed RPC budget. Cancel with the peer
 				// instead; connection liveness is checked independently.
 				callCtx, stop := context.WithCancel(peer.ctx)
+				callCtx = transport.WithMethod(callCtx, req.Method)
 				watch := req.Method == "watch"
 				busy := func() {
 					stop()
 					encoded, _ := json.Marshal(control.Response{ID: req.ID, Code: "HOST_BUSY", Error: "设备读取繁忙，请稍后重试"})
-					go peer.send(encoded)
+					go peer.sendContext(peer.ctx, req.ID, encoded)
 				}
 				if !watch {
 					select {
@@ -174,7 +176,6 @@ func serveHostObserved(ctx context.Context, p Pairing, opts Options, d *control.
 					busy()
 					return
 				}
-				callCtx = context.WithValue(callCtx, responseRequestKey{}, req.ID)
 				go func() {
 					defer reads.remove(req.ID, read)
 					if !watch {
@@ -207,7 +208,7 @@ func serveHostObserved(ctx context.Context, p Pairing, opts Options, d *control.
 							if len(encoded) > 16<<20 {
 								return errors.New("消息超过 16 MiB")
 							}
-							if err := peer.sendContext(callCtx, encoded); err != nil {
+							if err := peer.sendContext(callCtx, originalID, encoded); err != nil {
 								return err
 							}
 							partialSent = true
@@ -249,7 +250,7 @@ func serveHostObserved(ctx context.Context, p Pairing, opts Options, d *control.
 					if len(encoded) > 16<<20 {
 						encoded, _ = json.Marshal(control.Response{ID: originalID, Error: "响应超过 16 MiB，请缩小查询范围"})
 					}
-					_ = peer.sendContext(callCtx, encoded)
+					_ = peer.sendContext(callCtx, originalID, encoded)
 				}()
 			})
 			if err != nil {

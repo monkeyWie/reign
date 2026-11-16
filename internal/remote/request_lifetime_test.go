@@ -108,7 +108,7 @@ func TestFragmentLifetimeTracksProgress(t *testing.T) {
 			// must renew the inactivity window, unlike the old 30s total age.
 			w.chunks["snapshot"].updated = time.Now().Add(-time.Minute)
 		}
-		plain, _ := json.Marshal(chunk{ID: "snapshot", Index: i, Total: 3, Data: []byte(data)})
+		plain, _ := json.Marshal(chunk{Encoding: "identity", RawSize: len("large slow snapshot"), Request: "history", ID: "snapshot", Index: i, Total: 3, Data: []byte(data)})
 		sealed, err := sender.seal(w.aad("chunk", false), plain)
 		if err != nil {
 			t.Fatal(err)

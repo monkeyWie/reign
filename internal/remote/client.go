@@ -14,6 +14,7 @@ import (
 	"github.com/monkeyWie/reignhub/internal/control"
 	"github.com/monkeyWie/reignhub/internal/provider"
 	"github.com/monkeyWie/reignhub/internal/relay"
+	"github.com/monkeyWie/reignhub/internal/transport"
 	"github.com/pion/webrtc/v4"
 )
 
@@ -27,8 +28,9 @@ type Client struct {
 }
 
 type pendingCall struct {
+	idle      *transport.ReadIdle
 	ctx       context.Context
-	responses chan control.Response
+	responses *transport.Inbox[control.Response]
 }
 
 func Connect(ctx context.Context, p Pairing, opts Options) (*Client, error) {
@@ -68,20 +70,26 @@ func connectOnce(ctx context.Context, p Pairing, opts Options) (*Client, error) 
 		c.mu.Lock()
 		ch := c.pending[r.ID]
 		c.mu.Unlock()
-		if ch != nil {
-			select {
-			case ch.responses <- r:
-			case <-ch.ctx.Done():
-			case <-c.done:
-			}
+		if ch != nil && ch.ctx.Err() == nil {
+			ch.responses.Push(r, len(data))
 		}
+
 	})
 	if err != nil {
 		ws.CloseNow()
 		return nil, err
 	}
 	c.wire = w
-	w.wantsResponse = func(id string) bool { c.mu.Lock(); defer c.mu.Unlock(); return c.pending[id] != nil }
+	w.wantsResponse = func(id string) bool {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		pending := c.pending[id]
+		if pending == nil {
+			return false
+		}
+		pending.idle.Touch()
+		return true
+	}
 	w.relayLink = &relayLink{}
 	w.relayLink.socket.Store(dataWS)
 	go func() {
@@ -258,9 +266,12 @@ func (c *Client) Call(ctx context.Context, r control.Request, out any) error {
 	if r.ID == "" {
 		r.ID = fmt.Sprintf("%s-%d", relay.ID(), nextRequest.Add(1))
 	}
-	ch := make(chan control.Response, 8)
+	idle := transport.NewReadIdle(control.CancellableRead(r.Method))
+	defer idle.Stop()
+	ch := transport.NewInbox[control.Response]()
+	defer ch.Close()
 	c.mu.Lock()
-	c.pending[r.ID] = &pendingCall{ctx: ctx, responses: ch}
+	c.pending[r.ID] = &pendingCall{ctx: ctx, responses: ch, idle: idle}
 	c.mu.Unlock()
 	defer func() { c.mu.Lock(); delete(c.pending, r.ID); c.mu.Unlock(); c.wire.discardResponse(r.ID) }()
 	raw, err := json.Marshal(r)
@@ -270,14 +281,23 @@ func (c *Client) Call(ctx context.Context, r control.Request, out any) error {
 	if len(raw) > 1<<20 {
 		return errors.New("request too large")
 	}
-	if err = c.wire.sendContext(ctx, raw); err != nil {
+	if err = c.wire.sendContext(transport.WithMethod(ctx, r.Method), r.ID, raw); err != nil {
 		return err
 	}
+	idle.Touch()
 	var history provider.TranscriptBuffer
 	historyBytes := 0
 	for {
 		select {
-		case result := <-ch:
+		case <-ch.Ready:
+			result, ok, err := ch.Take()
+			if err != nil {
+				c.cancelRead(r)
+				return err
+			}
+			if !ok {
+				continue
+			}
 			if result.Partial {
 				if !r.Progress || r.Method != "transcript" {
 					return errors.New("unexpected partial response")
@@ -297,7 +317,7 @@ func (c *Client) Call(ctx context.Context, r control.Request, out any) error {
 				continue
 			}
 			if result.Error != "" {
-				if control.NeedsConnectionRenewal(result.Code, result.Error) {
+				if result.Code == control.ConnectionAuthorizationExpired {
 					c.wire.progress("authorization-renewal", "retry", "连接授权需要续期，重新建立连接", "复用已保存的设备配对，无需重新登录；不会自动重放写操作", "warning")
 					// Stop reporting an expired direct path as connected. The hub's
 					// existing reconnection policy can now obtain a fresh service lease.
@@ -329,6 +349,12 @@ func (c *Client) Call(ctx context.Context, r control.Request, out any) error {
 				return json.Unmarshal(result.Result, out)
 			}
 			return nil
+		case <-idle.C:
+			if !idle.Expired() {
+				continue
+			}
+			c.cancelRead(r)
+			return errors.New("设备读取连续 30 秒没有进展，已取消本次读取，请重试")
 		case <-ctx.Done():
 			c.cancelRead(r)
 			if control.ReadOnly(r.Method) {
