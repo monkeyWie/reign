@@ -1,3 +1,4 @@
+import { PlatformIcon } from "../../components/platform-icon";
 import { pageMetadata, marketingMeta, siteOrigin } from "../../lib/seo";
 import { translate, isLocale, localizeHref } from "../../lib/i18n";
 import { notFound } from "next/navigation";
@@ -11,10 +12,8 @@ import {
   FolderOpen,
   Globe,
   HardDrive,
-  Monitor,
   Network,
   ShieldCheck,
-  Smartphone,
   Terminal,
   Zap,
 } from "lucide-react";
@@ -74,9 +73,18 @@ export default async function Home({
               </Link>
             </div>
             <div className="hero-platforms">
-              <Monitor size={14} /> macOS · Windows · Linux <span />
-              <Smartphone size={14} /> Android · iOS <span />
-              <Globe size={14} /> Web
+              {(
+                ["macos", "windows", "linux", "android", "ios", "web"] as const
+              ).map((platform, index) => (
+                <span key={platform} className="hero-platform-item">
+                  <PlatformIcon platform={platform} size={14} />
+                  {
+                    ["macOS", "Windows", "Linux", "Android", "iOS", "Web"][
+                      index
+                    ]
+                  }
+                </span>
+              ))}
             </div>
           </div>
           <ProductPreview />

@@ -143,8 +143,11 @@
   color: var(--muted);
   margin-top: 30px;
 }
-.hero-platforms > span {
-  width: 5px;
+.hero-platforms > .hero-platform-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-right: 5px;
 }
 .hero-preview-note {
   display: block;
@@ -1422,9 +1425,6 @@
     font-size: 8px;
     gap: 5px;
     line-height: 2;
-  }
-  .hero-platforms > span {
-    display: none;
   }
   .hero-platforms svg {
     width: 12px;

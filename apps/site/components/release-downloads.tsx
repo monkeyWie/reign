@@ -1,12 +1,5 @@
-import {
-  ArrowUpRight,
-  Code2,
-  Download,
-  Laptop,
-  Monitor,
-  Smartphone,
-  Terminal,
-} from "lucide-react";
+import { PlatformIcon } from "./platform-icon";
+import { ArrowUpRight, Code2, Download } from "lucide-react";
 import { translate, type Locale } from "../lib/i18n";
 import {
   releasesURL,
@@ -28,7 +21,6 @@ export function ReleaseDownloads({
   const platforms = [
     {
       id: "macos",
-      Icon: Monitor,
       title: "macOS",
       arch: "Apple Silicon / Intel",
       format: "DMG",
@@ -38,7 +30,6 @@ export function ReleaseDownloads({
     },
     {
       id: "windows",
-      Icon: Laptop,
       title: "Windows",
       arch: "x64 / arm64",
       format: t("EXE 安装程序"),
@@ -46,7 +37,6 @@ export function ReleaseDownloads({
     },
     {
       id: "linux",
-      Icon: Terminal,
       title: "Linux",
       arch: "x64 / arm64",
       format: "DEB / Arch / AppImage",
@@ -54,7 +44,6 @@ export function ReleaseDownloads({
     },
     {
       id: "android",
-      Icon: Smartphone,
       title: "Android",
       arch: "arm64",
       format: "APK",
@@ -62,7 +51,6 @@ export function ReleaseDownloads({
     },
     {
       id: "ios",
-      Icon: Smartphone,
       title: "iOS",
       arch: "iPhone / iPad",
       format: t("未签名 IPA"),
@@ -70,7 +58,6 @@ export function ReleaseDownloads({
     },
   ] satisfies {
     id: Platform;
-    Icon: typeof Monitor;
     title: string;
     arch: string;
     format: string;
@@ -111,7 +98,7 @@ export function ReleaseDownloads({
       </section>
       <section className="site-section site-width">
         <div className="download-grid">
-          {platforms.map(({ id, Icon, title, arch, format, note }) => {
+          {platforms.map(({ id, title, arch, format, note }) => {
             const assets =
               release?.assets
                 .filter((a) => a.platform === id)
@@ -122,7 +109,7 @@ export function ReleaseDownloads({
                 ) || [];
             return (
               <article key={id}>
-                <Icon size={25} />
+                <PlatformIcon platform={id} size={25} />
                 <h2>{title}</h2>
                 <p className="download-arch">{arch}</p>
                 <span className="site-tag">{format}</span>

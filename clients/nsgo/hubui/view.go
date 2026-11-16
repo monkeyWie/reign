@@ -286,7 +286,7 @@ func (s *State) local(cx *core.Scope) core.Node {
 	copyID := s.copyButton(cx, "copy-device-id", "复制 ID", "outline", func() string { return str(s.host, "connectionId") })
 	return core.Scroll{TestID: "local-dashboard", Style: fill, StyleFunc: func() core.Style { return s.workspaceSurface(cx) }, Children: []core.Node{core.View{Style: core.Style{Padding: core.All(32), Gap: 18}, Children: []core.Node{
 		heading(cx, "这台电脑", "允许已授权设备访问本机 Agent，官方应用仍可照常使用。"),
-		card(cx, row(glyph(cx, lucide.Monitor, 22), dynamicText(cx, func() string {
+		card(cx, row(identityGlyph(cx, Object{"platform": platformClientInfo().Platform, "kind": "native"}, 22), dynamicText(cx, func() string {
 			s.read()
 			name := str(s.host, "name")
 			if name == "" {
