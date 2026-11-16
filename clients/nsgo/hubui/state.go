@@ -18,6 +18,7 @@ type draftState struct {
 }
 
 type State struct {
+	directoryGeneration                                     uint64
 	phoneNav                                                *base.Nav[string]
 	clientName                                              string
 	drafts                                                  map[string]draftState

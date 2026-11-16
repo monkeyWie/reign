@@ -13,6 +13,8 @@ func (s *State) refreshDevicePresence() {
 	if s.suspended || s.directoryChecking || len(s.devices) == 0 || time.Since(s.directoryChecked) < 30*time.Second {
 		return
 	}
+	s.directoryGeneration++
+	generation := s.directoryGeneration
 	s.directoryChecking = true
 	s.directoryChecked = time.Now()
 	ctx, cancel := context.WithCancel(s.ctx)
@@ -21,6 +23,9 @@ func (s *State) refreshDevicePresence() {
 		defer cancel()
 		v, err := s.api.Call(ctx, "client.presence", nil, "", nil)
 		s.cx.Post(func() {
+			if generation != s.directoryGeneration {
+				return
+			}
 			s.directoryChecking = false
 			s.directoryCancel = nil
 			if s.ctx.Err() != nil || s.suspended {
@@ -73,10 +78,8 @@ func (s *State) applyDevicePresence(statuses []Object) {
 		h := s.connection(id)
 		if s.deviceOffline(id) {
 			if h.reconnecting && h.attempt != nil && h.attempt.active {
-				a := h.attempt
-				a.active, a.finished = false, time.Now()
-				a.cancel()
-				h.reconnecting, h.waitingOnline = false, true
+				s.cancelDeviceAttempt(id, "设备离线，结束本轮连接")
+				h.waitingOnline = true
 				s.logConnection(id, "presence", "设备离线，等待上线", "检测到上线后恢复连接", "info")
 			}
 		} else if online, known := s.presenceFor(status)["online"].(bool); known && online && wasOffline {

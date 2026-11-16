@@ -193,3 +193,92 @@ func TestConnectionTimelineIsBoundedAndUpdatesNodeResults(t *testing.T) {
 		t.Fatal("unbounded connection history")
 	}
 }
+
+func TestCanceledRetryStopsTimerAndAllowsAnotherRetry(t *testing.T) {
+	f := &retryProgressFixture{demoAPI: newDemoAPI(), steps: make(chan connectivity.Progress, 8), finish: make(chan error, 1)}
+	app := nsgotest.Start(t, func(cx *core.Scope) core.Node { return RootWithAPI(cx, f, true) }, nsgotest.Size(390, 844))
+	openDemoChat(t, app)
+	app.Press("id:connection-status-demo-device")
+	app.Press("id:connection-retry")
+	app.WaitFor("text:正在建立信令连接", time.Second)
+	app.Press("id:connect-cancel")
+	app.WaitFor("role:button 未连接", time.Second)
+	app.Press("id:connection-status-demo-device")
+	elapsed := app.Find("id:connect-elapsed").Text
+	app.WaitUntil(2*time.Second, func() bool { return f.calls.Load() == 1 })
+	if app.Exists("id:connection-loading") || app.Exists("id:connection-retrying") {
+		t.Fatal("canceled task still claims to be connecting")
+	}
+	app.Press("id:copy-connection-log")
+	if !strings.Contains(app.Clipboard, "用户取消连接") || !strings.Contains(app.Clipboard, "active=false complete=false") {
+		t.Fatal("cancel was not recorded as a terminal attempt")
+	}
+	if app.Find("id:connect-elapsed").Text != elapsed {
+		t.Fatal("terminal attempt timer kept running")
+	}
+	app.Press("id:connection-retry")
+	app.WaitUntil(time.Second, func() bool { return f.calls.Load() == 2 })
+	app.WaitFor("id:connection-loading", time.Second)
+	f.finish <- nil
+	app.WaitFor("text:连接正常，消息会持续同步。", time.Second)
+}
+
+func TestInactiveAttemptElapsedDoesNotAccumulateWallTime(t *testing.T) {
+	start := time.Now().Add(-2 * time.Hour)
+	for _, a := range []*connectAttempt{
+		{started: start, finished: start.Add(3 * time.Second)},
+		{started: start, events: []connectionStep{{at: start.Add(3 * time.Second)}}},
+	} {
+		if a.elapsed() != 3*time.Second {
+			t.Fatalf("inactive attempt accumulated wall time: %s", a.elapsed())
+		}
+	}
+}
+
+func TestManualRetryReplacesStuckAttemptAndIgnoresOldCompletion(t *testing.T) {
+	f := &retryProgressFixture{demoAPI: newDemoAPI(), steps: make(chan connectivity.Progress, 8), finish: make(chan error, 1)}
+	app, s := conversationFixture(t, f, 390, Object{}, false)
+	old := make(chan *connectAttempt, 1)
+	app.Post(func() {
+		s.cx.Post(func() {
+			s.reconnectDevice("demo-device")
+			old <- s.connection("demo-device").attempt
+		})
+	})
+	app.WaitUntil(time.Second, func() bool { return f.calls.Load() == 1 })
+	previous := <-old
+	app.Post(func() { s.cx.Post(func() { s.reconnectDevice("demo-device") }) })
+	app.WaitUntil(time.Second, func() bool { return f.calls.Load() == 2 })
+	check := make(chan bool, 1)
+	app.Post(func() {
+		s.cx.Post(func() {
+			h := s.connection("demo-device")
+			check <- !previous.active && !previous.finished.IsZero() && h.attempt != previous && h.attempt.active && h.reconnecting
+		})
+	})
+	app.WaitUntil(time.Second, func() bool {
+		select {
+		case ok := <-check:
+			if !ok {
+				t.Fatal("replacement corrupted by canceled attempt")
+			}
+			return true
+		default:
+			return false
+		}
+	})
+	f.finish <- nil
+	app.WaitFor("role:button 连接正常", time.Second)
+	// Reproduce the exact stale flags from the diagnostic report. Retry must
+	// start a fresh task rather than silently returning on reconnecting=true.
+	app.Post(func() {
+		s.cx.Post(func() {
+			s.connection("demo-device").reconnecting = true
+			s.connection("demo-device").attempt = &connectAttempt{started: time.Now().Add(-time.Hour)}
+			s.reconnectDevice("demo-device")
+		})
+	})
+	app.WaitUntil(time.Second, func() bool { return f.calls.Load() == 3 })
+	f.finish <- nil
+	app.WaitFor("role:button 连接正常", time.Second)
+}

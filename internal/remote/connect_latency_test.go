@@ -56,7 +56,9 @@ func TestDirectConnectDoesNotWaitForRelayOrAgentDiscovery(t *testing.T) {
 			opts := Options{DisableWebRTC: tcp, DisableTCP: !tcp}
 			go serveHostObserved(ctx, pair, opts, &control.Dispatcher{Providers: map[string]provider.Provider{"blocked": p}}, monitor)
 			waitFor(t, func() bool { return monitor.Snapshot().State == "connected" })
-			setup, stop := context.WithTimeout(ctx, 4*time.Second)
+			// Optional services remain blocked until after Connect returns.
+			// Allow race-instrumented CI enough scheduling time for direct ICE/TCP.
+			setup, stop := context.WithTimeout(ctx, 30*time.Second)
 			started := time.Now()
 			c, err := Connect(setup, pair, opts)
 			stop()

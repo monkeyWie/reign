@@ -190,7 +190,7 @@ func TestReconnectPreservesLiveReplyAndReplaysFromCursor(t *testing.T) {
 	app.WaitUntil(time.Second, func() bool { app.Settle(); return s.streamCursor == 11 })
 	f.offline.Store(true)
 	app.Post(func() { s.cx.Post(func() { s.devices[0]["connected"] = false; s.changed() }) })
-	app.WaitFor("role:button 连接中", time.Second)
+	app.WaitFor("role:button 未连接", time.Second)
 	// Return to the foreground while offline: transcript reads succeed from an
 	// older cache, but must not erase the visible streamed reply.
 	app.Post(func() { s.cx.Post(s.startSessionWatch) })

@@ -86,8 +86,7 @@ func (s *State) connect(p Object) {
 			if s.ctx.Err() != nil || s.connectAttempt != a || !a.active {
 				return
 			}
-			a.active = false
-			a.finished = finished
+			a.finish(finished, err)
 			if err != nil {
 				a.err = err.Error()
 				s.changed()
@@ -113,8 +112,9 @@ func (s *State) connect(p Object) {
 
 func (s *State) closeConnectAttempt() {
 	if a := s.connectAttempt; a != nil {
-		a.active = false
-		a.cancel()
+		if a.active {
+			a.stop("用户取消连接")
+		}
 	}
 	s.connectAttempt = nil
 	s.dialog.Set("")
@@ -254,6 +254,9 @@ func (s *State) connectionPanel(cx *core.Scope, id string, a *connectAttempt, in
 		if a != nil && a.active {
 			return "正在连接"
 		}
+		if a != nil && a.err == context.Canceled.Error() && !s.connectionRecovering(id) {
+			return "连接已取消"
+		}
 		if a != nil && a.err != "" && !s.connectionRecovering(id) {
 			summary, _ := connectionFailure(a)
 			return summary
@@ -318,11 +321,12 @@ func (s *State) connectionPanel(cx *core.Scope, id string, a *connectAttempt, in
 	active := a != nil && a.active
 	if active {
 		d.Footer = []core.Node{button(cx, "connect-cancel", "取消", nil, "outline", func() {
-			a.active = false
 			if id != "" {
+				s.cancelDeviceAttempt(id, "用户取消连接")
 				s.connection(id).established = false
+			} else {
+				a.stop("用户取消连接")
 			}
-			a.cancel()
 			close()
 			s.changed()
 		})}
@@ -342,5 +346,33 @@ func (a *connectAttempt) elapsed() time.Duration {
 	if !a.finished.IsZero() {
 		return a.finished.Sub(a.started)
 	}
-	return time.Since(a.started)
+	if a.active {
+		return max(0, time.Since(a.started))
+	}
+	// An inactive attempt never keeps a wall-clock timer running, even if
+	// restored state has no terminal timestamp.
+	if len(a.events) > 0 {
+		return max(0, a.events[len(a.events)-1].at.Sub(a.started))
+	}
+	return 0
+}
+
+func (a *connectAttempt) finish(at time.Time, err error) {
+	a.active, a.complete, a.finished = false, err == nil, at
+	if err != nil {
+		a.err = err.Error()
+		for i := range a.steps {
+			if a.steps[i].State == "running" {
+				a.steps[i].State = "warning"
+			}
+		}
+	}
+}
+
+func (a *connectAttempt) stop(reason string) {
+	a.finish(time.Now(), context.Canceled)
+	a.record(connectivity.Progress{ID: "cancel", Stage: "cancel", Message: reason, State: "info"})
+	if a.cancel != nil {
+		a.cancel()
+	}
 }

@@ -87,6 +87,12 @@ func (s *State) connectionLog(id string, a *connectAttempt) string {
 	}
 	if a != nil {
 		fmt.Fprintf(&b, "Endpoint: %s\nAttempt: active=%t complete=%t\n", safeDiagnostic(str(a.params, "service")), a.active, a.complete)
+		if !a.started.IsZero() {
+			fmt.Fprintf(&b, "Attempt started: %s\n", s.localTime(a.started).Format(time.RFC3339Nano))
+		}
+		if !a.finished.IsZero() {
+			fmt.Fprintf(&b, "Attempt ended: %s\n", s.localTime(a.finished).Format(time.RFC3339Nano))
+		}
 		events = append(events, a.events...)
 		if a.err != "" {
 			fmt.Fprintf(&b, "Attempt error: %s\n", safeDiagnostic(a.err))
@@ -97,7 +103,7 @@ func (s *State) connectionLog(id string, a *connectAttempt) string {
 		events = events[len(events)-diagnosticLimit:]
 	}
 	for _, e := range events {
-		fmt.Fprintf(&b, "%s [%s/%s] %s", e.at.Format(time.RFC3339Nano), e.Stage, e.State, e.Message)
+		fmt.Fprintf(&b, "%s [%s/%s] %s", s.localTime(e.at).Format(time.RFC3339Nano), e.Stage, e.State, e.Message)
 		if e.Detail != "" {
 			fmt.Fprintf(&b, " | %s", e.Detail)
 		}

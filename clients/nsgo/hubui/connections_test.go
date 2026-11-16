@@ -242,6 +242,7 @@ func TestReconnectStatusShowsAnimatedIndicator(t *testing.T) {
 		s.cx.Post(func() {
 			s.connection("demo-device").established = true
 			s.connection("demo-device").reconnecting = true
+			s.connection("demo-device").attempt = &connectAttempt{active: true}
 			s.changed()
 		})
 	})
@@ -296,4 +297,27 @@ func TestVerifiedConnectionImmediatelyUpdatesIconAndIgnoresStalePresence(t *test
 	close(f.release)
 	app.WaitUntil(time.Second, func() bool { return !s.presencePolling })
 	app.Find("role:button 连接正常")
+}
+
+func TestKeepAliveForegroundStillChecksConnectionAndResyncs(t *testing.T) {
+	f := &connectionFixture{demoAPI: newDemoAPI()}
+	f.autoReconnect.Store(true)
+	app, s := conversationFixture(t, f, 390, Object{}, true)
+	app.Type("id:chat-input", "前后台切换保留草稿")
+	app.Post(func() {
+		s.cx.Post(func() {
+			s.keepAlive = true
+			s.connection("demo-device").established = true
+			s.devices[0]["autoReconnect"] = true
+			s.setBackground(true)
+			// Simulate an OS-aborted transport despite keepAlive being enabled.
+			f.offline.Store(true)
+			s.setBackground(false)
+		})
+	})
+	app.WaitUntil(time.Second, func() bool { return f.reconnects.Load() == 1 })
+	app.WaitFor("role:button 连接正常", time.Second)
+	if app.Find("id:chat-input").Text != "前后台切换保留草稿" || f.sends.Load() != 0 {
+		t.Fatal("foreground recovery changed/replayed draft")
+	}
 }

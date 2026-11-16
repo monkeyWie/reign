@@ -93,7 +93,7 @@ func (s *State) connectionRecovering(id string) bool {
 	if s.deviceOffline(id) {
 		return false
 	}
-	if h.reconnecting {
+	if h.reconnecting && h.attempt != nil && h.attempt.active {
 		return true
 	}
 	for _, d := range s.devices {
@@ -110,7 +110,10 @@ func (s *State) connectionTitle(id string) string {
 	if s.deviceOffline(id) {
 		return "设备离线"
 	}
-	return "连接中"
+	if s.connectionRecovering(id) {
+		return "连接中"
+	}
+	return "未连接"
 }
 func (s *State) connectionIndicator(cx *core.Scope, target func() string) core.Node {
 	status := core.NewMemo(cx, func() [2]string { s.read(); id := target(); return [2]string{id, s.connectionTitle(id)} })
@@ -118,7 +121,7 @@ func (s *State) connectionIndicator(cx *core.Scope, target func() string) core.N
 		value := status.Get()
 		id := value[0]
 		icon := lucide.Wifi
-		if s.deviceOffline(id) {
+		if s.connectionProblem(id) && !s.connectionRecovering(id) {
 			icon = lucide.WifiOff
 		}
 		node := button(cx, "connection-status-"+id, "", icon, "ghost", func() {
@@ -126,7 +129,7 @@ func (s *State) connectionIndicator(cx *core.Scope, target func() string) core.N
 			s.connectionDetailTarget = id
 			s.dialog.Set("connection-status")
 		}).(core.View)
-		if s.connectionProblem(id) && !s.deviceOffline(id) {
+		if s.connectionRecovering(id) {
 			node.Children = []core.Node{reconnectingGlyph(cx)}
 		}
 		node.Label = value[1]
@@ -217,11 +220,28 @@ func (s *State) reconnect(id string, automatic bool) {
 	s.connectDevice(id, automatic, pair)
 }
 
+// Stop the task and its UI state together. Late progress/completion callbacks
+// are fenced by the attempt identity and cannot finish a replacement attempt.
+func (s *State) cancelDeviceAttempt(id, reason string) {
+	h := s.connection(id)
+	if a := h.attempt; a != nil && a.active {
+		a.stop(reason)
+	}
+	h.reconnecting = false
+}
+
 func (s *State) connectDevice(id string, automatic, pair bool) {
 	h := s.connection(id)
-	if h.reconnecting || s.ctx.Err() != nil {
+	if s.ctx.Err() != nil {
 		return
 	}
+	if h.attempt != nil && h.attempt.active {
+		if automatic {
+			return
+		}
+		s.cancelDeviceAttempt(id, "手动重试，结束上一轮连接")
+	}
+	// A stale reconnecting flag must never swallow an explicit user retry.
 	h.reconnecting = true
 	h.waitingOnline = false
 	if !automatic {
@@ -292,12 +312,7 @@ func (s *State) connectDevice(id string, automatic, pair bool) {
 			if s.ctx.Err() != nil || h.attempt != a || !a.active {
 				return
 			}
-			a.active = false
-			a.finished = finished
-			a.complete = err == nil
-			if err != nil && !errors.Is(err, context.Canceled) {
-				a.err = err.Error()
-			}
+			a.finish(finished, err)
 			h.reconnecting = false
 			s.setConnectionIssue(id, "reconnect", err)
 			if err != nil {
@@ -342,15 +357,20 @@ func (s *State) setBackground(background bool) {
 		s.changed()
 	}
 	suspend := background && !s.keepAlive
-	if suspend == s.suspended || s.ctx.Err() != nil {
+	foreground := wasBackground && !background
+	if (suspend == s.suspended && !foreground) || s.ctx.Err() != nil {
 		return
 	}
+	wasSuspended := s.suspended
 	s.suspended = suspend
 	s.changed()
-	if suspend {
+	if suspend || foreground {
 		if s.directoryCancel != nil {
 			s.directoryCancel()
+			s.directoryCancel = nil
 		}
+		s.directoryGeneration++
+		s.directoryChecking = false
 		if s.pollCancel != nil {
 			s.pollCancel()
 			s.pollCancel = nil
@@ -359,11 +379,13 @@ func (s *State) setBackground(background bool) {
 		s.presencePolling = false
 		s.pollGeneration++
 		s.polling = false
-		if s.watchCancel != nil {
+		if s.watchCancel != nil && (suspend || wasSuspended) {
 			s.watchCancel()
 			s.watchCancel = nil
 		}
-		return
+		if suspend {
+			return
+		}
 	}
 	// Reuse saved grants and fetch a fresh transcript before resuming deltas.
 	// Never replay send/steer or discard a draft when returning to the app.
@@ -372,14 +394,16 @@ func (s *State) setBackground(background bool) {
 	}
 	s.refreshTimezone()
 	s.directoryChecked = time.Time{}
-	// A socket can look open after the OS suspended its network. Probe each
-	// previously connected device immediately instead of waiting for a heartbeat.
+	// Probe sockets after an actual suspension. With a foreground service,
+	// retain live streams and let the fresh transport snapshot detect losses.
 	for _, d := range s.devices {
 		id := str(d, "id")
-		if s.connection(id).established && flag(d, "autoReconnect") && !s.deviceOffline(id) {
+		if s.connection(id).established && flag(d, "autoReconnect") && !s.deviceOffline(id) && (wasSuspended || !flag(d, "connected")) {
 			s.reconnect(id, true)
 		}
 	}
-	s.startSessionWatch()
+	if wasSuspended {
+		s.startSessionWatch()
+	}
 	s.poll()
 }

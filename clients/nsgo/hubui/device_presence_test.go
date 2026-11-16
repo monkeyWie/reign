@@ -177,3 +177,59 @@ func TestPresencePausesEstablishedRecoveryAndResumesOnOnline(t *testing.T) {
 		t.Fatal("successful reconnect did not update presence and readiness")
 	}
 }
+
+type foregroundPresenceFixture struct {
+	*demoAPI
+	calls   atomic.Int32
+	release chan struct{}
+}
+
+func (f *foregroundPresenceFixture) Call(ctx context.Context, method string, p Object, target string, r Object) (any, error) {
+	if method == "client.presence" {
+		if f.calls.Add(1) == 1 {
+			// Model a queued response arriving after foreground starts a new read.
+			<-f.release
+			return []Object{{"id": "demo-device", "online": false, "checkedAt": time.Now().Unix()}}, nil
+		}
+		return []Object{{"id": "demo-device", "online": true, "checkedAt": time.Now().Unix()}}, nil
+	}
+	return f.demoAPI.Call(ctx, method, p, target, r)
+}
+
+func TestForegroundPresenceDiscardsLateBackgroundResult(t *testing.T) {
+	f := &foregroundPresenceFixture{demoAPI: newDemoAPI(), release: make(chan struct{})}
+	t.Cleanup(func() {
+		select {
+		case <-f.release:
+		default:
+			close(f.release)
+		}
+	})
+	app, s := conversationFixture(t, f, 390, Object{}, false)
+	app.Post(func() { s.cx.Post(func() { s.keepAlive = true; s.refreshDevicePresence() }) })
+	app.WaitUntil(time.Second, func() bool { return f.calls.Load() == 1 })
+	app.Post(func() { s.cx.Post(func() { s.setBackground(true); s.setBackground(false); s.refreshDevicePresence() }) })
+	app.WaitUntil(time.Second, func() bool { return f.calls.Load() == 2 })
+	close(f.release)
+	// Let the old API call post its response after the fresh foreground read.
+	time.Sleep(50 * time.Millisecond)
+	app.Settle()
+	check := make(chan bool, 1)
+	app.Post(func() {
+		s.cx.Post(func() {
+			online, known := s.deviceOnline(s.devices[0])
+			check <- known && online && !s.directoryChecking
+		})
+	})
+	app.WaitUntil(time.Second, func() bool {
+		select {
+		case ok := <-check:
+			if !ok {
+				t.Fatal("foreground presence remained blocked by background request")
+			}
+			return true
+		default:
+			return false
+		}
+	})
+}
