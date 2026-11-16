@@ -9,6 +9,16 @@ import (
 	"time"
 )
 
+var errConnectionAuthorization = errors.New("连接授权已失效，请重新连接")
+
+func authorizationFailure(id string, err error) control.Response {
+	r := control.Response{ID: id, Error: err.Error()}
+	if errors.Is(err, errConnectionAuthorization) {
+		r.Code = control.ConnectionAuthorizationExpired
+	}
+	return r
+}
+
 func (w *wire) authorize(host, device string, req control.Request) error {
 	if w.opts.GrantPublicKey == "" {
 		if w.opts.GrantRequired || w.opts.ServiceID != "" {
@@ -25,7 +35,7 @@ func (w *wire) authorize(host, device string, req control.Request) error {
 	w.grantMu.RUnlock()
 	g, err := access.Verify(ed25519.PublicKey(key), ticket, time.Now())
 	if err != nil || g.Role != "client" || !g.Allows(w.opts.ServiceID, host, device, "connect") {
-		return errors.New("远控授权已过期，请重新连接或登录")
+		return errConnectionAuthorization
 	}
 	if req.Provider != "" && !g.AllowsProduct(req.Provider) {
 		return errors.New("当前套餐未启用此 Agent，请在账号设备页调整 Agent 权益")

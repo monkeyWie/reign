@@ -143,7 +143,7 @@ func serveHostObserved(ctx context.Context, p Pairing, opts Options, d *control.
 					return
 				}
 				if err := peer.authorize(p.Host, deviceID, req); err != nil {
-					encoded, _ := json.Marshal(control.Response{ID: req.ID, Error: err.Error()})
+					encoded, _ := json.Marshal(authorizationFailure(req.ID, err))
 					go peer.send(encoded)
 					return
 				}
@@ -234,8 +234,8 @@ func serveHostObserved(ctx context.Context, p Pairing, opts Options, d *control.
 							return
 						}
 					}
-					if peer.authorize(p.Host, deviceID, req) != nil {
-						result = control.Response{ID: originalID, Error: "远控授权已过期，请重新连接"}
+					if err := peer.authorize(p.Host, deviceID, req); err != nil {
+						result = authorizationFailure(originalID, err)
 					}
 					encoded, _ := json.Marshal(result)
 					if len(encoded) > 16<<20 {

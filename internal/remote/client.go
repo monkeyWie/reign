@@ -296,6 +296,13 @@ func (c *Client) Call(ctx context.Context, r control.Request, out any) error {
 				continue
 			}
 			if result.Error != "" {
+				if control.NeedsConnectionRenewal(result.Code, result.Error) {
+					c.wire.progress("authorization-renewal", "retry", "连接授权需要续期，重新建立连接", "复用已保存的设备配对，无需重新登录；不会自动重放写操作", "warning")
+					// Stop reporting an expired direct path as connected. The hub's
+					// existing reconnection policy can now obtain a fresh service lease.
+					c.wire.close()
+					return errors.New("连接授权需要续期，请在连接恢复后重试")
+				}
 				return errors.New(result.Error)
 			}
 			if history.Seen {

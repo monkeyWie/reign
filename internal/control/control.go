@@ -39,6 +39,7 @@ type Request struct {
 }
 
 type Response struct {
+	Code        string          `json:"code,omitempty"`
 	Partial     bool            `json:"partial,omitempty"`
 	ID          string          `json:"id"`
 	Result      json.RawMessage `json:"result,omitempty"`

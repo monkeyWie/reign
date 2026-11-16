@@ -720,6 +720,12 @@ func (c *Client) Call(ctx context.Context, request Object) (any, error) {
 		break
 	}
 	if e, _ := response["error"].(string); e != "" {
+		code, _ := response["code"].(string)
+		if control.NeedsConnectionRenewal(code, e) {
+			c.note("authorization-renewal", "retry", "连接授权需要续期，重新建立连接", "复用设备配对，无需重新登录", "warning")
+			c.Close()
+			return nil, errors.New("连接授权需要续期，请在连接恢复后重试")
+		}
 		return nil, errors.New(e)
 	}
 	if response["notModified"] == true {
