@@ -55,8 +55,10 @@ func TestSignalAndRelayHaveIndependentTimeouts(t *testing.T) {
 	defer data.CloseNow()
 }
 func TestRelayTimeoutIdentifiesStageAndCancellationStillWorks(t *testing.T) {
-	server := delayedWelcomeServer(t, 0, 200*time.Millisecond)
-	_, _, _, err := dialWithTimeout(context.Background(), timeoutPair(server), "client", 50*time.Millisecond)
+	// Leave time for the signal handshake under race/coverage instrumentation;
+	// only the deliberately stalled relay should exhaust a stage's budget.
+	server := delayedWelcomeServer(t, 0, 2*time.Second)
+	_, _, _, err := dialWithTimeout(context.Background(), timeoutPair(server), "client", time.Second)
 	if err == nil || !strings.Contains(err.Error(), "中继") || !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("lost relay timeout detail: %v", err)
 	}

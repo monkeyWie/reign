@@ -112,14 +112,15 @@ func TestRelayAndP2P(t *testing.T) {
 			var traceMu sync.Mutex
 			trace := []connectivity.Progress{}
 			opts.Progress = func(p connectivity.Progress) { traceMu.Lock(); trace = append(trace, p); traceMu.Unlock() }
-			var client *Client
-			waitFor(t, func() bool {
-				attempt, stop := context.WithTimeout(ctx, 4*time.Second)
-				defer stop()
-				var err error
-				client, err = Connect(attempt, p, opts)
-				return err == nil
-			})
+			// The host is ready. One attempt with room for instrumented ICE/TCP
+			// checks avoids leaving cancelled direct peers awaiting cleanup while
+			// the next attempt asserts there is exactly one authenticated peer.
+			attempt, stop := context.WithTimeout(ctx, 30*time.Second)
+			client, err := Connect(attempt, p, opts)
+			stop()
+			if err != nil {
+				t.Fatal(err)
+			}
 			defer func() {
 				client.Close()
 				cancel()
