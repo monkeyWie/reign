@@ -64,6 +64,9 @@ func (h *Hub) identity(ctx context.Context, service, name string) (device.Identi
 	h.identityMu.Lock()
 	defer h.identityMu.Unlock()
 	var i device.Identity
+	if info := device.ClientInfoFrom(ctx); info.Name != "" {
+		name = info.Name
+	}
 	k := "identity:" + service
 	if e := h.DB.Get(k, &i); e == nil {
 		if name != "" && name != i.Name {
@@ -71,6 +74,11 @@ func (h *Hub) identity(ctx context.Context, service, name string) (device.Identi
 				return i, e
 			}
 			i.Name = name
+		}
+		info := device.CurrentClientInfo(ctx, i.Info)
+		info.Name = i.Name
+		if info != i.Info {
+			i.Info = info
 			if e := h.DB.Put(k, i); e != nil {
 				return i, e
 			}
@@ -81,6 +89,7 @@ func (h *Hub) identity(ctx context.Context, service, name string) (device.Identi
 	if e != nil {
 		return i, e
 	}
+	i.Info = device.CurrentClientInfo(ctx, device.ClientInfo{Name: name})
 	i, e = device.Register(ctx, service, i, false)
 	if e != nil {
 		return i, e
@@ -153,6 +162,9 @@ func (h *Hub) Reconnect(ctx context.Context, id string) (Saved, error) {
 		err := old.Resume(probe)
 		stop()
 		if err == nil {
+			var identity device.Identity
+			_ = h.DB.Get("identity:"+s.Service, &identity)
+			publishClientInfo(old, device.CurrentClientInfo(ctx, identity.Info))
 			return s, nil
 		}
 		if ctx.Err() != nil {
@@ -222,7 +234,7 @@ func (h *Hub) connect(ctx context.Context, service, code, public, password, name
 	if s.Key == "" || (s.Expires > 0 && s.Expires <= time.Now().Unix()) {
 		connectivity.Report(ctx, "request", "正在向被控电脑请求授权", connectivity.StageTimeout)
 		reqID := device.Random()[:32]
-		envelope, e := device.Seal(i.Private, d.Public, "reignhub/pair/request/"+reqID, map[string]any{"password": password, "remember": remember})
+		envelope, e := device.Seal(i.Private, d.Public, "reignhub/pair/request/"+reqID, map[string]any{"password": password, "remember": remember, "info": i.Info})
 		if e != nil {
 			return s, e
 		}
@@ -321,6 +333,7 @@ func (h *Hub) connect(ctx context.Context, service, code, public, password, name
 	if old != nil {
 		old.Close()
 	}
+	publishClientInfo(c, i.Info)
 	connectivity.Note(ctx, "connected", "connected", "连接成功", c.Path(), "success")
 	return s, nil
 }
@@ -458,4 +471,17 @@ func (h *Hub) Sync(ctx context.Context, id, p string) (any, error) {
 		return nil, e
 	}
 	return h.ApplyDirectory(id, p, delta)
+}
+
+// Display metadata must not delay a successful connection or data sync.
+func publishClientInfo(c *remote.Client, info device.ClientInfo) {
+	if info.Name == "" {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		params, _ := json.Marshal(info)
+		_ = c.Call(ctx, control.Request{Method: "peer.info", Params: params}, nil)
+	}()
 }

@@ -17,13 +17,14 @@ import (
 )
 
 type Identity struct {
-	ID           string `json:"id"`
-	ConnectionID string `json:"connectionId"`
-	Name         string `json:"name"`
-	Private      string `json:"private"`
-	Public       string `json:"public"`
-	Token        string `json:"token"`
-	Service      string `json:"service"`
+	Info         ClientInfo `json:"info,omitempty"`
+	ID           string     `json:"id"`
+	ConnectionID string     `json:"connectionId"`
+	Name         string     `json:"name"`
+	Private      string     `json:"private"`
+	Public       string     `json:"public"`
+	Token        string     `json:"token"`
+	Service      string     `json:"service"`
 }
 
 func NewIdentity(name string) (Identity, error) {

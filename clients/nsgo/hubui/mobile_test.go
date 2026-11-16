@@ -78,12 +78,18 @@ func testMobileDeviceAndScanner(t *testing.T, os core.OS, scan bool) {
 }
 func TestBrowserDeviceNames(t *testing.T) {
 	for _, tc := range []struct{ ua, want string }{
-		{"Mozilla/5.0 (Macintosh; Intel Mac OS X) Chrome/142.0.0 Safari/537.36", "Chrome · Mac"},
-		{"Mozilla/5.0 (Windows NT 10.0) Chrome/142 Safari/537.36 Edg/142", "Edge · Windows"},
-		{"Mozilla/5.0 (iPhone; CPU iPhone OS) Version/18.0 Mobile Safari/604.1", "Safari · iPhone"},
-		{"Mozilla/5.0 (Linux; Android 15) Chrome/142.0.0 Safari/537.36", "Chrome · Android"},
-		{"Mozilla/5.0 (iPhone) CriOS/142.0 Mobile Safari/604.1", "Chrome · iPhone"},
-		{"Mozilla/5.0 (Linux) Firefox/142.0", "Firefox · Linux"},
+		{"Mozilla/5.0 (Macintosh; Intel Mac OS X) Chrome/142.0.0 Safari/537.36", "Chrome 142"},
+		{"Mozilla/5.0 (Windows NT 10.0) Chrome/142 Safari/537.36 Edg/142", "Microsoft Edge 142"},
+		{"Mozilla/5.0 (iPhone; CPU iPhone OS) Version/18.0 Mobile Safari/604.1", "Safari 18"},
+		{"Mozilla/5.0 (Linux; Android 15) Chrome/142.0.0 Safari/537.36", "Chrome 142"},
+		{"Mozilla/5.0 (iPhone) CriOS/142.0 Mobile Safari/604.1", "Chrome 142"},
+		{"Mozilla/5.0 (Linux) Firefox/142.0", "Firefox 142"},
+		{"Mozilla/5.0 Chrome/157 Safari/537.36 Edg/157.0.123", "Microsoft Edge 157"},
+		{"Mozilla/5.0 Chrome/142 SamsungBrowser/29.0", "Samsung Internet 29"},
+		{"Mozilla/5.0 Chrome/142 OPR/123.0", "Opera 123"},
+		{"Mozilla/5.0 (iPhone) FxiOS/145.1 Mobile Safari/604.1", "Firefox 145"},
+		{"Mozilla/5.0 Safari/604.1", "Safari"},
+		{"unknown", "浏览器"},
 	} {
 		if got := browserDeviceName(tc.ua); got != tc.want {
 			t.Errorf("got %q want %q", got, tc.want)

@@ -4,6 +4,7 @@ package hubui
 
 import (
 	"github.com/monkeyWie/reignhub/clients/nsgo/webapi"
+	"github.com/monkeyWie/reignhub/internal/device"
 	"github.com/nsgo-dev/nsgo/core"
 	"net/url"
 	"strings"
@@ -24,7 +25,31 @@ func demoRequested() bool {
 }
 func isWeb() bool { return true }
 
-func platformDeviceName() string {
-	return browserDeviceName(js.Global().Get("navigator").Get("userAgent").String())
+func platformClientInfo() device.ClientInfo {
+	nav := js.Global().Get("navigator")
+	ua := nav.Get("userAgent").String()
+	info := device.ClientInfo{Name: browserDeviceName(ua), Platform: browserPlatform(ua), Kind: "browser"}
+	if info.Platform == "darwin" && nav.Get("maxTouchPoints").Type() == js.TypeNumber && nav.Get("maxTouchPoints").Int() > 1 {
+		info.Platform = "ios"
+	}
+	// Client hints identify Chromium derivatives without exposing the OS in the name.
+	if data := nav.Get("userAgentData"); data.Type() == js.TypeObject {
+		if brands := data.Get("brands"); brands.Type() == js.TypeObject {
+			for _, name := range []string{"Microsoft Edge", "Opera", "Google Chrome", "Chromium"} {
+				for j := 0; j < brands.Length(); j++ {
+					b := brands.Index(j)
+					if b.Get("brand").String() == name {
+						version := strings.Split(b.Get("version").String(), ".")[0]
+						if version != "" && strings.Trim(version, "0123456789") == "" {
+							info.Name = name + " " + version
+							return info.Normalize()
+						}
+					}
+				}
+			}
+		}
+	}
+	return info.Normalize()
 }
-func resolveDeviceName(_ *core.Scope, done func(string)) { done(platformDeviceName()) }
+func platformDeviceName() string                                    { return platformClientInfo().Name }
+func resolveClientInfo(_ *core.Scope, done func(device.ClientInfo)) { done(platformClientInfo()) }

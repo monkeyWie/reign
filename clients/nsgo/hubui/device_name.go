@@ -1,38 +1,79 @@
 package hubui
 
-import "strings"
+import (
+	"context"
+	"strings"
+	"sync/atomic"
+
+	"github.com/monkeyWie/reignhub/internal/device"
+)
 
 func browserDeviceName(ua string) string {
-	browser := "浏览器"
-	switch {
-	case strings.Contains(ua, "Edg/") || strings.Contains(ua, "EdgA/") || strings.Contains(ua, "EdgiOS/"):
-		browser = "Edge"
-	case strings.Contains(ua, "OPR/") || strings.Contains(ua, "Opera/"):
-		browser = "Opera"
-	case strings.Contains(ua, "Firefox/") || strings.Contains(ua, "FxiOS/"):
-		browser = "Firefox"
-	case strings.Contains(ua, "Chrome/") || strings.Contains(ua, "CriOS/"):
-		browser = "Chrome"
-	case strings.Contains(ua, "Safari/"):
-		browser = "Safari"
+	for _, browser := range []struct {
+		name   string
+		tokens []string
+	}{
+		{"Microsoft Edge", []string{"Edg/", "EdgA/", "EdgiOS/"}},
+		{"Opera", []string{"OPR/", "OPiOS/", "Opera/"}},
+		{"Samsung Internet", []string{"SamsungBrowser/"}},
+		{"Firefox", []string{"Firefox/", "FxiOS/"}},
+		{"Chrome", []string{"Chrome/", "CriOS/"}},
+		{"Safari", []string{"Version/"}},
+	} {
+		for _, token := range browser.tokens {
+			if start := strings.Index(ua, token); start >= 0 {
+				version := ua[start+len(token):]
+				end := 0
+				for end < len(version) && version[end] >= '0' && version[end] <= '9' {
+					end++
+				}
+				if end > 0 {
+					return browser.name + " " + version[:end]
+				}
+				return browser.name
+			}
+		}
 	}
-	os := ""
+	if strings.Contains(ua, "Safari/") {
+		return "Safari"
+	}
+	return "浏览器"
+}
+
+func browserPlatform(ua string) string {
 	switch {
 	case strings.Contains(ua, "Android"):
-		os = "Android"
-	case strings.Contains(ua, "iPhone"):
-		os = "iPhone"
-	case strings.Contains(ua, "iPad"):
-		os = "iPad"
+		return "android"
+	case strings.Contains(ua, "iPhone"), strings.Contains(ua, "iPad"), strings.Contains(ua, "iPod"):
+		return "ios"
 	case strings.Contains(ua, "Windows"):
-		os = "Windows"
+		return "windows"
 	case strings.Contains(ua, "Macintosh"):
-		os = "Mac"
+		return "darwin"
 	case strings.Contains(ua, "Linux"):
-		os = "Linux"
+		return "linux"
 	}
-	if os != "" {
-		return browser + " · " + os
+	return ""
+}
+
+// Requests may run outside the UI thread. Publish immutable profile snapshots.
+type identifiedAPI struct {
+	API
+	info atomic.Value
+}
+
+func (a *identifiedAPI) setInfo(info device.ClientInfo) { a.info.Store(info.Normalize()) }
+func (a *identifiedAPI) Call(ctx context.Context, method string, p Object, target string, r Object) (any, error) {
+	return a.API.Call(device.WithClientInfo(ctx, a.info.Load().(device.ClientInfo)), method, p, target, r)
+}
+
+func appleDeviceName(name, model string) string {
+	name = strings.TrimSpace(name)
+	switch name {
+	case "", "iPhone", "iPad", "iPod touch", "iPhone / iPad":
+		if friendly := appleModels[model]; friendly != "" {
+			return friendly
+		}
 	}
-	return browser
+	return name
 }

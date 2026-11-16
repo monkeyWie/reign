@@ -345,7 +345,7 @@ func (s *State) composer(cx *core.Scope) core.Node {
 		}
 	}, Style: core.Style{Width: core.Pct(100), MaxWidth: core.Pt(860), Padding: core.All(12), CornerRadius: 18, BorderWidth: 1, Gap: 10}, StyleFunc: func() core.Style {
 		c := palette(cx)
-		return core.Style{Background: c.elevated, BorderColor: c.border, Color: c.foreground, Shadows: []core.BoxShadow{{Offset: core.Point{Y: 5}, Blur: 20, Color: core.RGB(0x102338).Faded(choose(cx.Dark(), float32(.18), float32(.07)))}}}
+		return core.Style{Background: c.elevated, BorderColor: c.border, Color: c.foreground, Shadows: []core.BoxShadow{{Offset: core.Point{Y: 5}, Blur: 20, Color: core.RGB(0x000000).Faded(choose(cx.Dark(), float32(.18), float32(.07)))}}}
 	}, Children: []core.Node{
 		core.Show{When: func() bool { s.read(); return len(s.uploads) > 0 }, Then: func(cx *core.Scope) core.Node { return s.uploadPreviews(cx) }},
 		core.Input{TestID: "chat-input", Label: "消息", Placeholder: "发送消息…", Value: s.draft.Get, OnChange: s.draft.Set, Multiline: true, SubmitBehavior: submit, OnSubmit: func(string) { s.send(choose(running(), "steer", "send")) }, OnPaste: func(e core.PasteEvent) {
@@ -499,7 +499,7 @@ func (s *State) workspaceSurface(cx *core.Scope) core.Style {
 	c := palette(cx)
 	st := core.Style{Background: c.background}
 	if s.width.Get() >= wideBreakpoint {
-		st = st.Merge(core.Style{Margin: core.Edges{Top: 8, Right: 8, Bottom: 8}, CornerRadius: 20, BorderWidth: 1, BorderColor: c.border, Overflow: core.Hidden, Shadows: []core.BoxShadow{{Offset: core.Point{Y: 2}, Blur: 12, Color: core.RGB(0x152d45).Faded(.05)}}})
+		st = st.Merge(core.Style{Margin: core.Edges{Top: 8, Right: 8, Bottom: 8}, CornerRadius: 20, BorderWidth: 1, BorderColor: c.border, Overflow: core.Hidden, Shadows: []core.BoxShadow{{Offset: core.Point{Y: 2}, Blur: 12, Color: core.RGB(0x000000).Faded(.05)}}})
 	}
 	return st
 }

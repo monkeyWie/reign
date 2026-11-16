@@ -27,11 +27,12 @@ import (
 )
 
 type Grant struct {
-	Client  string `json:"client"`
-	Name    string `json:"name"`
-	Public  string `json:"public"`
-	Key     string `json:"key"`
-	Expires int64  `json:"expires,omitempty"`
+	Info    device.ClientInfo `json:"info,omitempty"`
+	Client  string            `json:"client"`
+	Name    string            `json:"name"`
+	Public  string            `json:"public"`
+	Key     string            `json:"key"`
+	Expires int64             `json:"expires,omitempty"`
 }
 type saved struct {
 	Identity     device.Identity  `json:"identity"`
@@ -39,8 +40,9 @@ type saved struct {
 	Grants       map[string]Grant `json:"grants"`
 }
 type Intent struct {
-	Password string `json:"password"`
-	Remember bool   `json:"remember"`
+	Info     device.ClientInfo `json:"info,omitempty"`
+	Password string            `json:"password"`
+	Remember bool              `json:"remember"`
 }
 type Manager struct {
 	mu         sync.Mutex
@@ -151,6 +153,7 @@ func (m *Manager) Run(ctx context.Context) {
 					opts.TCPSTUN = policy.TCPSTUN
 				}
 				opts.ResolveKey = m.key
+				opts.OnClientInfo = m.updateClientInfo
 				go remote.RunHostObserved(life, remote.Pairing{Relay: "ws" + strings.TrimPrefix(i.Service, "http"), Host: i.ID, Key: device.Random(), RelayToken: i.Token}, opts, m.d, n)
 			}
 		}
@@ -308,7 +311,11 @@ func (m *Manager) respond(ctx context.Context, id string, allow bool) error {
 	}
 	var reply string
 	if allow {
-		g := Grant{Client: p.Client, Name: p.Name, Public: p.Public, Key: device.Random()}
+		info := intent.Info.Normalize()
+		if info.Name == "" {
+			info.Name = p.Name
+		}
+		g := Grant{Client: p.Client, Name: info.Name, Info: info, Public: p.Public, Key: device.Random()}
 		if !intent.Remember {
 			g.Expires = time.Now().Add(8 * time.Hour).Unix()
 		}
@@ -391,11 +398,15 @@ func (m *Manager) Local(ctx context.Context, r control.Request) (any, error) {
 		i := m.state.Identity
 		pending := []map[string]any{}
 		for _, p := range m.pending {
-			pending = append(pending, map[string]any{"id": p.ID, "name": p.Name, "fingerprint": device.Fingerprint(p.Public), "expires": p.Expires, "remember": m.intents[p.ID].Remember})
+			info := m.intents[p.ID].Info.Normalize()
+			if info.Name == "" {
+				info.Name = p.Name
+			}
+			pending = append(pending, map[string]any{"id": p.ID, "name": info.Name, "platform": info.Platform, "kind": info.Kind, "model": info.Model, "fingerprint": device.Fingerprint(p.Public), "expires": p.Expires, "remember": m.intents[p.ID].Remember})
 		}
 		grants := []map[string]any{}
 		for _, g := range m.state.Grants {
-			grants = append(grants, map[string]any{"client": g.Client, "name": g.Name, "fingerprint": device.Fingerprint(g.Public), "expires": g.Expires})
+			grants = append(grants, map[string]any{"client": g.Client, "name": g.Name, "platform": g.Info.Platform, "kind": g.Info.Kind, "model": g.Info.Model, "fingerprint": device.Fingerprint(g.Public), "expires": g.Expires})
 		}
 		sort.Slice(pending, func(a, b int) bool { return pending[a]["id"].(string) < pending[b]["id"].(string) })
 		status := m.status
@@ -494,4 +505,28 @@ func (m *Manager) Local(ctx context.Context, r control.Request) (any, error) {
 	default:
 		return nil, fmt.Errorf("unknown host method")
 	}
+}
+
+func (m *Manager) updateClientInfo(id string, info device.ClientInfo) error {
+	info = info.Normalize()
+	if info.Name == "" {
+		return fmt.Errorf("缺少设备名称")
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	old, ok := m.state.Grants[id]
+	if !ok || (old.Expires != 0 && old.Expires <= time.Now().Unix()) {
+		return fmt.Errorf("设备未获授权")
+	}
+	if old.Info == info && old.Name == info.Name {
+		return nil
+	}
+	updated := old
+	updated.Info, updated.Name = info, info.Name
+	m.state.Grants[id] = updated
+	if err := m.save(); err != nil {
+		m.state.Grants[id] = old
+		return err
+	}
+	return nil
 }

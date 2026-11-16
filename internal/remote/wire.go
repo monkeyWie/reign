@@ -15,12 +15,14 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/monkeyWie/reignhub/internal/connectivity"
+	"github.com/monkeyWie/reignhub/internal/device"
 	"github.com/monkeyWie/reignhub/internal/relay"
 	"github.com/pion/webrtc/v4"
 )
 
 type Options struct {
-	Progress       func(connectivity.Progress) `json:"-"`
+	OnClientInfo   func(string, device.ClientInfo) error `json:"-"`
+	Progress       func(connectivity.Progress)           `json:"-"`
 	PublicSTUN     []string
 	SelfSTUN       []string
 	GrantRequired  bool

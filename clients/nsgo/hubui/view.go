@@ -304,7 +304,7 @@ func (s *State) local(cx *core.Scope) core.Node {
 		card(cx, label(cx, "访问授权", 14, false), label(cx, "首次连接需本机确认；配置密码后，输入正确密码可自动授权。", 13, true), row(button(cx, "set-password", "设置访问密码", nil, "outline", func() { s.dialog.Set("password") }), core.Show{When: func() bool { s.read(); return flag(s.host, "passwordEnabled") }, Then: func(cx *core.Scope) core.Node {
 			return button(cx, "clear-password", "关闭密码访问", nil, "ghost", func() { s.call("host.password", Object{"clearPassword": true}, nil) })
 		}}), core.Each(func() []Object { s.read(); return objects(s.host["grants"]) }, func(g Object) string { return str(g, "client") }, func(cx *core.Scope, g func() Object, _ func() int) core.Node {
-			return row(dynamicText(cx, func() string { return str(g(), "name") }, 13, false), spacer(), button(cx, "revoke-"+str(g(), "client"), "撤销授权", nil, "ghost", func() { s.call("host.revoke", Object{"client": g()["client"]}, nil) }))
+			return row(controllerIdentity(cx, g), spacer(), button(cx, "revoke-"+str(g(), "client"), "撤销授权", nil, "ghost", func() { s.call("host.revoke", Object{"client": g()["client"]}, nil) }))
 		})),
 		card(cx, row(glyph(cx, lucide.Bot, 22), core.View{Style: fill, Children: []core.Node{label(cx, "本机 Agent", 14, false), label(cx, "管理已安装的 Agent 与自定义接入。", 13, true)}}, button(cx, "manage-agents", "管理 Agent", lucide.ArrowRight, "outline", func() { s.openSettings("agents") }))),
 	}}}}

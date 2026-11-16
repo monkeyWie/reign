@@ -105,7 +105,8 @@ func TestDevicePairingControlAndRevocation(t *testing.T) {
 	var saved clienthub.Saved
 	go func() {
 		var err error
-		saved, err = hub.Connect(ctx, server.URL, code, info["public"].(string), "", "test controller", true, true)
+		controller := device.ClientInfo{Name: "iQOO Z9 Turbo", Platform: "android", Kind: "native", Model: "V2352A"}
+		saved, err = hub.Connect(device.WithClientInfo(ctx, controller), server.URL, code, info["public"].(string), "", "test controller", true, true)
 		result <- err
 	}()
 	var pending []map[string]any
@@ -113,6 +114,9 @@ func TestDevicePairingControlAndRevocation(t *testing.T) {
 		pending = invoke(t, manager, "host.info", nil).(map[string]any)["pending"].([]map[string]any)
 		return len(pending) == 1
 	})
+	if pending[0]["name"] != "iQOO Z9 Turbo" || pending[0]["platform"] != "android" || pending[0]["kind"] != "native" {
+		t.Fatalf("missing encrypted controller profile: %v", pending[0])
+	}
 	invoke(t, manager, "host.respond", map[string]any{"id": pending[0]["id"], "allow": true})
 	if e = <-result; e != nil {
 		t.Fatal(e)
@@ -126,18 +130,39 @@ func TestDevicePairingControlAndRevocation(t *testing.T) {
 	if _, e = hub.Call(ctx, saved.ID, command); e != nil {
 		t.Fatal(e)
 	}
+	// Only the authenticated controller's own display metadata may change.
+	profile, _ := json.Marshal(map[string]any{"name": "Microsoft Edge 157", "platform": "windows", "kind": "browser", "client": "another-device"})
+	if _, e = hub.Call(ctx, saved.ID, control.Request{Method: "peer.info", Params: profile}); e != nil {
+		t.Fatal(e)
+	}
+	grants := invoke(t, manager, "host.info", nil).(map[string]any)["grants"].([]map[string]any)
+	if len(grants) != 1 || grants[0]["name"] != "Microsoft Edge 157" || grants[0]["platform"] != "windows" || grants[0]["client"] == "another-device" {
+		t.Fatalf("incorrect peer metadata update: %v", grants)
+	}
 	// Explicit retries in the same connection return the recorded result too.
 	if _, e = hub.Call(ctx, saved.ID, command); e != nil {
 		t.Fatal(e)
 	}
 	// Same command after reconnect must not cause a second side effect.
 	hub.Disconnect(saved.ID)
-	if _, e = hub.Connect(ctx, server.URL, code, "", "", "test controller", true, true); e != nil {
+	updated := device.ClientInfo{Name: "Levi 的 MacBook Pro", Platform: "darwin", Kind: "native"}
+	if _, e = hub.Connect(device.WithClientInfo(ctx, updated), server.URL, code, "", "", "test controller", true, true); e != nil {
 		t.Fatal(e)
 	}
 	if _, e = hub.Call(ctx, saved.ID, command); e != nil {
 		t.Fatal(e)
 	}
+	eventually(t, func() bool {
+		grants := invoke(t, manager, "host.info", nil).(map[string]any)["grants"].([]map[string]any)
+		return len(grants) == 1 && grants[0]["name"] == updated.Name && grants[0]["platform"] == "darwin"
+	})
+	if _, e = hub.Reconnect(device.WithClientInfo(ctx, device.ClientInfo{Name: "Renamed Mac", Platform: "darwin", Kind: "native"}), saved.ID); e != nil {
+		t.Fatal(e)
+	}
+	eventually(t, func() bool {
+		grants := invoke(t, manager, "host.info", nil).(map[string]any)["grants"].([]map[string]any)
+		return len(grants) == 1 && grants[0]["name"] == "Renamed Mac"
+	})
 	if fake.Sends != 1 {
 		t.Fatalf("command replayed %d times", fake.Sends)
 	}
@@ -179,7 +204,7 @@ func TestDevicePairingControlAndRevocation(t *testing.T) {
 		t.Fatal(e)
 	}
 	defer second.Disconnect(s2.ID)
-	grants := invoke(t, manager, "host.info", nil).(map[string]any)["grants"].([]map[string]any)
+	grants = invoke(t, manager, "host.info", nil).(map[string]any)["grants"].([]map[string]any)
 	var clientID string
 	for _, g := range grants {
 		if g["name"] == "second" {

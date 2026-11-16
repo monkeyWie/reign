@@ -86,17 +86,28 @@ func (a *API) list() (any, error) {
 func (a *API) loadIdentity(ctx context.Context, service, name string) (Object, error) {
 	a.identity.Lock()
 	defer a.identity.Unlock()
+	if info := device.ClientInfoFrom(ctx); info.Name != "" {
+		name = info.Name
+	}
 	v, e := a.store.Get("identity:" + service)
 	if e != nil {
 		return nil, e
 	}
 	if v != nil {
-		i := obj(v)
+		i := clone(obj(v))
 		if name != "" && name != str(i, "name") {
 			if _, e = post(ctx, service, str(i, "token"), "/p2p/devices/presence", Object{"name": name}); e != nil {
 				return nil, e
 			}
 			i["name"] = name
+		}
+		var previous device.ClientInfo
+		raw, _ := json.Marshal(i["info"])
+		_ = json.Unmarshal(raw, &previous)
+		info := device.CurrentClientInfo(ctx, previous)
+		info.Name = str(i, "name")
+		if info != previous {
+			i["info"] = info
 			if e = a.store.Put("identity:"+service, i); e != nil {
 				return nil, e
 			}
@@ -112,6 +123,7 @@ func (a *API) loadIdentity(ctx context.Context, service, name string) (Object, e
 	if e != nil {
 		return nil, e
 	}
+	r["info"] = device.CurrentClientInfo(ctx, device.ClientInfo{Name: name})
 	r["private"] = hex.EncodeToString(k.Bytes())
 	r["public"] = pub
 	e = a.store.Put("identity:"+service, r)
@@ -188,7 +200,7 @@ func (a *API) connect(ctx context.Context, p Object) (any, error) {
 	if str(s, "key") == "" || expired {
 		connectivity.Report(ctx, "authorize", "等待被控设备授权", connectivity.StageTimeout)
 		request := randomHex(16)
-		envelope, e := seal(i, str(d, "public"), "reignhub/pair/request/"+request, Object{"password": p["password"], "remember": p["remember"] != false})
+		envelope, e := seal(i, str(d, "public"), "reignhub/pair/request/"+request, Object{"password": p["password"], "remember": p["remember"] != false, "info": i["info"]})
 		if e != nil {
 			return nil, e
 		}
@@ -289,6 +301,7 @@ func (a *API) connect(ctx context.Context, p Object) (any, error) {
 	if old != nil {
 		old.Close()
 	}
+	publishClientInfo(c, i["info"])
 	return a.list()
 }
 func (a *API) client(id string) *browserclient.Client {
@@ -361,6 +374,10 @@ func (a *API) Call(ctx context.Context, method string, p Object, target string, 
 					err := old.Resume(probe)
 					stop()
 					if err == nil {
+						info := device.ClientInfoFrom(ctx)
+						if info.Name != "" {
+							publishClientInfo(old, info)
+						}
 						return a.list()
 					}
 					if ctx.Err() != nil {
@@ -554,4 +571,15 @@ func (a *API) assetCache(method, target string, p Object) (any, error) {
 		return nil, e
 	}
 	return nil, a.store.Put("asset-index", append(out, Object{"key": key, "device": target, "size": len(bytes), "touched": time.Now().UnixMilli()}))
+}
+
+func publishClientInfo(c *browserclient.Client, info any) {
+	if info == nil {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_, _ = c.Call(ctx, Object{"method": "peer.info", "params": info})
+	}()
 }

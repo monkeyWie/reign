@@ -6,10 +6,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/monkeyWie/reignhub/internal/device"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/monkeyWie/reignhub/internal/bridge"
 	"github.com/nsgo-dev/nsgo/core"
@@ -71,18 +74,36 @@ func platformDeviceName() string {
 	}
 	return runtime.GOOS + " 设备"
 }
-func resolveDeviceName(cx *core.Scope, done func(string)) {
+func platformClientInfo() device.ClientInfo {
+	return device.ClientInfo{Name: platformDeviceName(), Platform: runtime.GOOS, Kind: "native"}.Normalize()
+}
+func resolveClientInfo(cx *core.Scope, done func(device.ClientInfo)) {
+	info := platformClientInfo()
+	if runtime.GOOS == "darwin" {
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			if out, err := exec.CommandContext(ctx, "/usr/sbin/scutil", "--get", "ComputerName").Output(); err == nil && strings.TrimSpace(string(out)) != "" {
+				info.Name = strings.TrimSpace(string(out))
+			}
+			cx.Post(func() { done(info.Normalize()) })
+		}()
+		return
+	}
 	if runtime.GOOS != "android" && runtime.GOOS != "ios" {
-		done(platformDeviceName())
+		done(info)
 		return
 	}
 	cx.CallHost("ras.device", nil, func(v any, err error) {
 		if err == nil {
 			if name := strings.TrimSpace(str(object(v), "name")); name != "" {
-				done(name)
-				return
+				info.Name = name
+			}
+			info.Model = str(object(v), "model")
+			if runtime.GOOS == "ios" {
+				info.Name = appleDeviceName(info.Name, info.Model)
 			}
 		}
-		done(platformDeviceName())
+		done(info.Normalize())
 	})
 }

@@ -34,7 +34,9 @@ func platformOptions() []nsgo.Option {
 	host.Handle("ras.device", func(call *core.HostCall) {
 		p := C.ras_device_name()
 		defer C.free(unsafe.Pointer(p))
-		call.Resolve(map[string]any{"name": C.GoString(p)})
+		model := C.ras_device_model()
+		defer C.free(unsafe.Pointer(model))
+		call.Resolve(map[string]any{"name": C.GoString(p), "model": C.GoString(model), "platform": "ios"})
 	})
 	return []nsgo.Option{nsgo.HostChannel(host), nsgo.Component("ras.qr-camera", func(cx *core.NativeContext) core.NativeComponent {
 		id := cameraID.Add(1)

@@ -43,13 +43,19 @@ public final class RasActivity extends NsgoActivity {
             String name = null;
             try { name = Settings.Global.getString(getContentResolver(), "device_name"); }
             catch (SecurityException ignored) { /* Some OEMs protect this setting. */ }
-            if (name == null || name.trim().isEmpty()) {
-                name = Build.MODEL;
-                if (!name.toLowerCase().startsWith(Build.MANUFACTURER.toLowerCase()))
-                    name = Build.MANUFACTURER + " " + name;
-            }
+            String model = Build.MODEL == null ? "" : Build.MODEL.trim();
+            String brand = Build.MANUFACTURER == null ? "" : Build.MANUFACTURER.trim();
+            // Keep a user/OEM friendly name. Add the brand only for a bare model code.
+            if (name == null || name.trim().isEmpty()) name = model;
+            name = name.trim();
+            if (name.equalsIgnoreCase(model) && model.matches("(?i)(?=.*\\d)[a-z0-9_-]+") && !brand.isEmpty()
+                    && !name.toLowerCase(java.util.Locale.ROOT).startsWith(brand.toLowerCase(java.util.Locale.ROOT)))
+                name = brand + " " + name;
+            if (name.isEmpty()) name = "Android";
             HashMap<String,Object> result = new HashMap<>();
             result.put("name", name);
+            result.put("model", model);
+            result.put("platform", "android");
             reply.resolve(result);
         });
         openSession(getIntent());

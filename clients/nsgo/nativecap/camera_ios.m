@@ -3,6 +3,7 @@
 #import <UIKit/UIKit.h>
 #import <AVFoundation/AVFoundation.h>
 #include "camera_ios.h"
+#include <sys/utsname.h>
 extern void rasQrEvent(uint64_t token, char *name, char *value);
 
 @interface RasQrCamera : UIView <AVCaptureMetadataOutputObjectsDelegate> {
@@ -136,3 +137,11 @@ char *ras_device_name(void) {
 
 char *ras_timezone_name(void) { return strdup([NSTimeZone localTimeZone].name.UTF8String); }
 int ras_timezone_offset(void) { return (int)[[NSTimeZone localTimeZone] secondsFromGMT]; }
+
+char *ras_device_model(void) {
+    const char *simulator = getenv("SIMULATOR_MODEL_IDENTIFIER");
+    if (simulator && *simulator) return strdup(simulator);
+    struct utsname system;
+    if (uname(&system) == 0) return strdup(system.machine);
+    return strdup("");
+}

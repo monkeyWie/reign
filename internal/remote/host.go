@@ -11,6 +11,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/monkeyWie/reignhub/internal/connectivity"
 	"github.com/monkeyWie/reignhub/internal/control"
+	"github.com/monkeyWie/reignhub/internal/device"
 	"github.com/monkeyWie/reignhub/internal/provider"
 	"github.com/monkeyWie/reignhub/internal/relay"
 )
@@ -203,7 +204,21 @@ func serveHostObserved(ctx context.Context, p Pairing, opts Options, d *control.
 							return nil
 						})
 					}
-					result := d.HandleRemote(callCtx, req)
+					var result control.Response
+					if req.Method == "peer.info" && opts.OnClientInfo != nil && opts.ResolveKey != nil {
+						var info device.ClientInfo
+						err := json.Unmarshal(req.Params, &info)
+						if err == nil {
+							err = opts.OnClientInfo(deviceID, info.Normalize())
+						}
+						if err != nil {
+							result.Error = err.Error()
+						} else {
+							result.Result = json.RawMessage(`{}`)
+						}
+					} else {
+						result = d.HandleRemote(callCtx, req)
+					}
 					if partialSent && result.Error == "" {
 						var metadata provider.Transcript
 						if json.Unmarshal(result.Result, &metadata) == nil {

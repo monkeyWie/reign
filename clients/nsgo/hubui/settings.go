@@ -106,7 +106,7 @@ func (s *State) preferences(cx *core.Scope, initial string) core.Node {
 		if !open {
 			close()
 		}
-	}, BackdropStyle: core.Style{Background: core.RGB(0x152632).Faded(.26), BackdropFilters: []core.Filter{core.Blur(8)}}, PopupStyle: core.Style{CornerRadius: 24, BorderWidth: 1, Overflow: core.Hidden, Shadows: []core.BoxShadow{{Offset: core.Point{Y: 18}, Blur: 70, Color: core.RGB(0x07141f).Faded(.25)}}}, PopupStyleFunc: func() core.Style {
+	}, BackdropStyle: core.Style{Background: core.RGB(0x000000).Faded(.26), BackdropFilters: []core.Filter{core.Blur(8)}}, PopupStyle: core.Style{CornerRadius: 24, BorderWidth: 1, Overflow: core.Hidden, Shadows: []core.BoxShadow{{Offset: core.Point{Y: 18}, Blur: 70, Color: core.RGB(0x000000).Faded(.25)}}}, PopupStyleFunc: func() core.Style {
 		w := cx.Env().Window()
 		c := palette(cx)
 		return core.Style{Width: core.Pt(min(1050, max(0, w.Width-choose(narrow.Get(), core.Points(16), core.Points(64))))), Height: core.Pt(min(740, max(0, w.Height-choose(narrow.Get(), core.Points(24), core.Points(64))))), Background: c.background, BorderColor: c.border}
@@ -124,29 +124,8 @@ func (s *State) preferences(cx *core.Scope, initial string) core.Node {
 	})}}
 }
 func (s *State) appearanceSettings(cx *core.Scope) core.Node {
-	colors := func(dark bool) core.Node {
-		choices := lightSchemes
-		if dark {
-			choices = darkSchemes
-		}
-		cards := []core.Node{}
-		for _, entry := range choices {
-			item := entry
-			swatches := []core.Node{}
-			for _, color := range []uint32{item.sidebar, item.muted, item.code, item.elevated, item.accent} {
-				swatches = append(swatches, core.View{Style: core.Style{Width: core.Pt(18), Height: core.Pt(18), CornerRadius: 5, BorderWidth: 1, BorderColor: core.RGB(item.secondary).Faded(.18), Background: core.RGB(color)}})
-			}
-			cards = append(cards, core.View{TestID: choose(dark, "dark-colors-", "light-colors-") + item.id, Role: core.RoleButton, Label: item.name, OnPress: func(core.PressEvent) { s.selectColors(dark, item.id) }, Style: core.Style{Width: core.Pt(142), Padding: core.All(14), Gap: 10, AlignItems: core.AlignCenter, CornerRadius: 14, BorderWidth: 1}, StyleFunc: func() core.Style {
-				s.read()
-				c := palette(cx)
-				selected := choose(dark, s.darkScheme, s.lightScheme) == item.id
-				return core.Style{BorderColor: choose(selected, c.accent.Faded(.35), c.background.Faded(0)), Background: choose(selected, c.selected.Faded(.55), c.background.Faded(0)), Hover: &core.Style{Background: c.muted}}
-			}, Children: []core.Node{core.View{Style: core.Style{Direction: core.Row, Gap: 5}, Children: swatches}, label(cx, item.name, 13, false)}})
-		}
-		return core.View{Style: core.Style{Gap: 14}, Children: []core.Node{label(cx, choose(dark, "暗色配色", "亮色配色"), 16, false), label(cx, choose(dark, "在暗黑主题下使用", "在明亮主题下使用"), 12, true), core.View{Style: core.Style{Direction: core.Row, Wrap: core.Wrap, Gap: 8}, Children: cards}}}
-	}
 	return core.View{TestID: "appearance-settings", Style: core.Style{Gap: 28}, Children: []core.Node{
-		label(cx, "外观", 18, false), ui.Select[string]{TestID: "appearance-select", Label: "主题", Options: []ui.Option[string]{{Value: "system", Label: "跟随系统"}, {Value: "light", Label: "明亮"}, {Value: "dark", Label: "暗黑"}}, Value: func() string { s.read(); return s.appearance }, OnChange: s.setAppearance, Style: core.Style{MaxWidth: core.Pt(300)}}, colors(false), colors(true),
+		label(cx, "外观", 18, false), ui.Select[string]{TestID: "appearance-select", Label: "主题", Options: []ui.Option[string]{{Value: "system", Label: "跟随系统"}, {Value: "light", Label: "明亮"}, {Value: "dark", Label: "暗黑"}}, Value: func() string { s.read(); return s.appearance }, OnChange: s.setAppearance, Style: core.Style{MaxWidth: core.Pt(300)}},
 	}}
 }
 func (s *State) connectionSettings(cx *core.Scope) core.Node {

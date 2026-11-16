@@ -17,11 +17,11 @@ func TestSettingsThemePreservesWorkspace(t *testing.T) {
 	app.Type("id:chat-input", "设置切换不丢草稿")
 	app.Press("id:server-settings")
 	app.Find("id:appearance-settings")
+	app.Press("id:appearance-select")
+	app.Press("role:option 明亮")
 	app.Screenshot("settings-light")
-	app.Press("id:light-colors-lagoon")
 	app.Press("id:appearance-select")
 	app.Press("role:option 暗黑")
-	app.Press("id:dark-colors-aurora")
 	app.Screenshot("settings-dark")
 	app.Press("id:settings-close")
 	if text := app.Find("id:chat-input").Text; text != "设置切换不丢草稿" {
@@ -76,8 +76,6 @@ func TestAppearancePreferencesPersist(t *testing.T) {
 		state = newState(cx, newDemoAPI())
 		state.loadAppearance()
 		return button(cx, "save-preferences", "设置外观", nil, "ghost", func() {
-			state.selectColors(false, "lilac")
-			state.selectColors(true, "ink")
 			state.setAppearance("dark")
 		})
 	}, nsgotest.Size(390, 844))
@@ -86,7 +84,7 @@ func TestAppearancePreferencesPersist(t *testing.T) {
 		state.cx.Post(func() {
 			next := newState(state.cx, newDemoAPI())
 			next.loadAppearance()
-			if next.appearance != "dark" || next.lightScheme != "lilac" || next.darkScheme != "ink" || !next.cx.Dark() {
+			if next.appearance != "dark" || !next.cx.Dark() {
 				t.Error("appearance preferences did not persist")
 			}
 		})

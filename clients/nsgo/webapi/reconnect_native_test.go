@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/monkeyWie/reignhub/internal/control"
+	"github.com/monkeyWie/reignhub/internal/device"
 	"github.com/monkeyWie/reignhub/internal/provider"
 	"github.com/monkeyWie/reignhub/internal/relay"
 	"github.com/monkeyWie/reignhub/internal/remote"
@@ -33,6 +34,8 @@ func TestReconnectReusesConnectionThenCachedPairingAndFallsBack(t *testing.T) {
 	transport := relay.New(token)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/p2p/devices/presence":
+			json.NewEncoder(w).Encode(map[string]any{})
 		case "/p2p/devices/resolve":
 			resolves.Add(1)
 			json.NewEncoder(w).Encode(map[string]any{"online": true, "device": map[string]any{"id": host, "public": "host-public", "connectionId": "654321", "name": "test host"}})
@@ -47,11 +50,19 @@ func TestReconnectReusesConnectionThenCachedPairingAndFallsBack(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(device.WithClientInfo(context.Background(), device.ClientInfo{Name: "Microsoft Edge 157", Platform: "windows", Kind: "browser"}))
 	defer cancel()
 	pair := remote.Pairing{Relay: "ws" + strings.TrimPrefix(server.URL, "http"), Host: host, Key: key, RelayToken: token}
 	status := remote.NewHostStatus(pair.Relay)
-	go remote.RunHostObserved(ctx, pair, remote.Options{RelayOnly: true}, &control.Dispatcher{Providers: map[string]provider.Provider{"fixture": recoveryProvider{}}}, status)
+	profiles := make(chan device.ClientInfo, 16)
+	opts := remote.Options{RelayOnly: true, ResolveKey: func(string) (string, bool) { return key, true }, OnClientInfo: func(_ string, info device.ClientInfo) error {
+		select {
+		case profiles <- info:
+		default:
+		}
+		return nil
+	}}
+	go remote.RunHostObserved(ctx, pair, opts, &control.Dispatcher{Providers: map[string]provider.Provider{"fixture": recoveryProvider{}}}, status)
 	until := time.Now().Add(5 * time.Second)
 	for status.Snapshot().State != "connected" {
 		if time.Now().After(until) {
@@ -79,12 +90,28 @@ func TestReconnectReusesConnectionThenCachedPairingAndFallsBack(t *testing.T) {
 	if _, err = reconnect(setup); err != nil {
 		t.Fatal(err)
 	}
+	select {
+	case profile := <-profiles:
+		if profile.Name != "Microsoft Edge 157" || profile.Platform != "windows" || profile.Kind != "browser" {
+			t.Fatalf("incorrect browser profile: %#v", profile)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("browser did not publish authenticated profile")
+	}
 	first := h.client(id)
 	if resolves.Load() != 0 {
 		t.Fatal("cached reconnect resolved device again")
 	}
-	if _, err = reconnect(setup); err != nil {
+	if _, err = reconnect(device.WithClientInfo(setup, device.ClientInfo{Name: "Microsoft Edge 158", Platform: "windows", Kind: "browser"})); err != nil {
 		t.Fatal(err)
+	}
+	select {
+	case profile := <-profiles:
+		if profile.Name != "Microsoft Edge 158" {
+			t.Fatalf("resume did not update browser profile: %#v", profile)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("resume did not publish browser profile")
 	}
 	if h.client(id) != first || resolves.Load() != 0 {
 		t.Fatal("healthy connection was replaced")

@@ -2,6 +2,7 @@ package clienthub
 
 import (
 	"context"
+	"github.com/monkeyWie/reignhub/internal/device"
 	"github.com/monkeyWie/reignhub/internal/deviceservice"
 	"net/http/httptest"
 	"path/filepath"
@@ -25,18 +26,20 @@ func TestControllerRenameKeepsPairingIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	named, err := hub.identity(ctx, server.URL, "Pixel 9")
+	info := device.ClientInfo{Name: "Pixel 9", Platform: "android", Kind: "native", Model: "Pixel 9"}
+	ctx = device.WithClientInfo(ctx, info)
+	named, err := hub.identity(ctx, server.URL, "outdated name")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if named.Name != "Pixel 9" || named.ID != first.ID || named.Public != first.Public || named.Token != first.Token {
+	if named.Info != info || named.Name != "Pixel 9" || named.ID != first.ID || named.Public != first.Public || named.Token != first.Token {
 		t.Fatal("rename replaced identity or was not persisted")
 	}
-	again, err := hub.identity(ctx, server.URL, "")
+	again, err := hub.identity(context.Background(), server.URL, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if again.Name != "Pixel 9" {
+	if again.Name != "Pixel 9" || again.Info != info {
 		t.Fatal("background reconnect overwrote the resolved name")
 	}
 }

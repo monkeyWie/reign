@@ -216,7 +216,7 @@ func (s *State) dialogView(cx *core.Scope, kind string) core.Node {
 		}
 		d.NoCloseOnBackdropPress = true
 		d.NoCloseOnEscape = true
-		children = append(children, label(cx, str(pending, "name")+" 请求访问这台电脑上的 Agent。", 13, false), label(cx, "设备指纹："+str(pending, "fingerprint"), 11, true), label(cx, choose(flag(pending, "remember"), "允许后记住此控制设备，可在授权列表撤销。", "临时授权 8 小时，期间可再次连接。"), 12, true))
+		children = append(children, controllerIdentity(cx, func() Object { return pending }), label(cx, "请求访问这台电脑上的 Agent。", 13, false), label(cx, "设备指纹："+str(pending, "fingerprint"), 11, true), label(cx, choose(flag(pending, "remember"), "允许后记住此控制设备，可在授权列表撤销。", "临时授权 8 小时，期间可再次连接。"), 12, true))
 		footer = []core.Node{button(cx, "deny-host-request", "拒绝", nil, "outline", func() { close(); s.call("host.respond", Object{"id": id, "allow": false}, nil) }), button(cx, "approve-host-request", "允许连接", nil, "primary", func() { close(); s.call("host.respond", Object{"id": id, "allow": true}, nil) })}
 	case strings.HasPrefix(kind, "activate:"):
 		provider := strings.TrimPrefix(kind, "activate:")

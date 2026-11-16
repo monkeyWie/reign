@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/monkeyWie/reignhub/internal/device"
 	"github.com/nsgo-dev/nsgo/base"
 	"github.com/nsgo-dev/nsgo/core"
 )
@@ -90,10 +91,13 @@ type State struct {
 	nativeTasks                                             map[string]Object
 	nativeTaskMonitors                                      map[string]*nativeTaskMonitor
 
-	appearance, lightScheme, darkScheme, settingsReturn, settingsSection string
+	appearance, settingsReturn, settingsSection string
 }
 
 func newState(cx *core.Scope, api API) *State {
+	identified := &identifiedAPI{API: api}
+	identified.setInfo(platformClientInfo())
+	api = identified
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &State{clientName: platformDeviceName(), drafts: map[string]draftState{}, expanded: map[string]bool{}, cx: cx, api: api, ctx: ctx, cancel: cancel, revision: core.NewSignal(cx, 0), width: core.NewSignal(cx, core.Points(1320)), dialog: core.NewSignal(cx, ""), draft: core.NewSignal(cx, ""), deviceWidth: core.NewSignal(cx, core.Points(210)), sessionWidth: core.NewSignal(cx, core.Points(300)), collapsed: map[string]bool{}, images: map[string][]byte{}, loadingImages: map[string]bool{}, previewIndex: core.NewSignal(cx, 0), prompted: map[string]bool{}, retrying: map[string]time.Time{}, timeline: &core.Ref{}}
 	s.snapshots = newSnapshotWriter(ctx, api)
@@ -143,7 +147,11 @@ func (s *State) initialize() {
 	s.pollPresence()
 	s.observeLifecycle()
 	s.refreshTimezone()
-	resolveDeviceName(s.cx, func(name string) { s.clientName = name; s.changed() })
+	resolveClientInfo(s.cx, func(info device.ClientInfo) {
+		s.clientName = info.Name
+		s.api.(*identifiedAPI).setInfo(info)
+		s.changed()
+	})
 	s.async(func(ctx context.Context) (any, error) {
 		if s.api.CanHost() {
 			if _, e := s.api.Call(ctx, "host.bootstrap", nil, "", nil); e != nil {
