@@ -160,7 +160,7 @@ func RootWithAPI(cx *core.Scope, api API, start bool) core.Node {
 		}
 		return fmt.Sprintf("%s|%s|%s|%t", mode, s.target, str(s.selected, "id"), s.narrowChat)
 	})
-	return core.View{TestID: "agenthub", Style: fill.Merge(core.Style{PaddingEnv: core.EnvEdges{Top: core.EnvSafeArea, Bottom: core.EnvSafeArea}}), StyleFunc: func() core.Style {
+	return s.windowFrame(cx, core.View{TestID: "agenthub", Style: fill.Merge(core.Style{PaddingEnv: core.EnvEdges{Top: core.EnvSafeArea, Bottom: core.EnvSafeArea}}), StyleFunc: func() core.Style {
 		return core.Style{Background: palette(cx).canvas, Color: palette(cx).foreground, FontSize: 13}
 	}, OnLayout: func(b core.Bounds) { s.width.Set(b.Size.Width) }, Children: []core.Node{
 		core.Dynamic(func(cx *core.Scope) core.Node {
@@ -202,8 +202,9 @@ func RootWithAPI(cx *core.Scope, api API, start bool) core.Node {
 			}, Children: []core.Node{dynamicText(cx, func() string { s.read(); return s.notice }, 12, false)}}
 		}},
 		core.Dynamic(func(cx *core.Scope) core.Node { return s.dialogView(cx, s.dialog.Get()) }),
-	}}
+	}})
 }
+
 func (s *State) resize(cx *core.Scope, devices bool) core.Node {
 	w := s.sessionWidth
 	if devices {
