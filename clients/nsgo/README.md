@@ -1,20 +1,21 @@
 # ReignHub · NSGo 客户端
 
-桌面、移动端与浏览器共用此 Go UI 实现，复用根模块 Go 后端。网络层增加了原生 TCP P2P 与 TCP STUN，Provider 和 Agent 接入逻辑没有变更。
+桌面、移动端与浏览器共用此 Go UI 实现，复用根模块 Go 后端。原生端支持 WebRTC 与 TCP P2P，浏览器使用 WebRTC，均可回退到加密中继。
 
 ## 技术与目录
 
-按照 [NSGo 官方文档](https://nsgo.dev/zh/docs/) 开发，固定官方源码版本 `70cef6a4ed17f7c8428faabc9bb419ff4223745b`（2026-11-12）。NSGo 尚无稳定版本，升级应单独做平台和界面回归。
+按照 [NSGo 官方文档](https://nsgo.dev/zh/docs/) 开发，依赖版本以本目录 [go.mod](go.mod) 和 `go.sum` 为准。NSGo 尚无稳定版本，升级应单独做平台和界面回归。
 
-- 原生平台使用 NSGo 平台视图，无 WebView，无 Flutter；浏览器使用官方 Go WASM + DOM 后端。
+- 原生平台使用 NSGo 平台视图，无 WebView；浏览器使用官方 Go WASM + DOM 后端。
 - `hubui/`：设备侧栏、本机 Agent 面板、项目与会话目录、聊天、模型选择、授权、图片附件及响应式布局。
 - `hubui/api_native.go`：在同一个应用进程内直接调用已有 `internal/bridge`，无需 FFI、CLI 包装器或独立 Hub 后台进程。
 - `webapi/`：迁移原浏览器前端负责的配对、保存设备、离线快照、目录增量同步及 IndexedDB 附件缓存。
 - `browserclient/`：与已有 Go 主机兼容的加密协议和浏览器 RTCPeerConnection；优先尝试直连，无法直连时走现有中继。无 TURN、DERP、Tailcat。
 - `testsupport/fixture/`：仅限本机的隔离网络测试主机，不访问真实 Agent。
-- `scripts/`：官方构建命令的薄包装及 Android 链接兼容设置。
+- 根目录 `scripts/build.sh`、`scripts/go-toolexec.sh`、`scripts/build-android-host.py`：统一构建入口、链接参数与 Android 宿主打包。
+- `cmd/android-package/`：Android manifest 与 APK 的 Go 打包工具，使用本模块的 NSGo 依赖。
 
-本模块通过 `replace github.com/monkeyWie/reignhub => ../..` 复用后端；根目录 `go.mod` / `go.sum` 没有调整。
+本模块通过 `replace github.com/monkeyWie/reignhub => ../..` 复用后端；两个 Go module 分别运行测试。
 
 ## 开发和启动
 
@@ -35,12 +36,12 @@ AGENTHUB_NSGO_DEMO=1 GOWORK=off go tool nsgo dev
 也可以直接启动已构建的 macOS 包：
 
 ```sh
-'dist/ReignHub-0.1.0-macos_arm64/ReignHub.app/Contents/MacOS/ReignHub'
+'../../dist/ReignHub-0.1.0-macos_arm64/ReignHub.app/Contents/MacOS/ReignHub'
 ```
 
-NSGo 应用 ID 是 `dev.agenthub.nsgo`，其本地设备身份和缓存与旧 Flutter 应用隔离。开发时可用 `AGENTHUB_NSGO_DATA_DIR` 指定独立测试目录。
+NSGo 应用 ID 是 `dev.agenthub.nsgo`，设备身份和缓存保存在该应用的数据目录。开发时可用 `AGENTHUB_NSGO_DATA_DIR` 指定独立测试目录。
 
-原生客户端默认服务为 `https://reignhub.app`。可以在界面里改为自部署服务，或在第一次启动前设置运行环境变量 `AGENTHUB_SERVER_URL`。改变默认构建值：
+原生客户端默认服务为 `https://reignhub.app`。可以在界面里改为自部署服务，或在第一次启动前设置运行环境变量 `AGENTHUB_SERVER_URL`。改变默认构建值（以下构建命令从仓库根目录执行）：
 
 ```sh
 AGENTHUB_SERVER_URL=https://example.com ./scripts/build.sh macos_arm64,android_arm64
@@ -49,7 +50,7 @@ AGENTHUB_SERVER_URL=https://example.com ./scripts/build.sh macos_arm64,android_a
 桌面、手机和 Web 都支持 HTTP/WS 与 HTTPS/WSS，可直接使用公网 IP，无需 LAN 编译例外。例如：
 
 ```sh
-AGENTHUB_SERVER_URL=http://10.0.4.140:7443 ./scripts/build.sh macos_arm64,web
+AGENTHUB_SERVER_URL=http://192.168.1.10:26330 ./scripts/build.sh macos_arm64,web
 ```
 
 已有设备配置不会被构建默认值覆盖，仍需在界面修改。Web 按当前 origin 连接；HTTP 下部分浏览器能力受安全上下文限制，WebRTC 不可用时保留 WS 中继。公网 Web 推荐 HTTPS，但 TLS 不是连接的强制条件。
@@ -58,15 +59,17 @@ AGENTHUB_SERVER_URL=http://10.0.4.140:7443 ./scripts/build.sh macos_arm64,web
 
 ## 构建和分发
 
+从仓库根目录执行，脚本自动进入 NSGo module：
+
 ```sh
 ./scripts/build.sh
 # 或选择目标
 ./scripts/build.sh macos_arm64,windows_x64,linux_x64,ios,ios_simulator,android_arm64,web
 ```
 
-目标与名字由 `nsgo.yaml` 配置，使用官方 `go tool nsgo build`。输出在 `dist/`，APK、IPA、Web ZIP 在 `dist/releases/`，每个发布文件带 SHA-256。
+目标与名字由 `nsgo.yaml` 配置，使用官方 `go tool nsgo build`。默认输出在仓库根目录 `dist/`，APK、IPA、Web ZIP 在根目录 `dist/releases/`，每个发布文件带 SHA-256。显式 `-output` 支持绝对路径，相对路径按调用者当前目录解析；仓库路径包含空格也可构建。
 
-Android 构建中，现有 Pion 依赖 `anet` 引用 Go 私有 zone cache，和旧 Flutter 构建一样需要 `-checklinkname=0`。包装脚本仅在 Android 链接时追加这个标志，不修改 Go 安装、依赖缓存或后端源码。
+Android 构建中，现有 Pion 依赖 `anet` 引用 Go 私有 zone cache，需要 `-checklinkname=0`。包装脚本仅在 Android 链接时追加这个标志，不修改 Go 安装、依赖缓存或后端源码。
 
 - Android APK 支持通过 CI Secret `ANDROID_SIGNING_PEM_BASE64` 配置固定 PEM 签名身份；未配置时使用临时调试签名。详见 [CI 与 Release](../../docs/ci-and-releases.md)。
 - iOS IPA 已构建但未签名；安装到真机、TestFlight 或发布需要 Apple 签名配置。
@@ -78,30 +81,31 @@ Android 通过 NSGo 的公开 Host API 调用 `ConnectionService`。有连接或
 实时观察到的任务按设备、Provider、会话和 turn 隔离通知；运行中显示进度，完成、失败或停止会更新通知。切到其他会话后，独立的 watch 继续跟踪已观察到的运行任务；历史缓存不会触发通知。点击任务通知重新打开对应会话。活动任务在线时持有带超时、定期续期的 partial WakeLock，结束、离线或服务停止时释放。
 
 构建原生 Host 需要 Android SDK 的 `aapt2`、`d8`、`zipalign`、`apksigner` 和 OpenSSL；manifest 交给 SDK 编译，保留服务类型及权限。CI 仍使用已有签名身份。服务不会在用户移除应用任务后自行复活。Android 厂商省电和强制停止仍可能结束进程，iOS 和浏览器不采用 Android 的常驻服务方案。
+
 - Windows、Linux 包已交叉构建，尚未在对应真机运行。
 
-开发用 `reignhub-server` 可内嵌 ReignHub Web，执行 `./reignhub-server` 即可使用。`--no-web` 可关闭页面。以下外部目录方式仅用于开发时覆盖内嵌资源：
+开发用 `reignhub-server` 可内嵌 ReignHub Web，执行 `./reignhub-server` 即可使用。`--web-enabled=false` 可关闭页面。以下外部目录方式仅用于开发时覆盖内嵌资源：
 
 ```sh
-reignhub-server -listen :26331 -stun-listen :26330 -tcp-stun-listen :26330 \
+reignhub-server -listen :26330 -stun-listen :26331 -tcp-stun-listen :26331 \
   -state ./data/reignhub.db \
   -origins https://reignhub.app \
-  -web '/path/to/ReignHub-0.1.0-web'
+  -web '/path/to/assets/chat'
 ```
 
-HTTP/WS 可直接访问，也可用 Nginx 提供 HTTPS/WSS 并反代 26331。TCP 和 UDP STUN 的 26330 端口单独直达，不走普通 HTTP 反代。
+HTTP/WS 可直接访问，也可用 Nginx 提供 HTTPS/WSS 并反代 26330。TCP 和 UDP STUN 的 26331 端口单独直达，不走普通 HTTP 反代。
 
-打包公网 Linux 服务（包含 NSGo Web，保留当前 LAN 产物和服务）：
+打包 Linux、macOS 和 Windows 服务（包含 NSGo Web，保留当前 LAN 产物和服务）：
 
 ```sh
-python3 scripts/package-service.py --domain reignhub.app
+python3 scripts/platform/package-server.py --version X.Y.Z
 ```
 
-输出在 `dist/server-releases/`，有 amd64 和 arm64 两种架构，Web 已内嵌在 `reignhub-server`，包含 Nginx、systemd 示例和 SHA256 清单，不需要启动脚本或外部 Web 目录。客户端填写 `http://公网IP:26331`，或配置反代后填写 `https://reignhub.app`。TCP/UDP 26330 均单独直达。详见 [服务部署说明](deploy/service/README.md)。
+输出在仓库根目录 `dist/release/`，有三个平台和 amd64 / arm64 两种架构，Web 已内嵌在 `reignhub-server`，包含 Nginx、systemd 示例和 SHA256 清单，不需要启动脚本或外部 Web 目录。客户端填写 `http://公网IP:26330`，或配置反代后填写 `https://reignhub.app`。TCP/UDP 26331 均单独直达。详见 [服务部署说明](deploy/service/README.md)。
 
 ## 界面和同步
 
-保留旧 Zinc 配色、210 / 300 宽侧栏及拖动调整，按 1000 / 650 断点切换布局。会话优先按 Agent 项目归属分组，同一 Git 项目的不同 worktree 合并展示；没有项目归属时按完整工作目录分组，最近时间排序，聚合 Provider 并隐藏不支持的 VS Code；保留项目折叠、默认五个会话、更多会话及项目内新建入口。
+采用 Zinc 中性色与绿色品牌强调、210 / 300 宽侧栏及拖动调整，按 1000 / 650 断点切换布局。会话优先按 Agent 项目归属分组，同一 Git 项目的不同 worktree 合并展示；没有项目归属时按完整工作目录分组，最近时间排序，聚合 Provider 并隐藏不支持的 VS Code；保留项目折叠、默认五个会话、更多会话及项目内新建入口。
 
 聊天使用 NSGo 原生虚拟列表与增量 Markdown。通过现有 watch 协议接收文本增量；重连、事件缺口及快照通知会补最新状态。草稿、所选模型和上传内容按会话隔离，目录刷新不重建输入框。历史中被新一轮取代的 inProgress 不会让 Thinking 常驻。
 
@@ -140,10 +144,10 @@ GOWORK=off go tool nsgo test -target web \
   -run TestBrowserP2PAndRelayWithExistingHost ./browserclient
 ```
 
-## 尚未达到旧版完全一致的部分
+## 平台验证范围
 
-- NSGo 官方尚未提供实时条码相机预览。移动端目前是系统拍照 / 选照片，再在 Go 内识别设备二维码；不是旧版实时扫描。照片不上传到服务器。
+- 实时扫码通过 [原生能力扩展](native/README.md) 接入 Android Camera2 和 iOS AVFoundation，照片不上传到服务器；权限和前后台恢复需要对应平台验证。
 - 尚无 Android / iOS 真机验收，也未测试公网真实设备配对；不把交叉编译、模拟器或隔离测试当作这些验证。
-- 原生字体、Markdown 内部排版及弹窗仍由 NSGo 原生组件绘制。布局和样式已按旧源码迁移并检查截图，尚未对每个平台做逐像素差分验收，不能把当前版本称为已完成全部端的像素级 1:1 验收。
+- 原生字体、Markdown 内部排版及弹窗仍由 NSGo 原生组件绘制。各平台的文本选择、输入、滚动和窗口行为需分别验收，不能用单一平台的截图代替全部平台检查。
 
 参考：[入门](https://nsgo.dev/zh/docs/getting-started/)、[构建](https://nsgo.dev/zh/docs/building/)、[列表](https://nsgo.dev/zh/docs/lists/)、[文本](https://nsgo.dev/zh/docs/text/)、[测试](https://nsgo.dev/zh/docs/testing/)；API 同时按固定版本官方源码核对。

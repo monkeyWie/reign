@@ -4,11 +4,6 @@
 *.log
 .DS_Store
 
-# Generated native bridge artifacts
-/clients/flutter/android/app/src/main/jniLibs/
-/clients/flutter/ios/AgentHubGo/*.xcframework/
-/clients/flutter/ios/AgentHubGo/*.a
-
 # Local state, credentials and build caches
 **/build/
 /data/

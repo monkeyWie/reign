@@ -201,7 +201,9 @@ func TestCaughtUpRunningAgentDoesNotShowSyncDotsDuringTailRefresh(t *testing.T) 
 	app.WaitUntil(time.Second, func() bool { return len(f.snapshots) > 0 })
 	reset := <-f.snapshots
 	app.WaitFor("id:transcript-syncing", time.Second)
-	reset.reply <- live
+	current := copyObject(live)
+	current["streamCursor"] = 2 // This history is read after the reset boundary.
+	reset.reply <- current
 	app.WaitUntil(time.Second, func() bool { return !app.Exists("id:transcript-syncing") })
 	app.Screenshot("caught-up-agent-still-replying")
 }
@@ -305,5 +307,42 @@ func waitAnimatedText(app *nsgotest.App, text string, timeout time.Duration) {
 	app.WaitUntil(timeout, func() bool {
 		app.Advance(250 * time.Millisecond)
 		return app.Exists("text:" + text)
+	})
+}
+
+func TestSavedSessionCursorResumesWithMatchingContent(t *testing.T) {
+	f := &independentStreamAPI{demoAPI: newDemoAPI(), snapshots: make(chan snapshotRequest, 4), events: make(chan Object, 8), approvalsStarted: make(chan struct{})}
+	cached := Object{"resume": Object{"epoch": "live", "cursor": int64(10)}, "turns": []Object{{"id": "reply", "status": "inProgress", "items": []Object{{"id": "answer", "type": "agentMessage", "role": "assistant", "text": "saved"}}}}}
+	app, s := conversationFixture(t, f, 390, cached, true)
+	app.Post(func() { s.cx.Post(s.startSessionWatch) })
+	app.WaitUntil(time.Second, func() bool { return s.stream != nil && s.stream.baseline })
+	if f.reads.Load() != 0 {
+		t.Fatal("saved baseline refetched full history")
+	}
+	f.events <- Object{"epoch": "live", "cursor": int64(11), "events": []Object{{"id": int64(11), "kind": "text", "sessionId": "demo-chat", "turnId": "reply", "itemId": "answer", "offset": 5, "delta": " tail"}}}
+	app.WaitUntil(time.Second, func() bool { return s.streamCursor == 11 })
+	completed := make(chan struct{}, 1)
+	app.Post(func() {
+		s.cx.Post(func() {
+			snapshot := s.snapshotProjection()
+			if number(object(snapshot["resume"]), "cursor") != 11 || str(objects(objects(snapshot["turns"])[0]["items"])[0], "text") != "saved tail" {
+				t.Error("content and cursor separated", snapshot)
+			}
+			// Partial history cannot commit a cursor against unfinished content.
+			s.stream.snapshotInFlight = true
+			if s.snapshotProjection()["resume"] != nil {
+				t.Error("partial baseline retained a durable cursor")
+			}
+			s.stream.snapshotInFlight = false
+			completed <- struct{}{}
+		})
+	})
+	app.WaitUntil(time.Second, func() bool {
+		select {
+		case <-completed:
+			return true
+		default:
+			return false
+		}
 	})
 }

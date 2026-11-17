@@ -21,7 +21,7 @@ func (s *State) scanView(cx *core.Scope, close func()) core.Node {
 		p := palette(cx)
 		return core.Style{Width: core.Pt(min(520, w.Width)), Height: core.Pt(w.Height), Background: p.background, PaddingEnv: core.EnvEdges{Top: core.EnvSafeArea, Bottom: core.EnvSafeArea}, Gap: 12, Padding: core.All(16)}
 	}, Children: []core.Node{
-		row(button(cx, "scan-close", "", lucide.ArrowLeft, "ghost", close), label(cx, "扫描设备二维码", 18, false)),
+		dialogHeader(cx, "scan-close", "扫描设备二维码", close),
 		label(cx, "将电脑上的 ReignHub 设备二维码放入画面中，将自动识别。", 13, true),
 		core.View{Style: fill.Merge(core.Style{CornerRadius: 16, Overflow: core.Hidden, Background: core.RGB(0x000000)}), Children: []core.Node{
 			core.Native{TestID: "live-qr-camera", Component: "ras.qr-camera", Ref: ref, PropsFunc: func() map[string]any { return map[string]any{"active": active.Get()} }, Style: fill, OnEvent: func(event string, value any) {
@@ -43,7 +43,7 @@ func (s *State) scanView(cx *core.Scope, close func()) core.Node {
 			}},
 		}},
 		core.Show{When: func() bool { return errorText.Get() != "" }, Then: func(cx *core.Scope) core.Node { return dynamicText(cx, errorText.Get, 13, true) }},
-		row(button(cx, "scan-gallery", "从相册识别", lucide.Image, "outline", func() {
+		row(busyButton(cx, "scan-gallery", "从相册识别", lucide.Image, "outline", func() bool { return !active.Get() }, func() {
 			active.Set(false)
 			s.scanPhoto(cx, func(message string) { errorText.Set(message); active.Set(true); ref.Command("retry", nil) })
 		}), spacer(), button(cx, "scan-manual", "输入设备 ID", lucide.Keyboard, "ghost", func() { s.scanned = nil; s.dialog.Set("connect") })),

@@ -25,7 +25,7 @@ Codex CLI 会话由不同后端持有时也可能有写入冲突。不要仅凭�
 
 ## 自建探测器没有作用
 
-同时开放 `26330/TCP` 与 `26330/UDP`，DNS 记录设为 DNS only。普通 Nginx HTTP 反代不支持该探测协议。检查 Worker 是否发布了正确的 `SELF_STUN`／`TCP_STUN`。
+同时开放 `26331/TCP` 与 `26331/UDP`，DNS 记录设为 DNS only。普通 Nginx HTTP 反代不支持该探测协议。检查 Worker 是否发布了正确的 `SELF_STUN`／`TCP_STUN`。
 
 ## 如何报告问题
 

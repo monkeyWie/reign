@@ -2,7 +2,7 @@
 
 当前 MVP 使用 [Go 设备与连接服务](../deploy/service/README.md)，一个二进制包含设备登记、配对、信令、加密 WS/WSS 中继和 TCP / UDP STUN。
 
-- 默认 TCP 26331 提供可选 Web、API、WS/WSS，TCP / UDP 26330 提供 STUN，不需要 UDP 中继端口范围。
+- 默认 TCP 26330 提供可选 Web、API、WS/WSS，TCP / UDP 26331 提供 STUN，不需要 UDP 中继端口范围。
 - 被控端、原生控制端、Web 控制端都从 `/v2/network` 读取公共与自建 STUN 配置。
 - Trickle ICE 立即交换候选，尽可能通过局域网、IPv6 或 UDP 打洞直连；公共 STUN 不可达不会阻止尝试自建 STUN。
 - 原生端并发尝试 TCP 映射探测、端口复用与双方同时拨号；直连成功后业务数据走 WebRTC 或 TCP，信令连接保持；直连不可用时统一走自己的加密 WS/WSS 中继。

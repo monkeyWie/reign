@@ -32,7 +32,7 @@ func (p *Provider) attachments(ctx context.Context, session, cwd string, turn *p
 	var native struct {
 		Items []struct {
 			ID, Type, SavedPath string
-			Content             json.RawMessage
+			Content, Input      json.RawMessage
 		}
 	}
 	if json.Unmarshal(raw, &native) != nil {
@@ -60,7 +60,10 @@ func (p *Provider) attachments(ctx context.Context, session, cwd string, turn *p
 			}
 			item.Attachments = append(item.Attachments, p.assets.Import(ctx, scope, turn.ID+"/"+n.ID+"/"+ref, source, inline))
 		}
-		if n.Type == "userMessage" {
+		if n.Type == "userMessage" || n.Type == "steeringUserMessage" {
+			if n.Type == "steeringUserMessage" {
+				n.Content = n.Input
+			}
 			var contents []struct{ Type, Text, Path, URL, FileID string }
 			if json.Unmarshal(n.Content, &contents) != nil {
 				continue
@@ -234,20 +237,12 @@ func (p *Provider) SendAttachments(ctx context.Context, session, message, model 
 	if e != nil {
 		return e
 	}
-	c, e := p.threadClient(ctx, session)
-	if e != nil {
-		return e
-	}
-	params := map[string]any{"threadId": session, "input": input}
-	if model != "" {
-		params["model"] = model
-	}
-	return c.Call(ctx, "turn/start", params, nil)
+	return p.sendInput(ctx, session, input, model)
 }
 func (p *Provider) SteerAttachments(ctx context.Context, session, turn, message string, ids []string) error {
 	input, e := p.attachmentInput(session, message, ids)
 	if e != nil {
 		return e
 	}
-	return p.call(ctx, "turn/steer", map[string]any{"threadId": session, "expectedTurnId": turn, "input": input}, nil)
+	return p.steerInput(ctx, session, turn, input)
 }

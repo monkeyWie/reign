@@ -1,0 +1,28 @@
+---
+title: 工程规范
+description: 两种服务运行时与各平台控制端共同遵守的架构、设计和维护规则。
+---
+
+ReignHub 的 Go 与 Cloudflare Worker 实现同一份公共服务契约。修改公共接口或行为时，需要检查两边、更新受影响实现并验证两种部署。SQLite 与 D1/Durable Objects 等运行时细节可以不同；内部修改不要求给另一边制造无意义的代码改动。
+
+## 仓库知识库
+
+从 [AGENTS.md](https://github.com/monkeyWie/reignhub/blob/main/AGENTS.md) 和 [工程知识库索引](https://github.com/monkeyWie/reignhub/blob/main/docs/engineering/README.md) 开始。具体维护规则与代码一起在仓库中管理：
+
+| 主题                                | 参考                                                                                                   |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| 控制端、被控端、Provider 和服务边界 | [后端架构](https://github.com/monkeyWie/reignhub/blob/main/docs/engineering/architecture.md)           |
+| 公共接口与运行时差异                | [Go/Worker 一致性](https://github.com/monkeyWie/reignhub/blob/main/docs/engineering/service-parity.md) |
+| 主题、图标、加载、消息与平台交互    | [前端设计](https://github.com/monkeyWie/reignhub/blob/main/docs/engineering/frontend-design.md)        |
+| 错误、并发、存储和隐私              | [代码规范](https://github.com/monkeyWie/reignhub/blob/main/docs/engineering/code-standards.md)         |
+| 检查命令、隔离 fixture 与覆盖边界   | [验证规范](https://github.com/monkeyWie/reignhub/blob/main/docs/engineering/validation.md)             |
+| 故障现象、恢复与回归入口            | [故障知识库](https://github.com/monkeyWie/reignhub/blob/main/docs/engineering/troubleshooting.md)      |
+| 跨层选择及原因                      | [架构决策](https://github.com/monkeyWie/reignhub/blob/main/docs/engineering/decisions.md)              |
+
+仓库指令与工程知识库统一使用英文，公开用户文档保留支持的语言版本。本页只提供导航；完整规则在仓库集中维护，避免多份正文相互偏离。
+
+## 审查要求
+
+PR 说明问题、最终行为、实际运行的检查及限制。公共服务改动说明两边如何满足契约，某一边不需要代码改动时也说明依据。UI 改动提供相关明暗主题、桌面和窄屏证据。共同规则或恢复方式发生变化时，同步更新相应知识页。
+
+使用隔离 Agent fixture 和临时数据库，不操作真实会话作为测试数据。构建、fixture 测试与真实厂商联调分别说明，不能互相代替。现有共同 smoke 已验证两种服务的部分互通流程，但没有覆盖全部端点和故障组合。

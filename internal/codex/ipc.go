@@ -1,0 +1,534 @@
+package codex
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"path/filepath"
+	"sync"
+	"time"
+
+	jsonpatch "github.com/evanphx/json-patch/v5"
+	"github.com/google/uuid"
+	"github.com/monkeyWie/reignhub/internal/codexipc"
+	"github.com/monkeyWie/reignhub/internal/provider"
+	"github.com/monkeyWie/reignhub/internal/rpc"
+)
+
+// Outgoing owner state remains v11. Followed conversations independently accept
+// the verified v11/v13 snapshots and Immer patches; unknown schemas fail closed.
+var ipcVersions = map[string]int{
+	"thread-owner-discovery": 1, "thread-stream-following-changed": 1,
+	"thread-stream-following-status-requested": 1, "thread-stream-state-changed": 11,
+	"ipc-connection-reset": 1, "thread-unarchived": 1, "thread-queued-followups-changed": 3,
+	"thread-follower-start-turn": 2, "thread-follower-steer-turn": 1,
+	"thread-follower-interrupt-turn": 4, "thread-follower-load-complete-history": 1,
+	"thread-follower-command-approval-decision": 1, "thread-follower-file-approval-decision": 1,
+	"thread-follower-submit-user-input": 1, "thread-follower-set-queued-follow-ups-state": 3,
+	"thread-follower-remove-queued-message": 1, "thread-follower-clear-queued-messages": 1,
+	"thread-follower-permissions-request-approval-response": 1, "thread-follower-submit-mcp-server-elicitation-response": 1,
+	"thread-follower-compact-thread":      1,
+	"thread-follower-read-model-settings": 1, "thread-follower-update-thread-settings": 2,
+}
+
+type followedThread struct {
+	owner    string
+	version  int
+	revision int64
+	state    json.RawMessage
+	err      error
+	changed  chan struct{}
+}
+type ownedSend struct {
+	result      json.RawMessage
+	fingerprint string
+	pending     bool
+	uncertain   bool
+}
+type ownedThread struct {
+	metadata     map[string]any
+	pubMu        chan struct{}
+	published    map[string]any
+	subscribers  uint64
+	version      uint64
+	turnVersions map[string]uint64
+	turns        []map[string]any
+	settings     map[string]any
+	followers    map[string]bool
+	revision     int64
+	loaded       bool
+	announced    bool
+	queue        []map[string]any
+	draining     bool
+	uncertain    bool
+	blocked      string
+	sent         map[string]bool
+	inflight     string
+	sends        map[string]*ownedSend
+}
+type appIPC struct {
+	p        *Provider
+	home     string
+	mu       sync.Mutex
+	conn     *codexipc.Client
+	followed map[string]*followedThread
+	owned    map[string]*ownedThread
+	ctx      context.Context
+	cancel   context.CancelFunc
+	done     chan struct{}
+	dirty    chan string
+}
+
+func newAppIPC(p *Provider) *appIPC {
+	ctx, cancel := context.WithCancel(context.Background())
+	return &appIPC{p: p, home: codexProjectHome(), followed: map[string]*followedThread{}, owned: map[string]*ownedThread{}, ctx: ctx, cancel: cancel, done: make(chan struct{}), dirty: make(chan string, 128)}
+}
+func (b *appIPC) client() *codexipc.Client { b.mu.Lock(); defer b.mu.Unlock(); return b.conn }
+func (b *appIPC) connect(ctx context.Context) error {
+	c, err := codexipc.Dial(ctx, codexipc.Endpoint(b.home), b)
+	if err != nil {
+		return err
+	}
+	if b.ctx.Err() != nil {
+		_ = c.Close()
+		return b.ctx.Err()
+	}
+	b.mu.Lock()
+	b.conn = c
+	for _, o := range b.owned {
+		o.followers = map[string]bool{}
+		o.published = nil
+		o.subscribers++
+	}
+	ids := make([]string, 0, len(b.followed))
+	for id, f := range b.followed {
+		f.state = nil
+		f.owner = ""
+		f.err = nil
+		b.signal(f)
+		ids = append(ids, id)
+	}
+	b.mu.Unlock()
+	for _, id := range ids {
+		b.scheduleFollow(id)
+	}
+	b.mu.Lock()
+	owned := []string{}
+	for id := range b.owned {
+		owned = append(owned, id)
+	}
+	b.mu.Unlock()
+	for _, id := range owned {
+		_ = b.broadcast(ctx, "thread-stream-following-status-requested", map[string]any{"hostId": "local", "conversationId": id}, nil)
+	}
+	return nil
+}
+func (b *appIPC) run() {
+	defer close(b.done)
+	go b.publisher()
+	for {
+		c := b.client()
+		if c != nil {
+			select {
+			case <-c.Done():
+			case <-b.ctx.Done():
+				return
+			}
+		}
+		b.mu.Lock()
+		for _, f := range b.followed {
+			f.owner = ""
+			f.state = nil
+			f.err = errors.New("Codex IPC 已断开")
+			b.signal(f)
+		}
+		b.mu.Unlock()
+		select {
+		case <-b.ctx.Done():
+			return
+		case <-time.After(time.Second):
+		}
+		ctx, stop := context.WithTimeout(b.ctx, 3*time.Second)
+		err := b.connect(ctx)
+		stop()
+		if err != nil {
+			continue
+		}
+	}
+}
+func (b *appIPC) close() {
+	b.cancel()
+	if c := b.client(); c != nil {
+		_ = c.Close()
+	}
+	<-b.done
+}
+func (b *appIPC) signal(f *followedThread) {
+	if f.changed != nil {
+		close(f.changed)
+	}
+	f.changed = make(chan struct{})
+}
+func (b *appIPC) owns(id string) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	_, ok := b.owned[id]
+	return ok && b.backendAlive()
+}
+func (b *appIPC) backendAlive() bool {
+	b.p.mu.Lock()
+	defer b.p.mu.Unlock()
+	return b.p.client != nil && b.p.client.Alive()
+}
+func ipcID(params json.RawMessage) (string, string) {
+	var v struct{ ConversationID, HostID string }
+	_ = json.Unmarshal(params, &v)
+	return v.ConversationID, v.HostID
+}
+func (b *appIPC) CanHandle(m codexipc.Message) bool {
+	version, ok := ipcVersions[m.Method]
+	if !ok || version != m.Version || m.HostID != "" {
+		return false
+	}
+	id, host := ipcID(m.Params)
+	if host != "" && host != "local" {
+		return false
+	}
+	return id != "" && b.owns(id)
+}
+func (b *appIPC) request(ctx context.Context, method string, params any, owner string) (codexipc.Message, error) {
+	c := b.client()
+	if c == nil || !c.Alive() {
+		return codexipc.Message{}, errors.New("Codex IPC 尚未连接")
+	}
+	return c.Request(ctx, method, ipcVersions[method], params, owner)
+}
+func (b *appIPC) broadcast(ctx context.Context, method string, params any, targets []string) error {
+	c := b.client()
+	if c == nil || !c.Alive() {
+		return errors.New("Codex IPC 尚未连接")
+	}
+	return c.Broadcast(ctx, method, ipcVersions[method], params, targets)
+}
+func (b *appIPC) follow(ctx context.Context, id string) (string, error) {
+	if b.owns(id) {
+		return "", nil
+	}
+	c := b.client()
+	if c == nil || !c.Alive() {
+		return "", errors.New("Codex App IPC 不可用，请确认 App 正在运行")
+	}
+	attempt, stop := context.WithTimeout(ctx, 3*time.Second)
+	defer stop()
+	response, err := b.request(attempt, "thread-owner-discovery", map[string]any{"hostId": "local", "conversationId": id}, "")
+	if errors.Is(err, codexipc.RemoteError("no-client-found")) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("会话归属发现失败: %w", err)
+	}
+	if response.HandledBy == "" || response.HandledBy == c.ID() {
+		return "", errors.New("IPC 返回无效会话持有者")
+	}
+	b.mu.Lock()
+	f := b.followed[id]
+	if f == nil {
+		if len(b.followed) >= 128 {
+			b.mu.Unlock()
+			return "", errors.New("同时跟随的 Codex 会话过多")
+		}
+		f = &followedThread{changed: make(chan struct{})}
+		b.followed[id] = f
+	}
+	if f.owner != response.HandledBy {
+		f.owner = response.HandledBy
+		f.state = nil
+		f.revision = 0
+		f.err = nil
+		b.signal(f)
+	}
+	owner := f.owner
+	b.mu.Unlock()
+	err = b.broadcast(attempt, "thread-stream-following-changed", map[string]any{"hostId": "local", "conversationId": id, "following": true}, []string{owner})
+	return owner, err
+}
+func (b *appIPC) scheduleFollow(id string) {
+	go func() { ctx, stop := context.WithTimeout(b.ctx, 4*time.Second); defer stop(); _, _ = b.follow(ctx, id) }()
+}
+func (b *appIPC) waitState(ctx context.Context, id, owner string) (json.RawMessage, error) {
+	ctx, stop := context.WithTimeout(ctx, 5*time.Second)
+	defer stop()
+	for {
+		b.mu.Lock()
+		f := b.followed[id]
+		if f == nil || f.owner != owner {
+			b.mu.Unlock()
+			return nil, errors.New("Codex 会话持有者已变化")
+		}
+		state, err, ch := append(json.RawMessage(nil), f.state...), f.err, f.changed
+		b.mu.Unlock()
+		if err != nil {
+			return nil, err
+		}
+		if len(state) > 0 {
+			return state, nil
+		}
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("等待 Codex App 会话状态: %w", ctx.Err())
+		case <-ch:
+		}
+	}
+}
+func (b *appIPC) Broadcast(m codexipc.Message) {
+	if m.Method == "ipc-connection-reset" && m.Version == 1 {
+		if c := b.client(); c != nil {
+			_ = c.Close()
+		}
+		return
+	}
+	if m.Method == "client-status-changed" {
+		var v struct{ ClientID, Status string }
+		if json.Unmarshal(m.Params, &v) != nil || v.Status != "disconnected" {
+			return
+		}
+		b.mu.Lock()
+		for _, f := range b.followed {
+			if f.owner == v.ClientID {
+				f.owner = ""
+				f.state = nil
+				f.err = errors.New("Codex 会话持有者已断开")
+				b.signal(f)
+			}
+		}
+		for _, o := range b.owned {
+			delete(o.followers, v.ClientID)
+		}
+		b.mu.Unlock()
+		return
+	}
+	id, host := ipcID(m.Params)
+	if id == "" || host != "local" {
+		return
+	}
+	if m.Method == "thread-stream-following-changed" && m.Version == 1 {
+		var v struct{ Following bool }
+		_ = json.Unmarshal(m.Params, &v)
+		b.mu.Lock()
+		o := b.owned[id]
+		if o != nil {
+			if v.Following {
+				o.followers[m.Source] = true
+				o.published = nil
+				o.subscribers++
+			} else {
+				delete(o.followers, m.Source)
+			}
+		}
+		b.mu.Unlock()
+		if o != nil && v.Following {
+			b.markDirty(id)
+		}
+		return
+	}
+	if m.Method == "thread-stream-following-status-requested" && m.Version == 1 {
+		b.mu.Lock()
+		f := b.followed[id]
+		yes := f != nil && f.owner == m.Source
+		b.mu.Unlock()
+		if yes {
+			go func() {
+				_ = b.broadcast(b.ctx, "thread-stream-following-changed", map[string]any{"hostId": "local", "conversationId": id, "following": true}, []string{m.Source})
+			}()
+		}
+		return
+	}
+	if m.Method != "thread-stream-state-changed" {
+		return
+	}
+	b.mu.Lock()
+	f := b.followed[id]
+	if f == nil || f.owner != m.Source {
+		b.mu.Unlock()
+		return
+	}
+	if m.Version != 11 && m.Version != 13 {
+		f.err = fmt.Errorf("暂不支持 Codex IPC 状态版本 %d（当前支持 11、13）", m.Version)
+		b.signal(f)
+		b.mu.Unlock()
+		return
+	}
+	var v struct {
+		Change struct {
+			Type                   string
+			Revision, BaseRevision int64
+			ConversationState      json.RawMessage
+			Patches                json.RawMessage
+		}
+	}
+	if json.Unmarshal(m.Params, &v) != nil {
+		b.mu.Unlock()
+		return
+	}
+	change := v.Change
+	old := append(json.RawMessage(nil), f.state...)
+	var next json.RawMessage
+	var err error
+	switch change.Type {
+	case "snapshot":
+		if len(f.state) > 0 && (change.Revision < f.revision || change.Revision == f.revision && f.err == nil) {
+			b.mu.Unlock()
+			return
+		}
+		next = change.ConversationState
+	case "patches":
+		if change.Revision <= f.revision {
+			b.mu.Unlock()
+			return
+		}
+		if len(f.state) == 0 || f.version != m.Version || change.BaseRevision != f.revision || change.Revision <= change.BaseRevision {
+			err = errors.New("IPC 状态游标不连续")
+		} else {
+			var patch jsonpatch.Patch
+			patch, err = decodeIPCPatches(change.Patches)
+			if err == nil {
+				next, err = patch.ApplyWithOptions(f.state, &jsonpatch.ApplyOptions{SupportNegativeIndices: false, AccumulatedCopySizeLimit: 32 << 20})
+			}
+		}
+	default:
+		b.mu.Unlock()
+		return
+	}
+	if err == nil {
+		var state struct{ ID string }
+		if len(next) > codexipc.MaxFrame || json.Unmarshal(next, &state) != nil || state.ID != id {
+			err = errors.New("IPC 会话状态结构无效")
+		} else {
+			_, _, err = stateTurns(decodeObject(next))
+		}
+	}
+	if err != nil {
+		f.err = err
+		b.signal(f)
+		b.mu.Unlock()
+		go func() {
+			_ = b.broadcast(b.ctx, "thread-stream-following-changed", map[string]any{"hostId": "local", "conversationId": id, "following": true}, []string{m.Source})
+		}()
+		return
+	}
+	f.state = append(json.RawMessage(nil), next...)
+	f.revision = change.Revision
+	f.version = m.Version
+	f.err = nil
+	b.signal(f)
+	b.mu.Unlock()
+	b.p.observeIPCState(id, m.Source, old, next)
+}
+
+func (p *Provider) appBridge() *appIPC { p.mu.Lock(); defer p.mu.Unlock(); return p.ipc }
+
+// writeRoute never resumes a thread while another executor holds its writer
+// lock, including discovery failure. Read/subscribe paths never call this.
+func (p *Provider) writeRoute(ctx context.Context, id string) (*rpc.Client, string, error) {
+	b := p.appBridge()
+	if b == nil {
+		c, err := p.threadClient(ctx, id)
+		return c, "", err
+	}
+	if b.owns(id) {
+		p.mu.Lock()
+		c := p.client
+		p.mu.Unlock()
+		return c, "", nil
+	}
+	owner, err := b.follow(ctx, id)
+	if err != nil {
+		return nil, "", err
+	}
+	if owner != "" {
+		return nil, owner, nil
+	}
+	if !safeThreadID(id) {
+		return nil, "", errors.New("无效 Codex 会话 ID")
+	}
+	locked, err := codexipc.WriterLocked(filepath.Join(b.home, "thread-writer-locks", id+".lock"))
+	if err != nil {
+		return nil, "", fmt.Errorf("无法确认会话写锁: %w", err)
+	}
+	if locked {
+		return nil, "", errors.New("会话仍由其他 Codex 窗口持有，但 IPC 暂不可达；不会强行接管，请在原 App 打开后重试")
+	}
+	c, err := p.threadClient(ctx, id)
+	return c, "", err
+}
+func safeThreadID(id string) bool {
+	if id == "" || len(id) > 128 {
+		return false
+	}
+	for _, r := range id {
+		if !(r >= '0' && r <= '9' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r == '-') {
+			return false
+		}
+	}
+	return true
+}
+func (p *Provider) sendInput(ctx context.Context, id string, input []any, model string) error {
+	c, owner, err := p.writeRoute(ctx, id)
+	if err != nil {
+		return err
+	}
+	if owner != "" {
+		b := p.appBridge()
+		if b == nil {
+			return provider.ErrUnavailable
+		}
+		raw, err := b.waitState(ctx, id, owner)
+		if err != nil {
+			return err
+		}
+		var state map[string]any
+		_ = json.Unmarshal(raw, &state)
+		request := map[string]any{"threadId": id, "turnTrigger": "composer", "clientUserMessageId": uuid.NewString(), "input": input, "cwd": state["cwd"], "model": nil, "effort": nil, "collaborationMode": state["latestCollaborationMode"], "useAppServerPermissionDefault": true}
+		// Preserve owner policy. Never supply a second profile-based permissions field.
+		for _, source := range []string{"currentPermissions", "latestThreadSettings"} {
+			if settings, ok := state[source].(map[string]any); ok {
+				for _, key := range []string{"approvalPolicy", "approvalsReviewer", "sandboxPolicy"} {
+					if v, ok := settings[key]; ok {
+						request[key] = v
+					}
+				}
+			}
+		}
+		if model != "" {
+			request["model"] = model
+			if cm := object(state["latestCollaborationMode"]); cm != nil {
+				if settings := object(cm["settings"]); settings != nil {
+					settings["model"] = model
+				}
+			}
+		}
+		_, err = b.request(ctx, "thread-follower-start-turn", map[string]any{"conversationId": id, "turnStart": map[string]any{"request": request, "context": map[string]any{"useAppServerPermissionDefault": true}}}, owner)
+		return err
+	}
+	params := map[string]any{"threadId": id, "input": input}
+	if model != "" {
+		params["model"] = model
+	}
+	return c.Call(ctx, "turn/start", params, nil)
+}
+func (p *Provider) steerInput(ctx context.Context, id, turn string, input []any) error {
+	c, owner, err := p.writeRoute(ctx, id)
+	if err != nil {
+		return err
+	}
+	if owner != "" {
+		b := p.appBridge()
+		if b == nil {
+			return provider.ErrUnavailable
+		}
+		_, err = b.request(ctx, "thread-follower-steer-turn", map[string]any{"conversationId": id, "input": input, "clientUserMessageId": uuid.NewString()}, owner)
+		return err
+	}
+	return c.Call(ctx, "turn/steer", map[string]any{"threadId": id, "expectedTurnId": turn, "input": input}, nil)
+}

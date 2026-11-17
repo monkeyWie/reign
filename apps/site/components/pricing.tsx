@@ -58,7 +58,13 @@ export function PricingCards() {
           <div className="pricing-loading">
             <h2>{t("暂时无法加载官方套餐")}</h2>
             <p>{t("请稍后重试，或前往账号页查看。")}</p>
-            <button className="button" onClick={() => setAttempt(attempt + 1)}>
+            <button
+              className="button"
+              onClick={() => {
+                setError(false);
+                setAttempt((value) => value + 1);
+              }}
+            >
               {t("重新加载")}
             </button>
           </div>

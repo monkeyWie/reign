@@ -28,6 +28,7 @@ type Frame struct {
 type connection struct {
 	ws     *websocket.Conn
 	device string
+	peer   string
 	data   *websocket.Conn
 }
 
@@ -51,11 +52,42 @@ type Server struct {
 	Grant            func(host, device, role string) string
 	RelayAllowed     func(host, device, role string) bool
 	Origins          []string
+	closed           bool
+	wg               sync.WaitGroup
+	ctx              context.Context
+	cancel           context.CancelFunc
 }
 
-func New(token string) *Server { return &Server{token: token, rooms: make(map[string]*relayRoom)} }
-func ID() string               { var b [16]byte; _, _ = rand.Read(b[:]); return hex.EncodeToString(b[:]) }
+func New(token string) *Server {
+	ctx, cancel := context.WithCancel(context.Background())
+	return &Server{token: token, rooms: make(map[string]*relayRoom), ctx: ctx, cancel: cancel}
+}
+func ID() string { var b [16]byte; _, _ = rand.Read(b[:]); return hex.EncodeToString(b[:]) }
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		http.Error(w, "server shutting down", 503)
+		return
+	}
+	s.wg.Add(1)
+	s.mu.Unlock()
+	defer s.wg.Done()
+	// Validate complete origins here: the WebSocket library accepts host patterns,
+	// which cannot express our exact scheme + host + port policy.
+	if origin := r.Header.Get("Origin"); origin != "" {
+		allowed := origin == "http://"+r.Host || origin == "https://"+r.Host
+		for _, o := range s.Origins {
+			if o == origin {
+				allowed = true
+			}
+		}
+		if !allowed {
+			http.Error(w, "origin denied", 403)
+			return
+		}
+	}
+
 	if r.URL.Path != "/p2p/signal" && r.URL.Path != "/p2p/relay" {
 		http.NotFound(w, r)
 		return
@@ -99,7 +131,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id, role := r.URL.Query().Get("id"), r.URL.Query().Get("role")
-	if len(id) < 16 || len(id) > 128 || (role != "host" && role != "client") {
+	if raw, err := hex.DecodeString(id); err != nil || len(raw) != 16 || strings.ToLower(id) != id || (role != "host" && role != "client") {
 		http.Error(w, "invalid route", 400)
 		return
 	}
@@ -111,11 +143,13 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "relay not allowed", 403)
 		return
 	}
-	ws, err := websocket.Accept(w, r, &websocket.AcceptOptions{Subprotocols: []string{"reign.p2p"}, OriginPatterns: s.Origins})
+	ws, err := websocket.Accept(w, r, &websocket.AcceptOptions{Subprotocols: []string{"reign.p2p"}, InsecureSkipVerify: true})
 	if err != nil {
 		return
 	}
 	defer ws.CloseNow()
+	stopClose := context.AfterFunc(s.ctx, func() { _ = ws.CloseNow() })
+	defer stopClose()
 	ws.SetReadLimit(2 << 20)
 	if r.URL.Path == "/p2p/relay" {
 		peer := r.URL.Query().Get("peer")
@@ -129,13 +163,23 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				attached = room.clients[peer]
 			}
 		}
-		if attached == nil || attached.device != deviceID || attached.data != nil {
+		if attached == nil || attached.device != deviceID || (role == "host" && peer != attachedPeer(room)) {
 			s.mu.Unlock()
 			return
 		}
+		old := attached.data
 		attached.data = ws
 		s.mu.Unlock()
-		defer func() { s.mu.Lock(); attached.data = nil; s.mu.Unlock() }()
+		if old != nil {
+			_ = old.CloseNow()
+		}
+		defer func() {
+			s.mu.Lock()
+			if attached.data == ws {
+				attached.data = nil
+			}
+			s.mu.Unlock()
+		}()
 		_ = (&connection{ws: ws}).send(Frame{Peer: peer, Kind: "welcome", Protocol: 1, AllowRelay: allowedRelay})
 		for {
 			_, raw, err := ws.Read(r.Context())
@@ -183,18 +227,34 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ticket = s.Grant(id, deviceID, role)
 	}
 	peer := ID()
+	c.peer = peer
 	s.mu.Lock()
 	room := s.rooms[id]
 	if role == "host" {
-		if room != nil {
-			s.mu.Unlock()
-			_ = ws.Close(websocket.StatusPolicyViolation, "host already connected")
-			return
+		old := room
+		if old != nil {
+			// An authenticated owner may replace its own half-open socket.
+			if old.host.device != deviceID {
+				s.mu.Unlock()
+				return
+			}
 		}
+
 		room = &relayRoom{host: c, clients: make(map[string]*connection)}
 		s.rooms[id] = room
+		if old != nil {
+			sockets := []*websocket.Conn{old.host.ws}
+			for _, c := range old.clients {
+				sockets = append(sockets, c.ws)
+			}
+			go func() {
+				for _, ws := range sockets {
+					_ = ws.CloseNow()
+				}
+			}()
+		}
 	} else {
-		if room == nil || len(room.clients) >= 16 {
+		if room == nil || len(room.clients) >= 32 {
 			s.mu.Unlock()
 			_ = ws.Close(websocket.StatusTryAgainLater, "host unavailable or full")
 			return
@@ -211,7 +271,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		s.mu.Lock()
 		if role == "host" {
-			delete(s.rooms, id)
+			if s.rooms[id] == room {
+				delete(s.rooms, id)
+			}
 		} else {
 			delete(room.clients, peer)
 		}
@@ -281,6 +343,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if s.Grant != nil {
 				ticket = s.Grant(id, deviceID, role)
 			}
+			if c.send(Frame{Kind: "lease", Peer: peer, Grant: ticket, AllowRelay: allowedRelay}) != nil {
+				return
+			}
 			if role == "client" {
 				_ = room.host.send(Frame{Kind: "lease", Peer: peer, Device: deviceID, Grant: ticket})
 			}
@@ -339,4 +404,20 @@ func (s *Server) Online(host string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.rooms[host] != nil
+}
+
+func attachedPeer(room *relayRoom) string {
+	if room == nil || room.host == nil {
+		return ""
+	}
+	return room.host.peer
+}
+
+// Close rejects new sockets and waits for all handlers before the database closes.
+func (s *Server) Close() {
+	s.mu.Lock()
+	s.closed = true
+	s.cancel()
+	s.mu.Unlock()
+	s.wg.Wait()
 }

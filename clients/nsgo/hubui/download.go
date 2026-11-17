@@ -107,7 +107,7 @@ func (s *State) downloadView(cx *core.Scope) core.Node {
 	if task == nil {
 		return nil
 	}
-	return ui.Dialog{TestID: "attachment-download", Title: "下载附件", Open: func() bool { return true }, OnOpenChange: func(open bool, _ base.Reason) {
+	return modalDialog(cx, ui.Dialog{TestID: "attachment-download", Title: "下载附件", Open: func() bool { return true }, OnOpenChange: func(open bool, _ base.Reason) {
 		if !open {
 			s.cancelDownload(task)
 		}
@@ -134,5 +134,5 @@ func (s *State) downloadView(cx *core.Scope) core.Node {
 		core.Show{When: func() bool { s.read(); return task.data != nil && task.status != "saving" }, Then: func(cx *core.Scope) core.Node {
 			return button(cx, "attachment-download-save", "保存到…", nil, "primary", func() { s.saveDownload(cx, task) })
 		}},
-	}}
+	}}, func() { s.cancelDownload(task) })
 }

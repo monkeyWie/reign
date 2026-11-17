@@ -92,7 +92,7 @@ export default async function Technology({
         [
           t("一个地址，发现能力"),
           t(
-            "客户端只填服务根地址，探测地址从 /p2p/config 下发。可选 Go 探测器在同一 26330 端口监听 TCP 和 UDP。",
+            "客户端只填服务根地址，探测地址从 /p2p/config 下发。可选 Go 探测器在同一 26331 端口监听 TCP 和 UDP。",
           ),
         ],
         [

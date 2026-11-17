@@ -14,7 +14,6 @@ import (
 	"math/big"
 	"net"
 	"net/http"
-	"path"
 	"strings"
 	"sync"
 	"time"
@@ -37,15 +36,15 @@ type Device struct {
 	Seen         int64  `json:"seen"`
 }
 type Pair struct {
-	ID       string `json:"id"`
-	Host     string `json:"host"`
+	ID       string `json:"id" gorm:"primaryKey;size:32"`
+	Host     string `json:"host" gorm:"index:pair_pending"`
 	Client   string `json:"client"`
 	Name     string `json:"name"`
 	Public   string `json:"public"`
 	Envelope string `json:"envelope"`
 	Reply    string `json:"reply,omitempty"`
-	State    string `json:"state"`
-	Expires  int64  `json:"expires"`
+	State    string `json:"state" gorm:"index:pair_pending"`
+	Expires  int64  `json:"expires" gorm:"index"`
 }
 type DeviceGrant struct {
 	Host   string `gorm:"primaryKey;size:64"`
@@ -67,17 +66,18 @@ type Admission struct {
 type Server struct {
 	// Hooks are assigned before serving. Registration runs in the same database
 	// transaction, so a rejected allocation cannot leave an unowned device.
-	OnRegister  func(*gorm.DB, Device) error
-	Policy      func(context.Context, Admission) error
-	mu          sync.Mutex
-	DB          *gorm.DB
-	pairs       map[string]Pair
-	rates       map[string]bucket
-	relay       *relay.Server
-	ServiceID   string
-	Network     connectivity.Policy
-	STUNPort    string
-	TCPSTUNPort string
+	OnRegister   func(*gorm.DB, Device) error
+	Policy       func(context.Context, Admission) error
+	mu           sync.Mutex
+	DB           *gorm.DB
+	rates        map[string]bucket
+	nextCleanup  int64
+	RelayEnabled bool
+	relay        *relay.Server
+	ServiceID    string
+	Network      connectivity.Policy
+	STUNPort     string
+	TCPSTUNPort  string
 }
 
 func hash(s string) string { v := sha256.Sum256([]byte(s)); return hex.EncodeToString(v[:]) }
@@ -97,7 +97,7 @@ func New(path string, origins []string) (*Server, error) {
 // NewWithDB composes the directory with any configured GORM database. The
 // caller owns the database lifetime. SQLite remains the self-hosted default.
 func NewWithDB(db *gorm.DB, origins []string) (*Server, error) {
-	if err := db.AutoMigrate(&Device{}, &DeviceGrant{}, &Metadata{}); err != nil {
+	if err := db.AutoMigrate(&Device{}, &DeviceGrant{}, &Metadata{}, &Pair{}); err != nil {
 		return nil, err
 	}
 	meta := Metadata{Key: "service_id", Value: device.Random()}
@@ -107,13 +107,28 @@ func NewWithDB(db *gorm.DB, origins []string) (*Server, error) {
 	if err := db.First(&meta, "key = ?", "service_id").Error; err != nil {
 		return nil, err
 	}
-	s := &Server{DB: db, pairs: map[string]Pair{}, rates: map[string]bucket{}, Network: connectivity.DefaultPolicy(), ServiceID: meta.Value}
+	s := &Server{RelayEnabled: true, DB: db, rates: map[string]bucket{}, Network: connectivity.DefaultPolicy(), ServiceID: meta.Value}
 	s.relay = relay.New("")
 	s.relay.Origins = origins
-	public, private, err := ed25519.GenerateKey(rand.Reader)
+	s.relay.RelayAllowed = func(_, _, _ string) bool { return s.RelayEnabled }
+	// Persist the signing seed with the service ID; restarting must not invalidate leases.
+	_, generated, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		return nil, err
 	}
+	key := Metadata{Key: "signing_seed", Value: base64.RawURLEncoding.EncodeToString(generated.Seed())}
+	if err = db.Clauses(clause.OnConflict{DoNothing: true}).Create(&key).Error; err != nil {
+		return nil, err
+	}
+	if err = db.First(&key, "key = ?", key.Key).Error; err != nil {
+		return nil, err
+	}
+	seed, err := base64.RawURLEncoding.DecodeString(key.Value)
+	if err != nil || len(seed) != ed25519.SeedSize {
+		return nil, fmt.Errorf("invalid stored service signing identity")
+	}
+	private := ed25519.NewKeyFromSeed(seed)
+	public := private.Public().(ed25519.PublicKey)
 	s.Network.ServiceID = s.ServiceID
 	s.Network.GrantPublicKey = base64.RawURLEncoding.EncodeToString(public)
 	s.Network.Deployment = "self-hosted"
@@ -143,6 +158,7 @@ func NewWithDB(db *gorm.DB, origins []string) (*Server, error) {
 	return s, nil
 }
 func (s *Server) Close() error {
+	s.relay.Close()
 	raw, err := s.DB.DB()
 	if err != nil {
 		return err
@@ -180,39 +196,52 @@ func (s *Server) allow(k string, limit int) bool {
 	return b.N <= limit
 }
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path == "/p2p/capabilities" && r.Method == "GET" {
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Cache-Control", "no-store")
-		json.NewEncoder(w).Encode(map[string]any{"protocolVersion": 2, "deployment": "self-hosted", "accountRequired": false, "billingEnabled": false})
+	w.Header().Set("Cache-Control", "no-store")
+	origin := r.Header.Get("Origin")
+	if origin != "" {
+		allowed := origin == "http://"+r.Host || origin == "https://"+r.Host
+		for _, o := range s.relay.Origins {
+			if o == origin {
+				allowed = true
+			}
+		}
+		if !allowed {
+			apiError(w, "origin denied", 403)
+			return
+		}
+		w.Header().Set("Access-Control-Allow-Origin", origin)
+		w.Header().Set("Vary", "Origin")
+		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+	}
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(204)
 		return
 	}
 	if r.URL.Path == "/p2p/signal" || r.URL.Path == "/p2p/relay" {
 		s.relay.ServeHTTP(w, r)
 		return
 	}
-	origin := r.Header.Get("Origin")
-	if origin != "" {
-		allowed := origin == "http://"+r.Host || origin == "https://"+r.Host
-		for _, o := range s.relay.Origins {
-			if match, _ := path.Match(o, origin); match {
-				allowed = true
+	if r.URL.Path == "/p2p/config" && (r.Method == "GET" || r.Method == "POST") {
+		policy := s.Network
+		if len(policy.SelfSTUN) == 0 {
+			if endpoint := connectivity.STUNURL(r.Host, s.STUNPort); endpoint != "" {
+				policy.SelfSTUN = []string{endpoint}
 			}
 		}
-		if !allowed {
-			http.Error(w, "origin denied", 403)
-			return
+		if len(policy.TCPSTUN) == 0 && s.TCPSTUNPort != "" {
+			policy.TCPSTUN = []string{strings.TrimPrefix(connectivity.STUNURL(r.Host, s.TCPSTUNPort), "stun:")}
 		}
-		w.Header().Set("Access-Control-Allow-Origin", origin)
-		w.Header().Set("Vary", "Origin")
-		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
-		w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
-	}
-	if r.Method == "OPTIONS" {
-		w.WriteHeader(204)
+		writeJSON(w, 200, struct {
+			connectivity.Policy
+			Protocol        int      `json:"protocol"`
+			AccountRequired bool     `json:"accountRequired"`
+			LoginProviders  []string `json:"loginProviders"`
+		}{policy, 1, false, []string{}})
 		return
 	}
 	if r.Method != "POST" {
-		http.Error(w, "POST required", 405)
+		apiError(w, "POST required", 405)
 		return
 	}
 	var in struct {
@@ -222,51 +251,38 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Allow                                                         bool
 	}
 	if e := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&in); e != nil {
-		http.Error(w, "invalid request", 400)
+		apiError(w, "invalid request", 400)
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	ip, _, _ := net.SplitHostPort(r.RemoteAddr)
 	if !s.allow("ip:"+ip, 300) {
-		http.Error(w, "rate limited", 429)
+		apiError(w, "rate limited", 429)
 		return
 	}
 	now := time.Now().Unix()
-	for id, p := range s.pairs {
-		if p.Expires < now {
-			delete(s.pairs, id)
+	if now >= s.nextCleanup {
+		if err := s.DB.Where("expires <= ?", now).Delete(&Pair{}).Error; err != nil {
+			apiError(w, "database unavailable", 503)
+			return
 		}
+		s.nextCleanup = now + 60
 	}
-	write := func(v any) { w.Header().Set("Content-Type", "application/json"); json.NewEncoder(w).Encode(v) }
-	if r.URL.Path == "/p2p/config" {
-		policy := s.Network
-		if len(policy.SelfSTUN) == 0 {
-			if endpoint := connectivity.STUNURL(r.Host, s.STUNPort); endpoint != "" {
-				policy.SelfSTUN = []string{endpoint}
-			}
-		}
-		if len(policy.TCPSTUN) == 0 && s.TCPSTUNPort != "" {
-			if endpoint := connectivity.STUNURL(r.Host, s.TCPSTUNPort); endpoint != "" {
-				policy.TCPSTUN = []string{strings.TrimPrefix(endpoint, "stun:")}
-			}
-		}
-		write(policy)
-		return
-	}
+	write := func(v any) { writeJSON(w, 200, v) }
 	if r.URL.Path == "/p2p/devices/register" {
 		var count int64
 		if s.DB.Model(&Device{}).Count(&count).Error != nil {
-			http.Error(w, "database unavailable", 503)
+			apiError(w, "database unavailable", 503)
 			return
 		}
 		if count >= 10000 || !s.allow("register:"+ip, 10) {
-			http.Error(w, "registration limit", 429)
+			apiError(w, "registration limit", 429)
 			return
 		}
 		raw, e := hex.DecodeString(in.Public)
-		if e != nil || len(raw) != 32 || len(in.Name) > 100 {
-			http.Error(w, "invalid identity", 400)
+		if e != nil || len(raw) != 32 || strings.ToLower(in.Public) != in.Public || len(in.Name) > 100 {
+			apiError(w, "invalid identity", 400)
 			return
 		}
 		token := device.Random()
@@ -275,13 +291,13 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		for {
 			n, e := rand.Int(rand.Reader, big.NewInt(1_000_000))
 			if e != nil {
-				http.Error(w, "device ID allocation failed", 503)
+				apiError(w, "device ID allocation failed", 503)
 				return
 			}
 			code = fmt.Sprintf("%06d", n.Int64())
 			var count int64
 			if s.DB.Model(&Device{}).Where("connection_id = ?", code).Count(&count).Error != nil {
-				http.Error(w, "database unavailable", 503)
+				apiError(w, "database unavailable", 503)
 				return
 			}
 			if count == 0 {
@@ -298,7 +314,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			return nil
 		}); e != nil {
-			http.Error(w, "device registration failed", 503)
+			apiError(w, "device registration failed", 503)
 			return
 		}
 
@@ -307,48 +323,48 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	id := s.identity(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
 	if id == "" {
-		http.Error(w, "unauthorized", 401)
+		apiError(w, "unauthorized", 401)
 		return
 	}
 	var me Device
 	if s.DB.First(&me, "id = ?", id).Error != nil {
-		http.Error(w, "database unavailable", 503)
+		apiError(w, "database unavailable", 503)
 		return
 	}
 	if s.Policy != nil {
 		if err := s.Policy(r.Context(), Admission{Operation: r.URL.Path, DeviceID: id, HostID: in.Host}); err != nil {
-			http.Error(w, err.Error(), http.StatusForbidden)
+			apiError(w, err.Error(), http.StatusForbidden)
 			return
 		}
 	}
 	switch r.URL.Path {
 	case "/p2p/devices/presence":
+		name := me.Name
 		if in.Name != "" && len(in.Name) <= 100 {
-			me.Name = in.Name
+			name = in.Name
 		}
-		if me.Host {
-
-		}
-		me.Seen = now
-		if e := s.DB.Save(&me).Error; e != nil {
-			http.Error(w, "persistence failed", 500)
-			return
+		if now-me.Seen >= 300 || name != me.Name {
+			me.Name, me.Seen = name, now
+			if e := s.DB.Save(&me).Error; e != nil {
+				apiError(w, "persistence failed", 500)
+				return
+			}
 		}
 		write(map[string]bool{"ok": true})
 	case "/p2p/devices/status":
 		if len(in.Hosts) > 50 {
-			http.Error(w, "at most 50 hosts", http.StatusBadRequest)
+			apiError(w, "at most 50 hosts", http.StatusBadRequest)
 			return
 		}
 		for _, host := range in.Hosts {
-			if _, err := hex.DecodeString(host); err != nil || len(host) != 32 {
-				http.Error(w, "invalid host", http.StatusBadRequest)
+			if !validID(host) {
+				apiError(w, "invalid host", http.StatusBadRequest)
 				return
 			}
 		}
 		var grants []DeviceGrant
 		if err := s.DB.Where("client = ? AND host IN ?", id, in.Hosts).Find(&grants).Error; err != nil {
-			http.Error(w, "presence unavailable", 503)
+			apiError(w, "presence unavailable", 503)
 			return
 		}
 		allowed := map[string]bool{id: true}
@@ -357,7 +373,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		var hosts []Device
 		if err := s.DB.Where("id IN ? AND host = ?", in.Hosts, true).Find(&hosts).Error; err != nil {
-			http.Error(w, "presence unavailable", 503)
+			apiError(w, "presence unavailable", 503)
 			return
 		}
 		visible := map[string]Device{}
@@ -379,7 +395,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		code := strings.ReplaceAll(strings.ReplaceAll(in.ConnectionID, " ", ""), "-", "")
 		var d Device
 		if s.DB.First(&d, "connection_id = ? AND host = ?", code, true).Error != nil {
-			http.Error(w, "device not found", 404)
+			apiError(w, "device not found", 404)
 			return
 		}
 		d.TokenHash = ""
@@ -389,60 +405,76 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "/p2p/pairings/request":
 		var host Device
 		err := s.DB.First(&host, "id = ?", in.Host).Error
-		if err != nil || !host.Host || len(in.Envelope) > 32000 || len(in.ID) != 32 {
-			http.Error(w, "invalid pairing target", 400)
+		if err != nil || !host.Host || len(in.Envelope) > 32000 || !validID(in.Host) || !validID(in.ID) {
+			apiError(w, "invalid pairing target", 400)
 			return
 		}
-		if !s.allow("pair:"+id, 10) || !s.allow("hostpair:"+host.ID, 30) || len(s.pairs) > 1000 {
-			http.Error(w, "pairing rate limited", 429)
+		var count int64
+		if err := s.DB.Model(&Pair{}).Count(&count).Error; err != nil {
+			apiError(w, "database unavailable", 503)
 			return
 		}
-		if _, exists := s.pairs[in.ID]; exists {
-			http.Error(w, "duplicate request", 409)
+		if !s.allow("pair:"+id, 10) || !s.allow("hostpair:"+host.ID, 30) || count > 1000 {
+			apiError(w, "pairing rate limited", 429)
+			return
+		}
+		var existing Pair
+		if s.DB.First(&existing, "id = ?", in.ID).Error == nil {
+			apiError(w, "duplicate request", 409)
 			return
 		}
 		p := Pair{ID: in.ID, Host: host.ID, Client: id, Name: me.Name, Public: me.Public, Envelope: in.Envelope, State: "pending", Expires: now + 120}
-		s.pairs[p.ID] = p
+		if err := s.DB.Create(&p).Error; err != nil {
+			apiError(w, "persistence failed", 503)
+			return
+		}
 		write(p)
 	case "/p2p/pairings/pending":
 		out := []Pair{}
-		for _, p := range s.pairs {
-			if p.Host == id && p.State == "pending" {
-				out = append(out, p)
-			}
+		if err := s.DB.Where("host = ? AND state = ? AND expires > ?", id, "pending", now).Order("expires, id").Find(&out).Error; err != nil {
+			apiError(w, "database unavailable", 503)
+			return
 		}
 		write(out)
 	case "/p2p/pairings/result":
-		p, ok := s.pairs[in.ID]
-		if !ok || p.Client != id {
-			http.Error(w, "pairing expired", 404)
+		var p Pair
+		if s.DB.First(&p, "id = ? AND client = ? AND expires > ?", in.ID, id, now).Error != nil {
+			apiError(w, "pairing expired", 404)
 			return
 		}
 		write(p)
 	case "/p2p/pairings/respond":
-		p, ok := s.pairs[in.ID]
-		if !ok || p.Host != id || p.State != "pending" {
-			http.Error(w, "request unavailable", 409)
+		var p Pair
+		if s.DB.First(&p, "id = ? AND host = ? AND state = ? AND expires > ?", in.ID, id, "pending", now).Error != nil {
+			apiError(w, "request unavailable", 409)
 			return
 		}
 		p.State = "denied"
 		if in.Allow {
-			if in.Reply == "" {
-				http.Error(w, "missing encrypted reply", 400)
+			if in.Reply == "" || len(in.Reply) > 32000 {
+				apiError(w, "missing encrypted reply", 400)
 				return
 			}
-			if e := s.DB.Clauses(clause.OnConflict{DoNothing: true}).Create(&DeviceGrant{Host: p.Host, Client: p.Client}).Error; e != nil {
-				http.Error(w, "persistence failed", 500)
-				return
-			}
+
 			p.State = "approved"
 			p.Reply = in.Reply
 		}
-		s.pairs[p.ID] = p
+		if err := s.DB.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Save(&p).Error; err != nil {
+				return err
+			}
+			if p.State == "approved" {
+				return tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&DeviceGrant{Host: p.Host, Client: p.Client}).Error
+			}
+			return nil
+		}); err != nil {
+			apiError(w, "persistence failed", 503)
+			return
+		}
 		write(p)
 	case "/p2p/pairings/revoke":
 		if e := s.DB.Delete(&DeviceGrant{}, "host = ? AND client = ?", id, in.Client).Error; e != nil {
-			http.Error(w, "persistence failed", 500)
+			apiError(w, "persistence failed", 500)
 			return
 		}
 		s.relay.DisconnectDevice(id, in.Client)
@@ -474,4 +506,24 @@ func (s *Server) CanAccess(deviceID, hostID string) bool {
 	}
 	var grant DeviceGrant
 	return s.DB.First(&grant, "host = ? AND client = ?", hostID, deviceID).Error == nil
+}
+
+func validID(s string) bool {
+	b, err := hex.DecodeString(s)
+	return err == nil && len(b) == 16 && strings.ToLower(s) == s
+}
+func writeJSON(w http.ResponseWriter, status int, value any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(value)
+}
+func apiError(w http.ResponseWriter, message string, status int) {
+	code := map[int]string{400: "INVALID_REQUEST", 401: "DEVICE_REQUIRED", 403: "ORIGIN_DENIED", 404: "NOT_FOUND", 405: "METHOD_NOT_ALLOWED", 409: "PAIRING_EXPIRED", 429: "RATE_LIMITED", 500: "SERVICE_UNAVAILABLE", 503: "SERVICE_UNAVAILABLE"}[status]
+	if message == "pairing expired" {
+		code = "PAIRING_EXPIRED"
+	}
+	if message == "device not found" {
+		code = "DEVICE_NOT_FOUND"
+	}
+	writeJSON(w, status, map[string]string{"code": code, "message": message})
 }

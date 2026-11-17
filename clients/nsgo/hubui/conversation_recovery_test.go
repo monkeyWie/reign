@@ -24,7 +24,9 @@ func conversationFixture(t *testing.T, api API, width core.Points, transcript Ob
 		state.target = "demo-device"
 		state.selected = Object{"id": "demo-chat", "providerId": "codex-app", "title": "会话"}
 		state.model = "test-model"
-		state.setTranscript(transcript)
+		if transcript != nil {
+			state.setTranscript(transcript)
+		}
 		view := state.conversation(cx, true).(core.View)
 		view.StyleFunc = func() core.Style {
 			return core.Style{Background: palette(cx).background, Color: palette(cx).foreground}

@@ -44,7 +44,9 @@ func (s *State) preferences(cx *core.Scope, initial string) core.Node {
 	narrow := core.NewMemo(cx, func() bool { return s.width.Get() < 760 })
 	close := func() { s.settingsReturn = ""; s.dialog.Set("") }
 	sidebar := func(cx *core.Scope) core.Node {
-		children := []core.Node{row(heading(cx, "设置", "让工作区更适合你"), spacer(), core.Show{When: narrow.Get, Then: func(cx *core.Scope) core.Node { return button(cx, "settings-close", "", lucide.X, "ghost", close) }}), ui.Input{TestID: "settings-search", Placeholder: "搜索设置", Label: "搜索设置", Value: search.Get, OnChange: search.Set, Style: core.Style{MinHeight: core.Pt(40)}}, label(cx, "工作区", 11, true)}
+		children := []core.Node{row(heading(cx, "设置", "让工作区更适合你"), spacer(), core.Show{When: narrow.Get, Then: func(cx *core.Scope) core.Node {
+			return labelledIconButton(cx, "settings-close", "关闭设置", lucide.X, close)
+		}}), ui.Input{TestID: "settings-search", Placeholder: "搜索设置", Label: "搜索设置", Value: search.Get, OnChange: search.Set, Style: core.Style{MinHeight: core.Pt(40)}}, label(cx, "工作区", 11, true)}
 		for _, entry := range settingsSections {
 			item := entry
 			children = append(children, core.Show{When: func() bool {
@@ -53,7 +55,7 @@ func (s *State) preferences(cx *core.Scope, initial string) core.Node {
 			}, Then: func(cx *core.Scope) core.Node {
 				return core.View{TestID: "settings-nav-" + item.id, Role: core.RoleButton, Label: item.title, OnPress: func(core.PressEvent) { s.settingsSection = item.id; section.Set(item.id) }, Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 12, Padding: core.Symmetric(12, 14), CornerRadius: 12}, StyleFunc: func() core.Style {
 					c := palette(cx)
-					st := core.Style{Hover: &core.Style{Background: c.selected.Faded(.55)}}
+					st := pressStyle(cx)
 					if section.Get() == item.id {
 						st.Background = c.selected
 					}
@@ -74,7 +76,7 @@ func (s *State) preferences(cx *core.Scope, initial string) core.Node {
 	content := func(cx *core.Scope) core.Node {
 		return core.View{TestID: "settings-content", Style: fill, Children: []core.Node{
 			core.View{Style: core.Style{Padding: core.Edges{Top: 24, Left: 28, Right: 20, Bottom: 12}}, Children: []core.Node{row(core.Show{When: narrow.Get, Then: func(cx *core.Scope) core.Node {
-				return button(cx, "settings-back", "", lucide.ArrowLeft, "ghost", func() { s.settingsSection = ""; section.Set("") })
+				return labelledIconButton(cx, "settings-back", "返回设置列表", lucide.ArrowLeft, func() { s.settingsSection = ""; section.Set("") })
 			}}, dynamicText(cx, func() string {
 				for _, item := range settingsSections {
 					if item.id == section.Get() {
@@ -82,7 +84,7 @@ func (s *State) preferences(cx *core.Scope, initial string) core.Node {
 					}
 				}
 				return "设置"
-			}, 20, false), spacer(), button(cx, "settings-close", "", lucide.X, "ghost", close))}},
+			}, 20, false), spacer(), labelledIconButton(cx, "settings-close", "关闭设置", lucide.X, close))}},
 			core.Scroll{TestID: "settings-scroll", Style: fill, Children: []core.Node{core.View{Style: core.Style{Padding: core.Edges{Top: 16, Left: 28, Right: 28, Bottom: 32}, Gap: 24}, Children: []core.Node{core.Dynamic(func(cx *core.Scope) core.Node {
 				switch section.Get() {
 				case "agents":
@@ -154,23 +156,31 @@ func (s *State) agentSettings(cx *core.Scope) core.Node {
 		label(cx, "本机 Agent", 22, false), label(cx, "管理运行在这台电脑上的 Agent，供已授权设备远程访问。", 13, true),
 		button(cx, "add-agent", "添加 ACP Agent", lucide.Plus, "outline", func() { s.openSettingsDialog("agent-config") }),
 		core.Each(func() []Object { s.read(); return s.localProviders }, func(p Object) string { return str(p, "id") }, func(cx *core.Scope, p func() Object, _ func() int) core.Node {
+			mounted := true
+			cx.Cleanup(func() { mounted = false })
 			info := row(glyph(cx, lucide.Bot, 22), core.View{Style: fill.Merge(core.Style{Gap: 6}), Children: []core.Node{dynamicText(cx, func() string { return str(p(), "name") }, 15, false), dynamicText(cx, func() string {
 				return choose(flag(p(), "installed"), "已安装", "未安装") + " · " + str(p(), "detail")
 			}, 12, true)}})
 			actions := core.View{Style: core.Style{Direction: core.Row, Gap: 8, JustifyContent: core.JustifyEnd, Wrap: core.Wrap}, Children: []core.Node{
 				core.Show{When: func() bool { return str(p(), "id") != "codex-app" && str(p(), "id") != "codex-cli" }, Then: func(cx *core.Scope) core.Node {
-					return button(cx, "configure-agent-"+str(p(), "id"), "配置", lucide.SlidersHorizontal, "ghost", func() {
-						s.call("host.agents", nil, func(v any) { s.agentDefinitions = object(v); s.openSettingsDialog("agent-config:" + str(p(), "id")) })
+					return s.actionButton(cx, "configure-agent-"+str(p(), "id"), "配置", lucide.SlidersHorizontal, "ghost", func() {
+						providerID := str(p(), "id")
+						s.call("configure-agent-"+providerID, "host.agents", nil, func(v any) {
+							s.agentDefinitions = object(v)
+							if mounted {
+								s.openSettingsDialog("agent-config:" + providerID)
+							}
+						})
 					})
 				}},
 				core.Show{When: func() bool {
 					return flag(p(), "installed") && str(p(), "state") != "unsupported" && !providerReady(p())
 				}, Then: func(cx *core.Scope) core.Node {
-					return button(cx, "enable-"+str(p(), "id"), "启用", nil, "outline", func() {
+					return s.actionButton(cx, "enable-"+str(p(), "id"), "启用", nil, "outline", func() {
 						if flag(object(p()["capabilities"]), "desktop") {
 							s.openSettingsDialog("activate:" + str(p(), "id"))
 						} else {
-							s.call("host.enable", Object{"provider": p()["id"]}, nil)
+							s.call("enable-"+str(p(), "id"), "host.enable", Object{"provider": p()["id"]}, nil)
 						}
 					})
 				}},

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/monkeyWie/reignhub/internal/provider"
+	"github.com/monkeyWie/reignhub/internal/readretry"
 )
 
 // All presentation state belongs to the UI loop. Watch, snapshots and approval
@@ -14,13 +15,17 @@ type sessionStream struct {
 	s                                     *State
 	ctx                                   context.Context
 	target, provider, session, key, epoch string
-	cursor                                int64
+	cursor, resetCursor                   int64
 	baseline, snapshotInFlight, invalid   bool
 	snapshotAgain                         bool
 	journal                               []Object
 	journalBytes                          int
 	syncVersion                           uint64
 	approvals                             chan struct{}
+	historyRetry                          readretry.Backoff
+	historyRetryVersion                   uint64
+	nextSnapshot                          time.Time
+	historyError                          error
 }
 
 func (w *sessionStream) current() bool {
@@ -63,10 +68,12 @@ func (w *sessionStream) refreshSnapshot() {
 	w.startSnapshot()
 }
 func (w *sessionStream) startSnapshot() {
-	if !w.current() || w.snapshotInFlight {
+	if !w.current() || w.snapshotInFlight || time.Now().Before(w.nextSnapshot) {
 		return
 	}
+	w.historyRetryVersion++
 	w.snapshotInFlight = true
+	w.historyError = nil
 	w.snapshotAgain = false
 	w.invalid = false
 	w.journal = nil
@@ -80,7 +87,7 @@ func (w *sessionStream) startSnapshot() {
 		previewCtx, stopPreviews := context.WithCancel(w.ctx)
 		defer stopPreviews()
 		observe := observeTranscriptPreviews(previewCtx, w.s.cx.Post, func(partial Object) {
-			if !w.current() || w.invalid || epoch != w.epoch || str(partial, "streamEpoch") != "" && str(partial, "streamEpoch") != w.epoch {
+			if !w.current() || !w.snapshotMatches(epoch, partial) {
 				return
 			}
 			if len(objects(partial["turns"])) == 0 {
@@ -92,7 +99,9 @@ func (w *sessionStream) startSnapshot() {
 			}
 			w.s.setTranscript(preview)
 		})
-		ctx := provider.WithTranscriptObserver(w.ctx, observe)
+		readCtx, stopRead := context.WithTimeout(w.ctx, 30*time.Second)
+		defer stopRead()
+		ctx := provider.WithTranscriptObserver(readCtx, observe)
 		v, err := rpc(ctx, w.s.api, w.target, w.provider, w.session, "transcript", Object{"fresh": true, "progress": true})
 		stopPreviews()
 		w.s.cx.Post(func() {
@@ -100,23 +109,35 @@ func (w *sessionStream) startSnapshot() {
 				return
 			}
 			w.snapshotInFlight = false
+			w.historyError = err
 			w.s.setConnectionIssue(w.target, "transcript", err)
 			if err != nil {
 				w.journal = nil
 				w.syncing(false)
-				time.AfterFunc(time.Second, func() {
+				delay := w.historyRetry.Next(err)
+				w.nextSnapshot = time.Now().Add(delay)
+				w.historyRetryVersion++
+				version := w.historyRetryVersion
+				time.AfterFunc(delay, func() {
 					w.s.cx.Post(func() {
-						if w.current() {
+						if w.current() && w.historyRetryVersion == version {
 							w.startSnapshot()
 						}
 					})
 				})
 				return
 			}
+			w.historyRetry.Reset()
+			w.nextSnapshot = time.Time{}
 			t := object(v)
-			if w.invalid || epoch != w.epoch || str(t, "streamEpoch") != "" && str(t, "streamEpoch") != w.epoch {
+			if !w.snapshotMatches(epoch, t) {
 				w.startSnapshot()
 				return
+			}
+			// History is readable even if the live subscription has not joined yet.
+			// Its event boundary can establish the initial baseline independently.
+			if w.epoch == "" {
+				w.epoch, w.cursor = str(t, "streamEpoch"), number(t, "streamCursor")
 			}
 			// A completed history response may predate live text already on screen.
 			// Replay everything received since the request began; UTF-16 offsets make
@@ -139,6 +160,12 @@ func (w *sessionStream) startSnapshot() {
 			}
 		})
 	}()
+}
+
+func (w *sessionStream) snapshotMatches(epoch string, t Object) bool {
+	return !w.invalid && (epoch == "" || epoch == w.epoch) &&
+		(str(t, "streamEpoch") == "" || w.epoch == "" ||
+			str(t, "streamEpoch") == w.epoch && number(t, "streamCursor") >= w.resetCursor)
 }
 
 func (w *sessionStream) replayAfter(t Object) []Object {
@@ -200,11 +227,14 @@ func (w *sessionStream) batch(b Object) {
 	}
 	events := objects(b["events"])
 	if flag(b, "reset") {
-		w.baseline = false
-		w.s.streamEpoch, w.s.streamCursor = "", 0
-		if w.snapshotInFlight {
+		// The first subscription establishes the boundary of the independent
+		// history read. A later reset invalidates an already established one.
+		if w.snapshotInFlight && w.epoch != "" {
 			w.invalid = true
 		}
+		w.baseline = false
+		w.resetCursor = number(b, "cursor")
+		w.s.streamEpoch, w.s.streamCursor = "", 0
 	}
 	w.epoch, w.cursor = str(b, "epoch"), number(b, "cursor")
 	if !w.baseline && !w.snapshotInFlight {
@@ -260,6 +290,7 @@ func (w *sessionStream) batch(b Object) {
 func (w *sessionStream) run(epoch string, cursor int64) {
 	go w.pollApprovals()
 	probe := true
+	var retry readretry.Backoff
 	for w.ctx.Err() == nil {
 		v, err := rpc(w.ctx, w.s.api, w.target, w.provider, w.session, "watch", Object{"epoch": epoch, "after": cursor, "probe": probe})
 		if w.ctx.Err() != nil {
@@ -271,7 +302,7 @@ func (w *sessionStream) run(epoch string, cursor int64) {
 				w.s.setConnectionIssue(w.target, "watch", err)
 				if err == nil {
 					w.batch(object(v))
-				} else {
+				} else if !w.snapshotInFlight {
 					w.syncing(false)
 				}
 				w.s.changed()
@@ -284,13 +315,12 @@ func (w *sessionStream) run(epoch string, cursor int64) {
 		case <-applied:
 		}
 		if err != nil {
-			select {
-			case <-w.ctx.Done():
+			if readretry.Wait(w.ctx, retry.Next(err)) != nil {
 				return
-			case <-time.After(time.Second):
 			}
 			continue
 		}
+		retry.Reset()
 		b := object(v)
 		epoch, cursor = str(b, "epoch"), number(b, "cursor")
 		probe = false

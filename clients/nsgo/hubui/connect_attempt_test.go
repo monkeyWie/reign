@@ -142,15 +142,15 @@ func TestRetryKeepsStatusPanelAndShowsActualTransportSteps(t *testing.T) {
 	}
 	spinner := app.Find("id:connection-loading").ID
 	f.steps <- connectivity.Progress{ID: "stun:cf", Stage: "udp", Message: "公共 STUN 节点", Detail: "stun:stun.cloudflare.com:3478 · 并行探测", State: "info"}
-	f.steps <- connectivity.Progress{ID: "stun:self", Stage: "udp", Message: "自建 STUN 节点", Detail: "stun:probe.example.com:26330 · 并行探测", State: "info"}
-	f.steps <- connectivity.Progress{ID: "tcp", Stage: "tcp", Message: "探测 TCP 公网映射", Detail: "probe.example.com:26330", State: "running"}
+	f.steps <- connectivity.Progress{ID: "stun:self", Stage: "udp", Message: "自建 STUN 节点", Detail: "stun:probe.example.com:26331 · 并行探测", State: "info"}
+	f.steps <- connectivity.Progress{ID: "tcp", Stage: "tcp", Message: "探测 TCP 公网映射", Detail: "probe.example.com:26331", State: "running"}
 	f.steps <- connectivity.Progress{ID: "path", Stage: "relay", Message: "正在使用加密中继", Detail: "wss://reignhub.app/p2p/relay", State: "success"}
 	app.WaitFor("text:wss://reignhub.app/p2p/relay", time.Second)
 	app.Find("text:stun:stun.cloudflare.com:3478 · 并行探测")
-	app.Find("text:stun:probe.example.com:26330 · 并行探测")
+	app.Find("text:stun:probe.example.com:26331 · 并行探测")
 	app.Press("id:copy-connection-log")
 	app.WaitFor("role:button 已复制", time.Second)
-	if !strings.Contains(app.Clipboard, "stun:probe.example.com:26330") || !strings.Contains(app.Clipboard, "ReignHub connection diagnostics") {
+	if !strings.Contains(app.Clipboard, "stun:probe.example.com:26331") || !strings.Contains(app.Clipboard, "ReignHub connection diagnostics") {
 		t.Fatalf("incomplete connection report: %s", app.Clipboard)
 	}
 	if app.Find("id:connection-loading").ID != spinner {
@@ -173,7 +173,7 @@ func TestRetryKeepsStatusPanelAndShowsActualTransportSteps(t *testing.T) {
 	if app.Exists("id:connection-error-raw") || app.Exists("id:error-banner") {
 		t.Fatal("successful retry retained stale failure")
 	}
-	app.Press("id:connection-done")
+	app.Press("id:dialog-connection-status-close")
 	if app.Find("id:chat-input").Text != "重试时保留草稿" {
 		t.Fatal("retry discarded draft")
 	}

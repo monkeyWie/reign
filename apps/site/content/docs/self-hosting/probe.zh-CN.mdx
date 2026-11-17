@@ -15,15 +15,15 @@ Go 版本以仓库 `go.mod` 为准，也可以使用发布产物中的 Linux amd
 
 ```sh
 go build -o reignhub-probe ./cmd/reignhub-probe
-./reignhub-probe --listen :26330
+./reignhub-probe --listen :26331
 ```
 
 服务器与云安全组同时放行：
 
 | 端口  | 协议 | 用途                           |
 | ----- | ---- | ------------------------------ |
-| 26330 | UDP  | UDP STUN Binding／地址映射发现 |
-| 26330 | TCP  | 原生 TCP 探测与打洞候选发现    |
+| 26331 | UDP  | UDP STUN Binding／地址映射发现 |
+| 26331 | TCP  | 原生 TCP 探测与打洞候选发现    |
 
 普通 Nginx HTTP 反代不能转发这两个探测协议。探测域名应设置为 **DNS only**，不能套 Cloudflare HTTP 代理。
 
@@ -32,8 +32,8 @@ go build -o reignhub-probe ./cmd/reignhub-probe
 在 Worker 变量中配置并重新部署：
 
 ```text
-SELF_STUN=stun:probe.example.com:26330
-TCP_STUN=probe.example.com:26330
+SELF_STUN=stun:probe.example.com:26331
+TCP_STUN=probe.example.com:26331
 ```
 
 客户端仍然只填 Worker 的 HTTPS 地址。服务会通过 `/p2p/config` 下发这些入口。

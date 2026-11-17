@@ -16,14 +16,20 @@ import { gzipSync } from "node:zlib";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const output = join(root, "build/nsgo-console");
-const assets = join(root, "apps/site/public/assets/chat");
+const selfHosted = process.argv.includes("--self-hosted");
+const publicDir = join(
+  root,
+  selfHosted ? "build/self-hosted-assets" : "apps/site/public",
+);
+if (selfHosted) rmSync(publicDir, { recursive: true, force: true });
+const assets = join(publicDir, "assets/chat");
 const version = process.env.VERSION || "0.1.0";
 mkdirSync(output, { recursive: true });
 const result = spawnSync(
   "sh",
   ["scripts/build.sh", "web", "-output", output, "-version", version],
   {
-    cwd: join(root, "clients/nsgo"),
+    cwd: root,
     stdio: "inherit",
     env: process.env,
   },
@@ -73,7 +79,9 @@ const downloaderFile =
   createHash("sha256").update(downloader).digest("hex").slice(0, 10) +
   ".mjs";
 writeFileSync(join(assets, downloaderFile), downloader);
+cpSync(join(root, "apps/site/app/icon.svg"), join(assets, "icon.svg"));
 const html = readFileSync(join(root, "clients/nsgo/web/index.html"), "utf8")
+  .replace('href="/icon.svg"', 'href="/assets/chat/icon.svg"')
   .replace("__LOADER__", config.loader)
   .replace("__DOWNLOADER__", downloaderFile)
   .replace("__LOADING_CSS__", cssFile)
@@ -90,7 +98,7 @@ const headers = readdirSync(assets)
   )
   .join("\n");
 writeFileSync(
-  join(root, "apps/site/public/_headers"),
+  join(publicDir, "_headers"),
   headers +
     "\n/assets/chat/nsgo.json\n  Cache-Control: no-cache\n\n/assets/chat/index.html\n  Cache-Control: no-cache\n",
 );

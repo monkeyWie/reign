@@ -1,4 +1,4 @@
 {
   "title": "自建部署",
-  "pages": ["index", "cloudflare", "probe", "operations"]
+  "pages": ["index", "cloudflare", "go", "probe", "operations"]
 }

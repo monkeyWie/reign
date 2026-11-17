@@ -144,7 +144,7 @@ func TestLargeProgressiveHistoryKeepsNavigationResponsive(t *testing.T) {
 	// These are real UI actions while the final response is still outstanding.
 	app.Press("id:connection-status-demo-device")
 	app.WaitFor("id:dialog-connection-status", time.Second)
-	app.Press("id:connection-done")
+	app.Press("id:dialog-connection-status-close")
 	app.Press("id:back-sessions")
 	app.WaitFor("id:session-sidebar", time.Second)
 	app.Press("id:session-demo-chat")

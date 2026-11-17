@@ -9,7 +9,7 @@ import (
 	"github.com/pion/webrtc/v4"
 )
 
-const DefaultSTUNPort = "26330"
+const DefaultSTUNPort = "26331"
 
 type Policy struct {
 	Deployment     string   `json:"deployment"`

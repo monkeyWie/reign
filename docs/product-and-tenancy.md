@@ -1,13 +1,13 @@
 # 产品与租户设计
 
-状态：2026-11-11 SaaS 身份与收费规划。最新产品职责、授权流程和技术栈以 [产品 v2 基准](product-v2.md) 为准：Flutter + shadcn_flutter、Go 核心与服务、双角色桌面、设备 ID 连接。本文件中的匿名归属、账号绑定、连接票据与收费策略尚未接入现有私有原型。
+状态：2026-11-11 的 SaaS 身份与收费规划，保留作业务设计参考，不代表已实现能力。当前客户端采用 NSGo + Go，部署与授权协议以 [后端架构](engineering/architecture.md)、[自部署说明](platform/self-hosting.md) 和 [协议](platform/protocol.md) 为准。
 
 边界：开源版提供完整无账号自部署能力；匿名租户、账号与计费由独立闭源 SaaS 业务层实现。本文件描述业务目标，不要求将以下租户/用户模型放进开源核心。具体代码与部署边界以 [开源核心与闭源 SaaS 边界](open-source-boundary.md) 为准。
 
 ## 产品职责
 
-- Flutter 桌面：左侧设备导航，默认显示本机被控面板；选择远端设备后显示会话和对话。Go daemon 同时承担被控和控制职责。
-- Flutter iOS / Android / Web：ID/扫码连接、多设备、会话与审批；原生端使用 Go 核心，Web 直接使用浏览器网络/存储适配，不引入 Wasm。
+- NSGo 桌面：设备导航与远程会话界面，本机 Agent 放在设置页；Go 核心在同一进程承担被控和控制职责。
+- NSGo iOS / Android / Web：设备配对、多设备、会话与审批；原生端使用 Go 核心，Web 使用 Go WASM + DOM 和浏览器网络/存储适配。
 - Provider：封装 Agent 本地接入；Codex App / CLI 为独立接入项，可复用协议适配。网络、租户和套餐不进入 Provider。
 - Go 服务：开源无账号自部署与官方服务共用的设备登记、ID 解析、信令与加密 relay；SaaS 在外层组合身份/权益，不要求 CF。
 - SaaS 数据库：身份映射、租户、主机/设备归属、授权引用、套餐和汇总用量；不保存聊天正文、Agent 登录凭据或主机端到端私钥。D1 是旧 CF 方案的选项，不是必需依赖。
@@ -16,15 +16,15 @@
 
 ## 两种部署形态
 
-| 属性 | 私有实例 | 公有 SaaS |
-|---|---|---|
-| 身份入口 | 实例凭据 + 设备身份 | 先匿名设备身份，后可绑定 GitHub / Google |
-| 用户体验 | 填私有地址，输入该实例的设备 ID 或扫码 | 使用内置公有服务，输入设备 ID 或扫码 |
-| 隔离空间 | 固定实例 namespace，无需租户模型 | 自动分配匿名租户，映射为 namespace |
-| 数据库 | 可不启用账号 D1 | 需要租户/设备/策略持久化 |
+| 属性     | 私有实例                                    | 公有 SaaS                                              |
+| -------- | ------------------------------------------- | ------------------------------------------------------ |
+| 身份入口 | 实例凭据 + 设备身份                         | 先匿名设备身份，后可绑定 GitHub / Google               |
+| 用户体验 | 填私有地址，输入该实例的设备 ID 或扫码      | 使用内置公有服务，输入设备 ID 或扫码                   |
+| 隔离空间 | 固定实例 namespace，无需租户模型            | 自动分配匿名租户，映射为 namespace                     |
+| 数据库   | 可不启用账号 D1                             | 需要租户/设备/策略持久化                               |
 | 连接授权 | 主机确认或主机密码认证，记住设备/单设备撤销 | 相同主机授权；后续支持同账号自动配对，加服务端短期票据 |
-| 限制 | 本地技术限制，无 SaaS 套餐概念 | 闭源 EntitlementResolver 输出连接权限与额度 |
-| 收费关系 | 不依赖我们的公有平台 | 购买托管服务套餐 |
+| 限制     | 本地技术限制，无 SaaS 套餐概念              | 闭源 EntitlementResolver 输出连接权限与额度            |
+| 收费关系 | 不依赖我们的公有平台                        | 购买托管服务套餐                                       |
 
 私有实例无账号不代表允许任何人控制 Agent。仍必须验证实例接入凭据、设备配对和端到端身份。私有实例独立运行，不强制联系 SaaS 校验订阅。
 
@@ -79,8 +79,8 @@ type Principal = {
   tenantId: string;
   deviceId: string;
   userId?: string;
-  role: 'owner' | 'client';
-  authKind: 'private' | 'anonymous' | 'account';
+  role: "owner" | "client";
+  authKind: "private" | "anonymous" | "account";
 };
 interface Authenticator {
   authenticate(request: Request): Promise<Principal>;
@@ -89,7 +89,11 @@ interface EntitlementResolver {
   resolve(principal: Principal): Promise<Entitlements>;
 }
 interface RelayAuthorizer {
-  authorize(principal: Principal, hostId: string, role: 'host' | 'client'): Promise<ConnectionTicket>;
+  authorize(
+    principal: Principal,
+    hostId: string,
+    role: "host" | "client",
+  ): Promise<ConnectionTicket>;
 }
 ```
 
@@ -97,7 +101,7 @@ interface RelayAuthorizer {
 
 ## 配对和连接
 
-MVP 以 [产品 v2 授权流程](product-v2.md#首次授权记住设备与撤销) 为准：输入设备 ID 或扫码寻址，首次连接由主机确认或密码验证，后续可记住设备；同账号自动配对后续加入。以下一次性邀请是可选配对形式，扫码本身不能绕过主机配置的授权策略。
+MVP 以 [当前配对协议](platform/protocol.md) 为准：输入设备 ID 或扫码寻址，首次连接由主机确认或密码验证，后续可记住设备；同账号自动配对后续加入。以下一次性邀请是可选配对形式，扫码本身不能绕过主机配置的授权策略。
 
 目标二维码包含 serviceUrl、协议版本、设备连接 ID、公钥指纹；可附短时一次性 invitationId 和邀请秘密。不包含平台管理密钥、账号 access token、主机密码或长期主机私钥。
 
@@ -154,7 +158,7 @@ SaaS 授权入口完成校验后将目标主机的 tenantId 映射为受信 name
 
 ```typescript
 type Entitlements = {
-  plan: 'guest_free' | 'free' | 'pro';
+  plan: "guest_free" | "free" | "pro";
   accountRequired: boolean;
   allowNewConnections: boolean;
   allowRelay: boolean;
@@ -167,7 +171,7 @@ type Entitlements = {
 
 同一 SaaS 可以同时保留匿名免费、已绑定免费和付费用户，也可以在日后将公有远程服务调整为需要账号/付费。已有匿名租户可使用 grandfatherUntil / promotionExpiresAt 过渡，避免无预告立即断开。付费开通以服务端验证的支付 webhook 为准，并做事件去重；不是跳回成功页面就开权限。
 
-错误码稳定为 `ACCOUNT_REQUIRED`、`SUBSCRIPTION_REQUIRED`、`QUOTA_EXCEEDED`、`DEVICE_REVOKED`、`PROTOCOL_UPGRADE_REQUIRED`，Flutter/桌面根据响应呈现绑定、升级或重试入口。
+错误码稳定为 `ACCOUNT_REQUIRED`、`SUBSCRIPTION_REQUIRED`、`QUOTA_EXCEEDED`、`DEVICE_REVOKED`、`PROTOCOL_UPGRADE_REQUIRED`，控制端根据响应呈现绑定、升级或重试入口。
 
 ## P2P 与收费边界
 

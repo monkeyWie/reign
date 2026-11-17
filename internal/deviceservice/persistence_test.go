@@ -105,3 +105,61 @@ func TestRegistrationHookRollsBack(t *testing.T) {
 		t.Fatal("hook transaction not rolled back")
 	}
 }
+
+func TestPairingSurvivesRestartAndExpires(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "server.db")
+	s, err := New(path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpServer := httptest.NewServer(s)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	create := func(host bool) device.Identity {
+		t.Helper()
+		i, _ := device.NewIdentity("fixture")
+		i, err = device.Register(ctx, httpServer.URL, i, host)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return i
+	}
+	h, c := create(true), create(false)
+	request := map[string]string{"id": "0123456789abcdef0123456789abcdef", "host": h.ID, "envelope": "encrypted"}
+	if err = device.Post(ctx, httpServer.URL, c.Token, "/p2p/pairings/request", request, nil); err != nil {
+		t.Fatal(err)
+	}
+	key := s.Network.GrantPublicKey
+	httpServer.Close()
+	s.Close()
+	s, err = New(path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	httpServer = httptest.NewServer(s)
+	defer httpServer.Close()
+	if key != s.Network.GrantPublicKey {
+		t.Fatal("signing key rotated")
+	}
+	var pending []Pair
+	if err = device.Post(ctx, httpServer.URL, h.Token, "/p2p/pairings/pending", map[string]string{}, &pending); err != nil || len(pending) != 1 {
+		t.Fatal(pending, err)
+	}
+	var result Pair
+	if err = device.Post(ctx, httpServer.URL, h.Token, "/p2p/pairings/respond", map[string]any{"id": request["id"], "allow": true, "reply": "encrypted-reply"}, &result); err != nil || result.State != "approved" || !s.CanAccess(c.ID, h.ID) {
+		t.Fatal(result, err)
+	}
+	if err = device.Post(ctx, httpServer.URL, c.Token, "/p2p/pairings/result", request, &result); err != nil || result.Reply != "encrypted-reply" {
+		t.Fatal(result, err)
+	}
+	if err = s.DB.Model(&Pair{}).Where("id = ?", request["id"]).Update("expires", time.Now().Unix()-1).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err = device.Post(ctx, httpServer.URL, c.Token, "/p2p/pairings/result", request, &result); err == nil {
+		t.Fatal("expired pairing returned")
+	}
+	if !s.CanAccess(c.ID, h.ID) {
+		t.Fatal("mailbox cleanup deleted durable authorization")
+	}
+}

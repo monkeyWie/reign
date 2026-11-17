@@ -1,12 +1,28 @@
 # Self-hosted ReignHub
 
+## Standalone Go deployment
+
+Go and Cloudflare Worker are independent deployment options with the same `/p2p/*` contract. The Go service does not need Cloudflare, an account service, Node at runtime or an external database. Both deployments include only the Web console and redirect `/` to `/chat/`; the official website/docs are built and published separately.
+
+```sh
+docker compose -f deploy/service/compose.yaml up -d --build
+# Or extract a standalone release and run:
+./reignhub-server --config server.json
+```
+
+All features are enabled by default: device registration, pairing, signaling, encrypted relay, Web, UDP STUN and TCP STUN. HTTP defaults to `:26330`; TCP/UDP discovery defaults to `:26331`. SQLite defaults to `data/reignhub.db`. Customize every listener and feature through JSON or CLI; explicit flags override the file. Preserve the database and signing identity on upgrades.
+
+For a Worker probe only: `reignhub-server --http=false`. This mode opens no HTTP listener and no SQLite database. TCP and UDP ports can differ. Release packages include verified Homebrew/Scoop definitions; their tap/bucket publication is a separate maintainer step. See [Go deployment, HTTPS, systemd and package managers](../../deploy/service/README.md).
+
+Browser crypto requires HTTPS or localhost; LAN HTTP origins are suitable for native testing, not arbitrary remote browsers. STUN sockets require direct reachability and cannot be carried by an HTTP reverse proxy.
+
 ## One-click Cloudflare deployment
 
 Use the root repository Deploy to Cloudflare button. The template needs the root pnpm workspace; Cloudflare's deploy button does not include sibling dependencies when given a monorepo subdirectory.
 
-The template provides one Worker, static React assets, one D1 database and one SQLite Durable Object class. D1 is automatically provisioned by Wrangler/Workers Builds; `pnpm run deploy` deploys the Worker, then applies the schema. Initial requests may briefly return unavailable before that first migration finishes. No paid-plan enforcement exists in this deployment. Cloudflare's own free-tier resource allowances still apply.
+The template provides one Worker, static NSGo WASM console assets, one D1 database and one SQLite Durable Object class. D1 is automatically provisioned by Wrangler/Workers Builds; `pnpm run deploy` deploys the Worker, then applies the schema. Initial requests may briefly return unavailable before that first migration finishes. No paid-plan enforcement exists in this deployment. Cloudflare's own free-tier resource allowances still apply.
 
-After deployment, paste the resulting `https://<worker>.<account>.workers.dev` origin into clients. The browser controller lives at `/chat`. The website and docs are included. No custom domain is required.
+After deployment, paste the resulting `https://<worker>.<account>.workers.dev` origin into clients. The browser controller lives at `/chat`. The website and docs are excluded. No custom domain is required.
 
 The one-click resource provisioning requires a real Cloudflare account and has not been exercised by local dry-run tests. The compiled Worker and D1 migrations are tested locally.
 
@@ -30,16 +46,16 @@ For a local Worker, apply migrations with `--local` before `wrangler dev`. Do no
 
 ```sh
 go build -o reignhub-probe ./cmd/reignhub-probe
-./reignhub-probe --listen :26330
+./reignhub-probe --listen :26331
 ```
 
-Open `26330/TCP` and `26330/UDP` on the VM and firewall. Both protocols use the same port number. These are STUN Binding/probe listeners, **not HTTP endpoints**, so an Nginx HTTP reverse proxy cannot carry them. A Cloudflare DNS record for this probe must be **DNS only**, not proxied.
+Open `26331/TCP` and `26331/UDP` on the VM and firewall. Both protocols use the same port number. These are STUN Binding/probe listeners, **not HTTP endpoints**, so an Nginx HTTP reverse proxy cannot carry them. A Cloudflare DNS record for this probe must be **DNS only**, not proxied.
 
 Set Worker variables:
 
 ```text
-SELF_STUN=stun:probe.example.com:26330
-TCP_STUN=probe.example.com:26330
+SELF_STUN=stun:probe.example.com:26331
+TCP_STUN=probe.example.com:26331
 ```
 
 `PUBLIC_STUN` defaults to Cloudflare and Google UDP STUN. Public and self-hosted candidates are gathered concurrently; it is not a waterfall that waits for public relay failure. TCP probes supply native TCP mappings and simultaneous-open candidates. A browser has no raw TCP socket API and only attempts WebRTC.

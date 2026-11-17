@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"github.com/monkeyWie/reignhub/internal/agents"
 	"github.com/monkeyWie/reignhub/internal/config"
+	"github.com/monkeyWie/reignhub/internal/connectivity"
 	"github.com/monkeyWie/reignhub/internal/control"
 	"github.com/monkeyWie/reignhub/internal/device"
 	"github.com/monkeyWie/reignhub/internal/deviceservice"
@@ -129,9 +130,21 @@ func (m *Manager) Run(ctx context.Context) {
 			m.path = ""
 			m.status = "正在登记设备"
 			m.mu.Unlock()
-			if e := m.register(ctx, c); e != nil {
+			e := m.register(ctx, c)
+			var policy connectivity.Policy
+			if e == nil {
+				m.mu.Lock()
+				i := m.state.Identity
+				m.status = "正在获取服务授权配置"
+				m.mu.Unlock()
+				policy, e = device.HostNetwork(ctx, i.Service)
+			}
+			if e != nil {
+				n := remote.NewHostStatus(c.ServiceURL)
+				n.ReportError(e)
 				m.mu.Lock()
 				m.status = e.Error()
+				m.network = n
 				m.mu.Unlock()
 			} else {
 				current = signature
@@ -145,13 +158,10 @@ func (m *Manager) Run(ctx context.Context) {
 				cancel = stop
 				opts := m.ice(c)
 				opts.GrantRequired = true
-				{
-					policy := device.Network(life, i.Service)
-					opts.GrantPublicKey = policy.GrantPublicKey
-					opts.ServiceID = policy.ServiceID
-					opts.ICEServers = policy.Servers()
-					opts.TCPSTUN = policy.TCPSTUN
-				}
+				opts.GrantPublicKey = policy.GrantPublicKey
+				opts.ServiceID = policy.ServiceID
+				opts.ICEServers = policy.Servers()
+				opts.TCPSTUN = policy.TCPSTUN
 				opts.ResolveKey = m.key
 				opts.OnClientInfo = m.updateClientInfo
 				go remote.RunHostObserved(life, remote.Pairing{Relay: "ws" + strings.TrimPrefix(i.Service, "http"), Host: i.ID, Key: device.Random(), RelayToken: i.Token}, opts, m.d, n)

@@ -7,7 +7,7 @@ description: 部署开源 Worker，初始化 D1，连接自己的设备。
 
 打开仓库中的 [Deploy to Cloudflare](https://deploy.workers.cloudflare.com/?url=https://github.com/monkeyWie/reignhub) 入口，授权你自己的 Cloudflare 账号，按向导创建服务。
 
-部署根仓库，**不要只选择 `apps/site` 子目录**，因为它依赖同一 pnpm workspace 中的连接核心与 SDK。向导需要配置 Worker、一个 D1 数据库和 SQLite Durable Object。
+部署根仓库，**不要只选择 `apps/site` 子目录**，因为 Worker 依赖同一 pnpm workspace 中的连接核心。向导需要配置 Worker、一个 D1 数据库和 SQLite Durable Object。
 
 按照向导授权 Worker、D1 和 Durable Objects 所需权限，完成后保存分配的服务地址与资源绑定。
 
@@ -46,31 +46,11 @@ curl https://YOUR-WORKER.YOUR-SUBDOMAIN.workers.dev/p2p/config
 
 需要允许额外 Web 来源时，用 `ALLOWED_ORIGINS` 配置精确的逗号分隔 origin。当前服务自身的 origin 默认允许。不要用宽泛通配符替代配对授权。
 
-## 站点语言与 SEO
+## 仅部署控制台
 
-英文使用 `/docs` 等无前缀路径，中文使用 `/zh-CN/docs`。首次访问按浏览器语言选择，手动切换后记住选择；控制台使用 `/chat`。如果使用固定公网域名，在构建时设置：
+根地址统一跳转 `/chat/`。开源包只包含 NSGo Web 控制台、连接 API 和加密中继，不构建或打包 Next.js、官网、文档与搜索索引。官网内容只通过独立的官方 CI 发布，无需配置 `SITE_URL` 等官网构建变量。
 
-```sh
-SITE_URL=https://reignhub.example.com pnpm build:web
-pnpm run deploy
-```
-
-这会为自己的域名生成 canonical、语言替代链接、分享卡片和站点地图。未设置 `SITE_URL` 时，不生成绝对 canonical，站点地图为空，避免把自建实例指向官方域名。更换域名需要调整构建变量并重新构建。私有实例仍需访问控制，robots.txt 不是鉴权。
-
-## 配置自己的法律页面
-
-如果服务有自己的运营条款和隐私政策，可在构建时指定链接：
-
-```sh
-NEXT_PUBLIC_TERMS_URL='https://example.com{localePrefix}/terms' \
-NEXT_PUBLIC_PRIVACY_URL='https://example.com{localePrefix}/privacy' \
-NEXT_PUBLIC_SUPPORT_EMAIL='support@example.com' \
-pnpm build:web
-```
-
-`{localePrefix}` 在英文中为空，中文中为 `/zh-CN`；不需要多语言时也可填写固定链接。配置两个地址后，官网页脚和账号页会显示对应入口。正文由你自己的站点托管，开源版本不附带其他运营者的条款。
-
-配置 `NEXT_PUBLIC_SUPPORT_EMAIL` 后，官网和文档页脚会展示可点击的客服邮箱。这是公开的构建变量，修改后需要重新构建。
+从源码构建还需要 Go（版本见 `go.mod`）来编译 WASM 控制台。发布的 Worker 归档已经包含编译后的控制台，使用归档部署无需 Go 工具链。
 
 ## 本地验证
 

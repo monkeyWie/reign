@@ -2,12 +2,12 @@
 
 当前实现统一使用 NSGo UI 和 Go 核心。公共仓库 `reignhub` 使用 MIT；商业实现独立放在私有 `reignhub-cloud`，通过固定 commit 的 `open-source` Git submodule 依赖公共仓库。闭源代码不会进入公共仓库。
 
-| 公共核心 | 私有商业层 |
-| --- | --- |
-| 客户端、Agent Providers、配对与设备撤销 | 匿名归属、用户、设备认领、租户 |
-| P2P、端到端加密、WS/WSS 与 CF 线路适配 | GitHub/Google OAuth、登录会话 |
-| 自部署入口与 GORM/SQLite | 套餐权益、账号设备配额、计费接入点 |
-| 签名连接 grant 数据格式和校验工具 | grant 签发策略、Cloudflare 托管资源分配 |
+| 公共核心                                | 私有商业层                              |
+| --------------------------------------- | --------------------------------------- |
+| 客户端、Agent Providers、配对与设备撤销 | 匿名归属、用户、设备认领、租户          |
+| P2P、端到端加密、WS/WSS 与 CF 线路适配  | GitHub/Google OAuth、登录会话           |
+| 自部署入口与 GORM/SQLite                | 套餐权益、账号设备配额、计费接入点      |
+| 签名连接 grant 数据格式和校验工具       | grant 签发策略、Cloudflare 托管资源分配 |
 
 自部署版独立运行，不需要账号、订阅或联系官方服务。商业版使用 `pkg/service` 组合相同核心，设备登记和业务归属在同一事务内完成，拒绝登记不会留下无归属设备。`Policy` 钩子覆盖设备 API 和中继握手/心跳检查。
 
@@ -21,4 +21,4 @@
 
 两种服务目前均为单实例。公共 SQL 表保存设备和配对授权；私有 SQL 表保存账号、归属与托管隧道分配。共用 GORM 数据库以保证登记事务，持久化层可替换，但在线房间和限流仍需另外实现跨节点协调。
 
-旧 Worker/Flutter 分层草案已由本文取代。旧部署目录保留作参考，不属于当前发布路线。实际存储和 Cloudflare 配置见 [数据与备用线路](storage-and-tunnels.md)。
+Go 和 Cloudflare Worker 都是当前维护的无账号自部署实现；最新模块边界见 [后端架构](engineering/architecture.md)，部署配置见 [自部署说明](platform/self-hosting.md)。

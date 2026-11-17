@@ -32,15 +32,15 @@ func main() {
 	expect := flag.String("expect", "tcp", "expected path: tcp or relay")
 	flag.Parse()
 	if *mode == "server" {
-		s, err := connectivity.ListenTCPSTUN(":26330")
+		s, err := connectivity.ListenTCPSTUN(":26331")
 		if err != nil {
 			log.Fatal(err)
 		}
 		defer s.Close()
-		log.Fatal(http.ListenAndServe(":26331", relay.New(strings.Repeat("r", 32))))
+		log.Fatal(http.ListenAndServe(":26330", relay.New(strings.Repeat("r", 32))))
 	}
-	p := remote.Pairing{Relay: "ws://" + *address + ":26331", Host: strings.Repeat("h", 32), Key: strings.Repeat("ab", 32), RelayToken: strings.Repeat("r", 32)}
-	opts := remote.Options{DisableWebRTC: true, TCPSTUN: []string{*address + ":26330"}}
+	p := remote.Pairing{Relay: "ws://" + *address + ":26330", Host: strings.Repeat("h", 32), Key: strings.Repeat("ab", 32), RelayToken: strings.Repeat("r", 32)}
+	opts := remote.Options{DisableWebRTC: true, TCPSTUN: []string{*address + ":26331"}}
 	opts.TCPTrace = log.Printf
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()

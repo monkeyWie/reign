@@ -49,7 +49,7 @@ func TestSTUNBindingAndMalformedPackets(t *testing.T) {
 }
 
 func TestPolicyRetainsBothSTUNSourcesAndRejectsTURN(t *testing.T) {
-	policy := Policy{PublicSTUN: []string{"stun:public.example:3478"}, SelfSTUN: []string{"stun:private.example:26330", "stun:public.example:3478"}}
+	policy := Policy{PublicSTUN: []string{"stun:public.example:3478"}, SelfSTUN: []string{"stun:private.example:26331", "stun:public.example:3478"}}
 	servers := policy.Servers()
 	if len(servers) != 2 || servers[0].URLs[0] != policy.PublicSTUN[0] || servers[1].URLs[0] != policy.SelfSTUN[0] {
 		t.Fatal("public and own STUN must both participate", servers)
@@ -57,7 +57,7 @@ func TestPolicyRetainsBothSTUNSourcesAndRejectsTURN(t *testing.T) {
 	if filtered := STUNOnly([]webrtc.ICEServer{{URLs: []string{"turn:old.example:3478", "turns:old.example:5349"}, Username: "old", Credential: "old"}}); len(filtered) != 0 {
 		t.Fatal("legacy TURN was enabled")
 	}
-	if got := STUNURL("[2001:db8::1]:26330", "26330"); got != "stun:[2001:db8::1]:26330" {
+	if got := STUNURL("[2001:db8::1]:26331", "26331"); got != "stun:[2001:db8::1]:26331" {
 		t.Fatal("IPv6 endpoint", got)
 	}
 }

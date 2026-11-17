@@ -1,0 +1,58 @@
+name: Official website
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: official-site-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  site:
+    name: Verify official website (separate from self-hosted packages)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-go@v7.0.0
+        with:
+          go-version-file: go.mod
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build:site
+        env:
+          SITE_URL: https://reignhub.app
+      - name: Verify website routes, docs and console
+        run: |
+          pnpm exec wrangler d1 migrations apply DB --local --config apps/site/wrangler.jsonc
+          pnpm exec wrangler dev --config apps/site/wrangler.jsonc --port 8787 > /tmp/reignhub-site.log 2>&1 &
+          site_pid=$!
+          trap 'kill "$site_pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8787/chat/ > /dev/null; then break; fi
+            sleep 1
+          done
+          pnpm exec tsx scripts/platform/smoke-site.mts http://127.0.0.1:8787
+      - name: Bundle official deployment
+        run: pnpm exec wrangler deploy --config apps/site/wrangler.jsonc --dry-run --outdir build/site-worker
+      - name: Publish official website
+        if: >-
+          github.repository == 'monkeyWie/reignhub' &&
+          github.ref == 'refs/heads/main' &&
+          github.event_name != 'pull_request' &&
+          vars.REIGNHUB_DEPLOY_OFFICIAL_SITE == 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: pnpm --filter @reignhub/site run deploy

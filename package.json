@@ -5,11 +5,13 @@
   "scripts": {
     "check": "pnpm -r --if-present check",
     "test": "pnpm -r --if-present test",
-    "build:web": "pnpm --filter @reignhub/site build:worker",
-    "build:worker": "pnpm --filter @reignhub/site build:worker",
-    "dev": "pnpm --filter @reignhub/site dev",
+    "build:web": "node scripts/platform/build-console.mjs --self-hosted",
+    "build:worker": "pnpm build:web",
+    "dev": "pnpm build:web && wrangler dev",
     "build": "pnpm build:web",
-    "deploy": "wrangler deploy && wrangler d1 migrations apply DB --remote"
+    "deploy": "wrangler deploy && wrangler d1 migrations apply DB --remote",
+    "build:site": "pnpm --filter @reignhub/site build:worker",
+    "dev:site": "pnpm --filter @reignhub/site dev"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "5.20261110.1",

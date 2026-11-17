@@ -48,11 +48,11 @@ description: 一句话说明这页解决什么问题。
 ## 预览与验证
 
 ```sh
-pnpm dev
+pnpm dev:site
 pnpm --filter @reignhub/site check
-pnpm build:web
+pnpm build:site
 ```
 
-完整 Worker 本地运行后，可以执行 `pnpm exec tsx scripts/platform/smoke-site.mts http://localhost:8787`，检查双语官网、文档链接、404、SEO 与浏览器搜索索引。CI 的隔离链路验证也会运行这些检查。
+使用 `apps/site/wrangler.jsonc` 运行官网 Worker 后，可以执行 `pnpm exec tsx scripts/platform/smoke-site.mts http://localhost:8787`，检查双语官网、文档链接、404、SEO 与浏览器搜索索引。独立官网 CI 也会运行这些检查。
 
 修改导航、代码块或表格时，检查桌面、窄屏、深色模式及搜索。文档 PR 与代码 PR 使用同样的检查流程。

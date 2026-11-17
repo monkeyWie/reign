@@ -84,7 +84,14 @@ func (s *State) loadCachedSession() {
 			}
 			s.transcriptLoading = false
 			if err == nil && v != nil && s.transcript == nil {
-				s.setTranscript(object(v))
+				cached := object(v)
+				s.setTranscript(cached)
+				// A disk baseline may arrive after the initial watch was launched.
+				// Resume only before any remote baseline or snapshot has started.
+				if resume := object(cached["resume"]); str(resume, "epoch") != "" && s.stream != nil && s.stream.current() && !s.stream.baseline && !s.stream.snapshotInFlight {
+					s.streamKey, s.streamEpoch, s.streamCursor = key, str(resume, "epoch"), number(resume, "cursor")
+					s.startSessionWatch()
+				}
 			} else if err == nil && v != nil {
 				s.restoreOutgoing(object(v))
 				s.reconcileOutgoing(time.Time{})
@@ -135,15 +142,28 @@ func (s *State) emptyTranscript(cx *core.Scope) core.Node {
 	return core.Show{When: func() bool { s.read(); return s.selected != nil && s.transcript == nil }, Then: func(cx *core.Scope) core.Node {
 		pending := func() bool {
 			s.read()
-			return s.transcriptLoading || s.transcriptSyncing || s.connection(s.target).reconnecting
+			return s.transcriptLoading || s.transcriptSyncing || s.connection(s.target).reconnecting || s.stream != nil && s.stream.current() && s.stream.snapshotInFlight
 		}
 		return core.View{TestID: "transcript-placeholder", Style: core.Style{Position: core.Absolute, Top: core.Pct(40), Left: core.Pt(24), Right: core.Pt(24), Gap: 12, AlignItems: core.AlignCenter}, Children: []core.Node{
 			core.Show{When: pending, Then: func(*core.Scope) core.Node {
 				return ui.Spinner{TestID: "transcript-loading", Label: "正在加载消息", Size: 20}
 			}},
 			dynamicText(cx, func() string {
-				return choose(pending(), "正在加载消息…", "此会话尚无本地消息，连接后会自动加载。")
+				if pending() {
+					return "正在加载消息…"
+				}
+				if s.connected() {
+					if s.stream != nil && s.stream.current() && s.stream.historyError != nil {
+						_, detail := operationErrorText(s.stream.historyError.Error(), nil)
+						return "消息加载失败：" + detail
+					}
+					return "消息尚未加载，请重试。"
+				}
+				return "此会话尚无本地消息，连接后会自动加载。"
 			}, 13, true),
+			core.Show{When: func() bool { return !pending() && s.connected() }, Then: func(cx *core.Scope) core.Node {
+				return button(cx, "retry-transcript", "重试加载", nil, "outline", s.startSessionWatch)
+			}},
 		}}
 	}}
 }

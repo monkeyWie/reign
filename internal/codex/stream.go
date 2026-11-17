@@ -42,13 +42,41 @@ func (p *Provider) Probe(ctx context.Context, session, epoch string, after int64
 }
 func (p *Provider) watch(ctx context.Context, session, epoch string, after int64, probe bool) (provider.StreamBatch, error) {
 	log := p.stream().log
+	if b := p.appBridge(); b != nil {
+		b.mu.Lock()
+		f := b.followed[session]
+		repair := f != nil && (f.err != nil || f.owner == "" || len(f.state) == 0)
+		b.mu.Unlock()
+		if repair && !b.owns(session) {
+			owner, err := b.follow(ctx, session)
+			if err != nil {
+				return provider.StreamBatch{}, err
+			}
+			if owner == "" {
+				return provider.StreamBatch{}, provider.ErrUnavailable
+			}
+			if _, err = b.waitState(ctx, session, owner); err != nil {
+				return provider.StreamBatch{}, err
+			}
+		}
+	}
 	// Check the boundary without waiting before rejoining a replaced subscription.
 	batch, err := log.Probe(ctx, session, epoch, after)
 	if err != nil {
 		return batch, err
 	}
 	if batch.Reset {
-		if _, err := p.threadClient(ctx, session); err != nil {
+		if b := p.appBridge(); b != nil {
+			owner, err := b.follow(ctx, session)
+			if err != nil {
+				return provider.StreamBatch{}, err
+			}
+			if owner != "" {
+				if _, err = b.waitState(ctx, session, owner); err != nil {
+					return provider.StreamBatch{}, err
+				}
+			}
+		} else if _, err := p.threadClient(ctx, session); err != nil {
 			return provider.StreamBatch{}, err
 		}
 		return log.Probe(ctx, session, "", 0)
@@ -149,11 +177,10 @@ func (p *Provider) observeStream(m rpc.Message) {
 			delete(s.items, key)
 		}
 		event.Kind, event.ItemID, event.Item = "item", item.ID, &item
-		s.log.Publish(event)
 		if item.Role == "user" && userAttachmentSnapshot(params.Item) || item.Type == "imageGeneration" {
 			event.Kind, event.Item = "snapshot", nil
-			s.log.Publish(event)
 		}
+		s.log.Publish(event)
 		return
 	}
 	if params.ItemID == "" || params.Delta == "" {
@@ -199,9 +226,15 @@ func (p *Provider) observeStream(m rpc.Message) {
 // Plain user messages are already complete in the item event. Only file/image
 // inputs need the attachment importer to reread history and preserve their bytes.
 func userAttachmentSnapshot(raw json.RawMessage) bool {
-	var item struct{ Content []struct{ Type, Text string } }
+	var item struct {
+		Type           string
+		Content, Input []struct{ Type, Text string }
+	}
 	if json.Unmarshal(raw, &item) != nil {
 		return true
+	}
+	if item.Type == "steeringUserMessage" {
+		item.Content = item.Input
 	}
 	for _, content := range item.Content {
 		if content.Type == "localImage" || content.Type == "image" {

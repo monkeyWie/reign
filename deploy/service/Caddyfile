@@ -1,4 +1,4 @@
-{$AGENTHUB_DOMAIN} {
+{$REIGNHUB_DOMAIN} {
   encode gzip
-  reverse_proxy agenthub:26331
+  reverse_proxy reignhub-server:26330
 }

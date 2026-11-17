@@ -1,15 +1,20 @@
 ---
 title: Self-hosting overview
-description: One Cloudflare Worker for Web, signaling and your encrypted relay.
+description: Choose a standalone Go server or a Cloudflare Worker.
 ---
 
 ## What you deploy
 
-The open-source deployment includes the website, documentation, `/chat` Web controller, `/p2p/*` connection protocol, D1 and a device-room Durable Object. It requires no accounts, OAuth or payment configuration and applies no official commercial quotas.
+Choose a standalone Go server with local SQLite and integrated TCP/UDP discovery, or Cloudflare Worker with D1 and Durable Objects. Both provide the same pairing and encrypted transport APIs. Both include only the Web console; the root URL redirects to `/chat/`. The official website/docs are built and published separately.
 
-You need a Cloudflare account. The default workers.dev address includes HTTPS, so neither a paid domain nor a public VM is mandatory.
+The Cloudflare deployment includes only the `/chat` Web controller, `/p2p/*` connection protocol, D1 and a device-room Durable Object. It requires no accounts, OAuth or payment configuration and applies no official commercial quotas.
+
+For the Worker you need a Cloudflare account. The default workers.dev address includes HTTPS, so neither a paid domain nor a public VM is mandatory.
 
 <Cards>
+  <Card title="Deploy the Go server" href="/docs/self-hosting/go">
+    One binary or Docker Compose, local SQLite, all features enabled.
+  </Card>
   <Card title="Deploy to Cloudflare" href="/docs/self-hosting/cloudflare">
     Start from the deployment button or CLI.
   </Card>
@@ -29,4 +34,4 @@ Your self-hosted service runs independently, without official accounts, payment 
 
 ## Client configuration
 
-Use the same Worker root URL in every client, such as `https://reignhub.example.workers.dev`. The Web client is at `/chat`. The service publishes probe addresses, so clients need no second address field.
+Use the same Go server or Worker root URL in every client, such as `https://reignhub.example.workers.dev`. The Web client is at `/chat`. The service publishes probe addresses, so clients need no second address field.

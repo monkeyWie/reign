@@ -44,7 +44,10 @@ func (p *Provider) discoverCLI(ctx context.Context, path string) (cliDaemonInfo,
 // seeing an installed CLI never starts a new daemon or resumes a session.
 func (p *Provider) AutoConnect(ctx context.Context) error {
 	if p.kind != "cli" {
-		return nil
+		if !p.cfg.ManagedAgents["codex-app"] && p.appBridge() == nil {
+			return nil
+		}
+		return p.Start(ctx)
 	}
 	s := p.cliStatus(ctx)
 	if s.Ready() || !s.Running {

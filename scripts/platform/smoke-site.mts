@@ -110,7 +110,7 @@ export async function smokeSite(origin: string) {
         `Missing localized architecture diagram: ${path}`,
       );
     assert.ok(
-      !html.includes("/v2/") && !html.includes("Legacy Flutter"),
+      !html.includes("/v2/"),
       `Internal migration history in public content: ${path}`,
     );
     visited.add(path);

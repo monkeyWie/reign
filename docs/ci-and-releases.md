@@ -1,6 +1,6 @@
 # CI 与 Release
 
-GitHub Actions 工作流：[CI and Release](../.github/workflows/ci.yml)。只构建维护中的 NSGo / Go 实现；Flutter 和 Worker 历史原型不参与发布。
+GitHub Actions 工作流：[CI and Release](../.github/workflows/ci.yml)。客户端只构建共享 NSGo / Go 实现，服务分别验证 Go 和 Cloudflare Worker。客户端构建统一使用根目录 `scripts/build.sh`，默认产物在根目录 `dist/`，发布清单在 `dist/release/`。
 
 ## 触发
 
@@ -14,29 +14,33 @@ GitHub Actions 工作流：[CI and Release](../.github/workflows/ci.yml)。只�
 
 Linux 和 macOS 分别运行两个 Go module 的 `go vet`、`go test -race` 与覆盖率。额外检查 Go 格式、构建脚本、版本解析、发布清单与校验和逻辑。
 
-| 产物 | 格式 |
-| --- | --- |
-| macOS arm64 / x64 | `.dmg`，拖入 Applications 安装 |
-| Windows x64 / arm64 | `-setup.exe`，包含快捷方式与卸载程序 |
-| Linux x64 / arm64 桌面 | `.deb`、`.pkg.tar.gz`（Arch）与 `.AppImage`，运行需要 GTK 4 |
-| Android arm64 | 含原生 QR host 的 APK |
-| iOS | `-unsigned.ipa`，需自行签名才能安装 |
-| iOS Simulator | 编译验证，不作为设备安装包发布 |
-| Web + Worker | `reignhub-web-worker-<version>.tar.gz`，官网、控制台和开源服务 |
-| Linux amd64 / arm64 探测服务 | `reignhub-probe-<version>-linux-<arch>.tar.gz`，独立 TCP/UDP 探测 |
+| 产物                                           | 格式                                                                                         |
+| ---------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| macOS arm64 / x64                              | `.dmg`，拖入 Applications 安装                                                               |
+| Windows x64 / arm64                            | `-setup.exe`，包含快捷方式与卸载程序                                                         |
+| Linux x64 / arm64 桌面                         | `.deb`、`.pkg.tar.gz`（Arch）与 `.AppImage`，运行需要 GTK 4                                  |
+| Android arm64                                  | 含原生 QR host 的 APK                                                                        |
+| iOS                                            | `-unsigned.ipa`，需自行签名才能安装                                                          |
+| iOS Simulator                                  | 编译验证，不作为设备安装包发布                                                               |
+| Web + Worker                                   | `reignhub-web-worker-<version>.tar.gz`，仅控制台和开源服务，不含官网/文档                    |
+| Go 服务 Linux / macOS / Windows，amd64 / arm64 | `reignhub-server-<version>-<os>-<arch>.tar.gz`（Windows 为 ZIP），含 Web、SQLite、中继和探测 |
+| 包管理配置                                     | `reignhub-server-packaging-<version>.tar.gz`，Homebrew/Scoop 配方、校验和与安装脚本          |
+| Linux amd64 / arm64 探测服务                   | `reignhub-probe-<version>-linux-<arch>.tar.gz`，独立 TCP/UDP 探测                            |
 
-PR 和 main 构建的产物在对应 Actions run 的 Artifacts 中，保留 14 天；覆盖率保留 7 天。每次完整构建都会把公开产物合并到 `release-bundle` artifact，验证 15 个预期安装包/归档及各自 `.sha256`，生成总 `SHA256SUMS`；tag 发布直接使用这一份已验证的产物。缺失、额外文件或校验和错误都会阻止发布。
+PR 和 main 构建的产物在对应 Actions run 的 Artifacts 中，保留 14 天；覆盖率保留 7 天。每次完整构建都会把公开产物合并到 `release-bundle` artifact，验证 22 个预期安装包/归档及各自 `.sha256`，生成总 `SHA256SUMS`；tag 发布直接使用这一份已验证的产物。缺失、额外文件或校验和错误都会阻止发布。
 
-Web job 构建 NSGo Web、Next.js 网站与 Worker，并使用迁移后的本地 D1 验证原生客户端互通。Linux amd64 探测服务使用随机本地端口实际启动，验证 TCP/UDP 探测，不承载 Web 或账号服务。
+Go server job 复用已通过检查的 Worker 归档内 Web 资产，交叉编译六个平台，生成真实 URL/校验和的 Homebrew/Scoop 定义，并通过随机端口验证打包二进制的 Web 分片、SQLite、TCP/UDP，以及 TypeScript 控制端到隔离 Go Agent 的加密中继互通。另构建并启动非 root、根文件系统只读的 Docker 服务，验证同样的加密客户端互通。构建不会自动发布 Homebrew tap、Scoop bucket 或容器镜像。
+
+Web job 只构建 NSGo Web 和独立开源 Worker，并使用迁移后的本地 D1 验证原生客户端互通、根路径跳转、分片资源与官网路径 404。官网由独立的 `site.yml` 工作流使用 `pnpm build:site` 构建、验证；仅官方仓库开启 `REIGNHUB_DEPLOY_OFFICIAL_SITE=true` 并配置 Cloudflare secrets 后发布，不进入开源归档。Linux amd64 探测服务使用随机本地端口实际启动，验证 TCP/UDP 探测，不承载 Web 或账号服务。
 
 ## 配置（均可选）
 
 仓库 Settings → Secrets and variables → Actions：
 
-| 名称 | 类型 | 用途 |
-| --- | --- | --- |
-| `REIGNHUB_SERVER_URL` | Variable | 原生客户端内置默认服务地址；未配置为 `https://reignhub.app`。Web 始终使用当前 origin |
-| `ANDROID_SIGNING_PEM_BASE64` | Secret | 可选的固定 Android 签名身份，使用 NSGo PEM 格式（RSA private key + certificate） |
+| 名称                         | 类型     | 用途                                                                                 |
+| ---------------------------- | -------- | ------------------------------------------------------------------------------------ |
+| `REIGNHUB_SERVER_URL`        | Variable | 原生客户端内置默认服务地址；未配置为 `https://reignhub.app`。Web 始终使用当前 origin |
+| `ANDROID_SIGNING_PEM_BASE64` | Secret   | 可选的固定 Android 签名身份，使用 NSGo PEM 格式（RSA private key + certificate）     |
 
 没有签名 Secret 也能完成流水线。Android 包名会加 `-debug.apk`，使用本次临时生成的调试身份，无法覆盖安装另一签名的旧包。需要跨版本覆盖安装时，将已有 NSGo `.nsgo/android/debug.pem`（或同格式的专用发布身份）Base64 后保存到上述 Secret，之后持续使用同一身份。不要提交密钥文件；流水线不会把 `.nsgo` 或密钥上传为产物，PR 也不会恢复这个 Secret。这不是 Google Play 上传密钥 / JKS 配置。
 
@@ -64,6 +68,6 @@ git push origin v0.1.0
 
 版本快照在 D1 永久保留，不设数据过期时间。有缓存就立即返回，只有首次没有缓存时同步读取 GitHub；距离上次 API 请求至少一小时才在后台异步刷新，并更新 D1、内存和边缘缓存。D1 同时保存 ETag。跨 Worker 实例通过 D1 短租约合并刷新，单实例合并并发请求，边缘缓存 5 分钟，浏览器缓存 1 分钟。GitHub 限流或故障时遵守 Retry-After / X-RateLimit-Reset 并继续提供上次成功的列表；空结果和冷启动失败也记录一小时的刷新间隔，不会由不同用户重复拉取。客户端不能指定仓库或强制刷新上游。
 
-可选地为实际部署的 Worker 设置 `GITHUB_RELEASE_TOKEN` secret，提高 GitHub API 配额；公开仓库读取无需 token。token 仅在 Worker 使用，不进入浏览器或响应。公开和商业部署复用相同下载组件、缓存实现及 `0002_release_cache.sql` 迁移。
+可选地为实际部署的 Worker 设置 `GITHUB_RELEASE_TOKEN` secret，提高 GitHub API 配额；公开仓库读取无需 token。token 仅在 Worker 使用，不进入浏览器或响应。下载目录仅在官网部署中启用，开源自部署不包含官网路由或下载缓存运行代码。
 
 桌面安装包使用 NSGo 官方 `build.installers: true` 生成。Linux 构建环境安装 NSIS，确保 Windows 的安装 EXE 实际生成；缺失任何安装包都会阻止发版。CI 会挂载 DMG 验证应用和签名、检查 NSIS 内的程序，以及验证 DEB 的架构、GTK 依赖、桌面入口、Arch 包和 AppImage 标识。

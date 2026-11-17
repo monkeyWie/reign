@@ -51,14 +51,14 @@ func sessionAccessHelp(raw string, failure *sessionOperationError) accessHelp {
 	}
 	if app {
 		h.Steps = []string{
-			"在" + where + "上打开 ReignHub，进入「本机」。",
-			"先等待 Codex 当前任务结束，再在「Codex App」卡片点击「启用」，按提示正常退出并重新打开 Codex App。",
+			"在" + where + "上打开 ReignHub，进入「设置 → Agent」。",
+			"保持 Codex App 运行，在「设置 → Agent」的「Codex App」卡片点击「启用」，通过本地 IPC 接入。",
 			"确认 Codex App 显示「已就绪」后，返回此会话重试发送。",
 		}
 	} else {
 		h.Steps = []string{
 			"在" + where + "上确认这个会话当前由哪个 Codex 应用或终端管理。",
-			"如果来自 Codex App：等待当前任务结束，在 ReignHub「本机」的「Codex App」卡片点击「启用」，按提示重新接入。",
+			"如果来自 Codex App：保持 App 运行，在 ReignHub「设置 → Agent」启用本地 IPC 接入。",
 			"如果来自 Codex CLI：需让 CLI 会话使用 ReignHub 已接入的共享后台；独立进程占用的会话不能直接接管。",
 			"接入完成后返回原会话重试；请勿仅因这个提示强制结束正在运行的任务。",
 		}
@@ -68,6 +68,9 @@ func sessionAccessHelp(raw string, failure *sessionOperationError) accessHelp {
 
 func (s *State) errorAtComposer() bool {
 	s.read()
+	if s.dialog.Get() != "" {
+		return false
+	}
 	f := s.failure
 	return s.error != "" && f != nil && f.Error() == s.error && s.selected != nil && f.target == s.target && f.provider == str(s.selected, "providerId") && f.session == str(s.selected, "id") && (s.width.Get() >= wideBreakpoint || s.narrowChat)
 }
@@ -79,7 +82,11 @@ func (s *State) errorOverlay(cx *core.Scope, composer bool) core.Node {
 		style.Margin.Bottom = 8
 		style.AlignItems = core.AlignCenter
 	}
-	return core.View{TestID: "error-overlay", Style: style, Children: []core.Node{s.errorCard(cx)}}
+	if composer {
+		return core.View{TestID: "error-overlay", PointerEvents: core.PointerEventsBoxNone, Style: style, Children: []core.Node{s.errorCard(cx)}}
+	}
+	style = core.Style{Left: core.Pt(0), Width: core.Pct(100), Bottom: core.Pt(20), Padding: core.Edges{Left: 18, Right: 18}, PaddingEnv: core.EnvEdges{Bottom: core.EnvSafeArea}, AlignItems: core.AlignEnd}
+	return core.Overlay{TestID: "error-overlay", Topmost: true, PointerEvents: core.PointerEventsBoxNone, Style: style, Children: []core.Node{s.errorCard(cx)}}
 }
 
 func (s *State) errorCard(cx *core.Scope) core.Node {
@@ -102,7 +109,7 @@ func (s *State) errorCard(cx *core.Scope) core.Node {
 			p := palette(cx)
 			return core.Style{Background: p.background, BorderColor: core.RGBA(0xf59e0b, .45), Color: p.foreground}
 		}, Children: []core.Node{
-			row(glyph(cx, lucide.CircleAlert, 18), core.View{Style: fill, Children: []core.Node{heading}}, button(cx, "dismiss-error", "", lucide.X, "ghost", func() { s.error = ""; s.failure = nil; s.changed() })),
+			row(glyph(cx, lucide.CircleAlert, 18), core.View{Style: fill, Children: []core.Node{heading}}, labelledIconButton(cx, "dismiss-error", "关闭提示", lucide.X, func() { s.error = ""; s.failure = nil; s.changed() })),
 			label(cx, description, 12, true),
 			core.View{Style: core.Style{Direction: core.Row, Wrap: core.Wrap, Gap: 6}, Children: actions},
 			core.Show{When: expanded.Get, Then: func(cx *core.Scope) core.Node {

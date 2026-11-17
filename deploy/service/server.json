@@ -1,0 +1,16 @@
+{
+  "http": true,
+  "signal": true,
+  "relay": true,
+  "webEnabled": true,
+  "stun": true,
+  "tcpStun": true,
+  "listen": ":26330",
+  "state": "data/reignhub.db",
+  "stunListen": ":26331",
+  "tcpStunListen": ":26331",
+  "publicStun": "stun:stun.cloudflare.com:3478,stun:stun.l.google.com:19302",
+  "selfStun": "",
+  "tcpStunPublic": "",
+  "origins": ""
+}

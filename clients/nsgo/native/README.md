@@ -1,6 +1,6 @@
 # ReignHub 原生能力扩展
 
-按 NSGo 官方公开 API 接入，不使用 WebView、不修改 Flutter，不修改 NSGo 模块缓存。
+按 NSGo 官方公开 API 接入，不使用 WebView，不修改 NSGo 模块缓存。
 
 - 官方导航：https://nsgo.dev/zh/docs/navigation/
 - 官方原生组件与宿主通道：https://nsgo.dev/zh/docs/embedding/
@@ -26,7 +26,7 @@ Camera2 提供连续预览，ZXing Core 3.5.3 只解码二维码，按 YUV 平�
 用户打开扫一扫时才申请 CAMERA 权限。使用后置摄像头，支持权限拒绝、后台暂停、
 前台恢复、无效二维码重试。设备名称优先读系统 device_name，再回退品牌和型号。
 
-使用 `scripts/build.sh android_arm64 -output dist/...` 构建。
+从仓库根目录使用 `./scripts/build.sh android_arm64 -output dist/...` 构建，辅助脚本位于根目录 `scripts/build-android-host.py`，Go 工具位于 `clients/nsgo/cmd/android-package`。
 脚本先执行 NSGo 标准构建，再使用官方 `nsgo build -embed` 导出的 AAR classes.jar
 编译本应用宿主；d8 合并官方运行时、宿主与 ZXing，使用 NSGo 的公开 apk 包重新打包。
 Go 可执行文件、数据目录、应用 ID 和 `.nsgo/android/debug.pem` 签名均保持一致，
@@ -44,3 +44,20 @@ iOS 系统可能仅返回通用的 iPhone/iPad 名称，不能保证读取用户
 
 NSGo 已提供所需扩展点，因此本实现不需要框架 fork 或上游 PR。
 若要简化上游 CLI，可另提通用的 Android 宿主源码/依赖打包配置能力；不把 ReignHub 的扫码业务放进框架。
+
+## Conversation display lifetime
+
+`ras.screen-awake` accepts `{enabled: boolean}`. Android's activity applies
+`FLAG_KEEP_SCREEN_ON` only while resumed, clears it on pause/destroy and reapplies
+the current request on resume. It does not acquire a CPU wake lock or require a
+new permission. The controller releases its request when leaving the visible
+conversation, including a native Back/swipe pop. Background-service retention
+does not keep the display awake. The pinned NSGo Android KeepAwake backend is a
+no-op, so this uses the existing public host bridge. iOS uses NSGo's display
+KeepAwake hold with the same page/lifecycle policy. Mobile Web uses Screen Wake
+Lock where supported over HTTPS or localhost; plain LAN HTTP cannot provide it.
+
+Lifecycle regressions live in `hubui/screen_awake_test.go`; browser tests cover
+late request completion after cancellation/disposal and interaction-based
+recovery after denial. Physical-device screen timeout/lock behavior still needs
+device verification; users can always lock the display explicitly.

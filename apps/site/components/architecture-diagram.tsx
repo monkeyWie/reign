@@ -19,8 +19,8 @@ export function ArchitectureDiagram({
       "From pairing to encrypted conversations",
     ),
     codex: label(
-      "ReignHub 与 Codex App 共享后端",
-      "ReignHub and Codex App share one backend",
+      "Codex App 本地 IPC 远控",
+      "Codex App remote control over local IPC",
     ),
     stack: label("ReignHub 技术分层", "ReignHub technology layers"),
   };
@@ -34,8 +34,8 @@ export function ArchitectureDiagram({
       "First-time authorization establishes trust. Both direct and relay paths use end-to-end encryption.",
     ),
     codex: label(
-      "两个客户端直连同一个 app-server，操作同一份会话。",
-      "Both clients connect directly to the same app-server and work with the same sessions.",
+      "现有会话跟随原 App；远程新建会话由 ReignHub 的私有后端执行。",
+      "Existing sessions follow their App owner; new remote sessions use ReignHub’s private backend.",
     ),
     stack: label(
       "原生与 Web 共用连接协议，云端负责协调，本地保存会话缓存。",
@@ -194,7 +194,7 @@ export function ArchitectureDiagram({
                   "公共 / 自建探测器",
                   "Public / self-hosted probes",
                 )}
-                detail="UDP STUN · TCP :26330"
+                detail="UDP STUN · TCP :26331"
               />
               <Arrow d="M250 338 H400 V281" dashed />
               <text
@@ -307,38 +307,45 @@ export function ArchitectureDiagram({
               <Node
                 x={25}
                 y={22}
-                w={170}
+                w={190}
                 title="Codex App"
-                detail={label("桌面会话", "Desktop sessions")}
+                detail={label("原有会话的 owner", "Owner of App sessions")}
               />
               <Node
                 x={25}
-                y={151}
-                w={170}
+                y={180}
+                w={190}
                 title="ReignHub"
-                detail={label("远程会话与指令", "Remote sessions and commands")}
+                detail={label("远程会话的 owner", "Owner of remote sessions")}
               />
               <Node
-                x={290}
-                y={86}
-                w={210}
-                title="Codex app-server"
-                detail={label(
-                  "共享会话 · 实时事件",
-                  "Shared sessions · live events",
-                )}
+                x={300}
+                y={100}
+                w={190}
+                title={label("本地 IPC", "Local IPC")}
+                detail="Owner ↔ Follower"
                 accent
               />
               <Node
-                x={570}
-                y={86}
-                w={145}
-                title={label("项目与任务", "Projects & tasks")}
-                detail={label("你的电脑", "Your computer")}
+                x={560}
+                y={22}
+                w={170}
+                title={label("App 私有后端", "App backend")}
+                detail="Codex app-server"
               />
-              <Arrow d="M195 60 H245 V110 H282" />
-              <Arrow d="M195 189 H245 V137 H282" />
-              <Arrow d="M500 124 H562" />
+              <Node
+                x={560}
+                y={180}
+                w={170}
+                title={label("Hub 私有后端", "Hub backend")}
+                detail="stdio app-server"
+              />
+              <Arrow d="M215 60 H270 V120 H292" />
+              <Arrow d="M300 150 H270 V218 H223" />
+              <Arrow d="M215 218 H250 V150 H292" />
+              <Arrow d="M300 120 H250 V60 H223" />
+              <Arrow d="M215 42 H552" />
+              <Arrow d="M215 240 H552" />
             </>
           )}
           {kind === "stack" && (

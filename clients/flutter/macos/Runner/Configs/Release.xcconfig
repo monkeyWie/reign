@@ -1,6 +1,0 @@
-#include "../../Flutter/Flutter-Release.xcconfig"
-#include "Warnings.xcconfig"
-
-// The packaged Go bridge targets the build host architecture.
-ARCHS = $(NATIVE_ARCH_ACTUAL)
-ONLY_ACTIVE_ARCH = YES

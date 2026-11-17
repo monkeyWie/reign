@@ -107,7 +107,7 @@ func testSessionWriterConflictGuidance(t *testing.T, width, height core.Points) 
 	app.Press("id:session-error-details")
 	app.Press("id:session-access-help")
 	app.Find("id:dialog-session-access-help")
-	app.Find("text:2. 先等待 Codex 当前任务结束，再在「Codex App」卡片点击「启用」，按提示正常退出并重新打开 Codex App。")
+	app.Find("text:2. 保持 Codex App 运行，在「设置 → Agent」的「Codex App」卡片点击「启用」，通过本地 IPC 接入。")
 	app.Screenshot(choose(width < 650, "phone-session-access-guidance", "session-access-guidance"))
 	app.Press("id:session-help-done")
 	if f.sends.Load() != 1 || f.activations.Load() != 0 {

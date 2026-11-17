@@ -5,6 +5,7 @@ import android.os.Build;
 import android.content.Intent;
 import android.provider.Settings;
 import android.view.ViewGroup;
+import android.view.WindowManager;
 import dev.oneo.nsgo.NsgoActivity;
 import dev.oneo.nsgo.NsgoView;
 import java.util.HashMap;
@@ -14,11 +15,17 @@ import java.util.HashSet;
 public final class RasActivity extends NsgoActivity {
     final HashSet<QrCamera> scanners = new HashSet<>();
     boolean resumed;
+    boolean screenAwake;
     NsgoView rasView;
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
         NsgoView view = (NsgoView)((ViewGroup)findViewById(android.R.id.content)).getChildAt(0);
         rasView = view;
+        view.handle("ras.screen-awake", (data, reply) -> {
+            screenAwake = data instanceof java.util.Map && Boolean.TRUE.equals(((java.util.Map<?,?>)data).get("enabled"));
+            updateScreenAwake();
+            reply.resolve(null);
+        });
         ConnectionService.listener = running -> {
             HashMap<String,Object> stateInfo = new HashMap<>();
             stateInfo.put("running", running);
@@ -79,18 +86,26 @@ public final class RasActivity extends NsgoActivity {
     }
     @Override protected void onResume() {
         super.onResume(); resumed = true;
+        updateScreenAwake();
         for (QrCamera c : new HashSet<>(scanners)) c.resume();
     }
     @Override protected void onPause() {
         resumed = false;
+        updateScreenAwake();
         for (QrCamera c : new HashSet<>(scanners)) c.pause();
         super.onPause();
     }
     @Override protected void onDestroy() {
+        screenAwake = false;
+        updateScreenAwake();
         ConnectionService.listener = null;
         ConnectionService.networkListener = null;
         stopService(new Intent(this, ConnectionService.class));
         super.onDestroy();
+    }
+    private void updateScreenAwake() {
+        if (screenAwake && resumed) getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        else getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
     }
     @Override public void onRequestPermissionsResult(int request, String[] permissions, int[] results) {
         super.onRequestPermissionsResult(request, permissions, results);

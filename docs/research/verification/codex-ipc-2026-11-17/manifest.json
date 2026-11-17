@@ -1,0 +1,7 @@
+{
+  "appVersion": "26.1106.51428",
+  "sourceAsset": "app-source/.vite/build/early-bootstrap-631-9880b56d55f301d1.js",
+  "sourceSha256": "bce29a615bb1ab7019b9db27acdff7018ddaae8a2c7d6ede4b6c983b01f90ebe",
+  "extractedSha256": "9c2be27e3887a7c5324dd96a7cf46745e2e0301abad53c4d0604078bbe07c242",
+  "scope": "Offline evaluation of installed owner handler registration; no live App access"
+}

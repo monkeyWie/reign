@@ -21,6 +21,7 @@ type draftState struct {
 type State struct {
 	directoryGeneration                                     uint64
 	phoneNav                                                *base.Nav[string]
+	phoneRoute                                              *core.Signal[string]
 	clientName                                              string
 	drafts                                                  map[string]draftState
 	expanded                                                map[string]bool
@@ -41,7 +42,9 @@ type State struct {
 	failure                                                 *sessionOperationError
 	copiedValue                                             string
 	copyVersion                                             uint64
-	ready, busy, polling, narrowChat, dark                  bool
+	ready, polling, narrowChat, dark                        bool
+	manualRefresh                                           bool
+	actions                                                 map[string]bool
 	draft                                                   *core.Signal[string]
 	deviceWidth, sessionWidth                               *core.Signal[core.Points]
 	collapsed                                               map[string]bool
@@ -103,6 +106,7 @@ func newState(cx *core.Scope, api API) *State {
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &State{clientName: platformDeviceName(), drafts: map[string]draftState{}, expanded: map[string]bool{}, cx: cx, api: api, ctx: ctx, cancel: cancel, revision: core.NewSignal(cx, 0), width: core.NewSignal(cx, core.Points(1320)), dialog: core.NewSignal(cx, ""), draft: core.NewSignal(cx, ""), deviceWidth: core.NewSignal(cx, core.Points(210)), sessionWidth: core.NewSignal(cx, core.Points(300)), collapsed: map[string]bool{}, images: map[string][]byte{}, loadingImages: map[string]bool{}, previewIndex: core.NewSignal(cx, 0), prompted: map[string]bool{}, retrying: map[string]time.Time{}, timeline: &core.Ref{}}
 	s.snapshots = newSnapshotWriter(ctx, api)
+	s.phoneRoute = core.NewSignal(cx, "")
 	cx.Cleanup(func() {
 		cancel()
 		if s.watchCancel != nil {
@@ -121,7 +125,6 @@ func (s *State) async(work func(context.Context) (any, error), done func(any)) {
 			if s.ctx.Err() != nil {
 				return
 			}
-			s.busy = false
 			if err != nil {
 				s.error = err.Error()
 				s.failure = nil
@@ -133,11 +136,8 @@ func (s *State) async(work func(context.Context) (any, error), done func(any)) {
 		})
 	}()
 }
-func (s *State) call(method string, p Object, done func(any)) {
-	s.busy = true
-	s.error = ""
-	s.changed()
-	s.async(func(ctx context.Context) (any, error) { return s.api.Call(ctx, method, p, "", nil) }, func(v any) {
+func (s *State) call(action, method string, p Object, done func(any)) {
+	s.runAction(action, func(ctx context.Context) (any, error) { return s.api.Call(ctx, method, p, "", nil) }, func(v any) {
 		if done != nil {
 			done(v)
 		}
@@ -234,6 +234,18 @@ func (s *State) cancelCatalogue() {
 	}
 	s.pollGeneration++
 	s.polling = false
+	s.manualRefresh = false
+}
+
+func (s *State) refreshSessions() {
+	if s.manualRefresh || s.suspended || s.target == "" || !s.connected() || s.ctx.Err() != nil {
+		return
+	}
+	// A manual refresh supersedes a background read instead of showing its
+	// progress or accepting an older response as the user's fresh result.
+	s.cancelCatalogue()
+	s.manualRefresh = true
+	s.poll()
 }
 
 func (s *State) poll() {
@@ -397,9 +409,14 @@ func (s *State) startSessionWatch() {
 	s.animateText = map[string]bool{}
 	target, p, id, key := s.target, str(s.selected, "providerId"), str(s.selected, "id"), s.key()
 	if s.streamKey != key {
-		s.streamKey, s.streamEpoch, s.streamCursor = key, "", 0
+		resume := object(s.transcript["resume"])
+		s.streamKey, s.streamEpoch, s.streamCursor = key, str(resume, "epoch"), number(resume, "cursor")
 	}
 	epoch, cursor := s.streamEpoch, s.streamCursor
+	if s.transcript == nil {
+		// A replay cursor cannot replace a missing history baseline.
+		epoch, cursor = "", 0
+	}
 	ctx, cancel := context.WithCancel(s.ctx)
 	s.watchCancel = cancel
 	go func() {
@@ -418,7 +435,8 @@ func (s *State) startSessionWatch() {
 	w := &sessionStream{s: s, ctx: ctx, target: target, provider: p, session: id, key: key, epoch: epoch, cursor: cursor, baseline: epoch != "", approvals: make(chan struct{}, 1)}
 	s.stream = w
 	if epoch == "" {
-		w.syncing(true)
+		// Do not gate the first readable messages on IPC/live subscription setup.
+		w.startSnapshot()
 	}
 	go w.run(epoch, cursor)
 }
@@ -436,13 +454,12 @@ func (s *State) setTranscript(t Object) {
 }
 func (s *State) older() {
 	cursor := str(s.transcript, "nextCursor")
-	if cursor == "" || s.busy {
+	if cursor == "" {
 		return
 	}
 	key, target, p, id := s.key(), s.target, str(s.selected, "providerId"), str(s.selected, "id")
 	connected := s.connected()
-	s.busy = true
-	s.async(func(ctx context.Context) (any, error) {
+	s.runAction("history:"+key, func(ctx context.Context) (any, error) {
 		v, err := s.api.Call(ctx, "client.cached", nil, target, Object{"method": "transcript", "provider": p, "session": id, "cursor": cursor})
 		if err == nil && v != nil {
 			return v, nil
@@ -472,7 +489,7 @@ func (s *State) older() {
 		s.transcript["nextCursor"] = page["nextCursor"]
 		s.rebuildMessages()
 		s.scheduleSnapshot()
-	})
+	}, func() bool { return key == s.key() })
 }
 func (s *State) pendingSend() string {
 	s.read()
@@ -480,7 +497,7 @@ func (s *State) pendingSend() string {
 }
 func (s *State) canSubmitMessage() bool {
 	s.read()
-	if s.selected == nil || s.busy || !s.connected() || s.pendingSend() != "" {
+	if s.selected == nil || !s.connected() || s.pendingSend() != "" {
 		return false
 	}
 	if activeTurn(s.transcript) != nil && !s.agentCapability("steer") {
@@ -500,7 +517,7 @@ func (s *State) canSend() bool {
 	return strings.TrimSpace(s.draft.Get()) != "" || len(s.uploads) > 0
 }
 func (s *State) send(method string) {
-	if s.selected == nil || s.busy || !s.connected() || s.pendingSend() != "" {
+	if s.selected == nil || !s.connected() || s.pendingSend() != "" {
 		return
 	}
 	if method == "interrupt" && !s.agentCapability("interrupt") {
@@ -580,11 +597,7 @@ func (s *State) submitMessage(method string, extra Object, outgoing *outgoingMes
 	}()
 }
 func (s *State) decision(a Object, decision string) {
-	target, p, id := s.target, str(s.selected, "providerId"), str(s.selected, "id")
-	s.busy = true
-	s.async(func(ctx context.Context) (any, error) {
-		return rpc(ctx, s.api, target, p, id, "decide", Object{"approval": a["id"], "decision": Object{"decision": decision}})
-	}, func(any) { s.approvals = nil })
+	s.approvalAction(a, Object{"decision": decision})
 }
 func (s *State) autoReconnect() {
 	if s.suspended {
@@ -662,9 +675,5 @@ func (s *State) agentCapabilities() Object {
 }
 func (s *State) agentCapability(name string) bool { return flag(s.agentCapabilities(), name) }
 func (s *State) answerApproval(a Object, value string) {
-	target, p, id := s.target, str(s.selected, "providerId"), str(s.selected, "id")
-	s.busy = true
-	s.async(func(ctx context.Context) (any, error) {
-		return rpc(ctx, s.api, target, p, id, "decide", Object{"approval": a["id"], "decision": Object{"decision": "input", "answers": Object{"value": Object{"answers": []string{value}}}}})
-	}, func(any) { s.approvals = nil })
+	s.approvalAction(a, Object{"decision": "input", "answers": Object{"value": Object{"answers": []string{value}}}})
 }

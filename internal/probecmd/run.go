@@ -1,5 +1,5 @@
 // Package probecmd provides the optional public TCP/UDP discovery service.
-// Signaling, device IDs, pairing and relay belong to the Worker.
+// The full service is provided by servercmd; this entry point is probe-only.
 package probecmd
 
 import (
@@ -13,7 +13,7 @@ import (
 )
 
 func Run() {
-	listen := flag.String("listen", ":26330", "STUN Binding listener on both TCP and UDP; expose directly, not through HTTP proxy")
+	listen := flag.String("listen", ":"+connectivity.DefaultSTUNPort, "STUN Binding listener on both TCP and UDP; expose directly, not through HTTP proxy")
 	flag.Parse()
 	tcp, err := connectivity.ListenTCPSTUN(*listen)
 	if err != nil {

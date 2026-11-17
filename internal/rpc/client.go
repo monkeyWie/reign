@@ -38,6 +38,9 @@ type Observer func(Message, func(context.Context, any) error)
 
 type Client struct {
 	conn     *websocket.Conn
+	read     func() ([]byte, error)
+	writeRaw func(context.Context, []byte) error
+	closeRaw func() error
 	next     atomic.Uint64
 	mu       sync.Mutex
 	pending  map[string]chan Message
@@ -87,8 +90,15 @@ func (c *Client) Alive() bool {
 		return true
 	}
 }
-func (c *Client) Close() error          { c.cancel(); return c.conn.CloseNow() }
+func (c *Client) Close() error          { c.cancel(); return c.closeTransport() }
 func (c *Client) Done() <-chan struct{} { return c.done }
+
+func (c *Client) closeTransport() error {
+	if c.closeRaw != nil {
+		return c.closeRaw()
+	}
+	return c.conn.CloseNow()
+}
 
 func (c *Client) Call(ctx context.Context, method string, params any, result any) error {
 	id := strconv.FormatUint(c.next.Add(1), 10)
@@ -126,15 +136,24 @@ func (c *Client) write(ctx context.Context, data any) error {
 	if err != nil {
 		return err
 	}
+	if c.writeRaw != nil {
+		return c.writeRaw(ctx, b)
+	}
 	return c.conn.Write(ctx, websocket.MessageText, b)
 }
 
 func (c *Client) readLoop() {
 	defer close(c.done)
 	defer c.cancel()
-	defer c.conn.CloseNow()
+	defer c.closeTransport()
 	for {
-		_, data, err := c.conn.Read(c.ctx)
+		var data []byte
+		var err error
+		if c.read != nil {
+			data, err = c.read()
+		} else {
+			_, data, err = c.conn.Read(c.ctx)
+		}
 		if err != nil {
 			return
 		}

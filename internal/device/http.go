@@ -3,6 +3,8 @@ package device
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"github.com/monkeyWie/reignhub/internal/connectivity"
@@ -16,17 +18,39 @@ import (
 // for both IP and domain deployments; the user chooses HTTP or HTTPS explicitly.
 var AllowLANHTTP = "false"
 
-// Network falls back to public STUN if an older/unreachable service cannot
-// advertise its endpoints. This must never prevent pairing or WSS fallback.
+// Network permits controller candidate discovery to fall back to public STUN.
+// Hosts use HostNetwork because their authorization identity is mandatory.
 func Network(ctx context.Context, service string) connectivity.Policy {
-	ctx, cancel := context.WithTimeout(ctx, connectivity.StageTimeout)
-	defer cancel()
-	var policy connectivity.Policy
-	if err := Post(ctx, service, "", "/p2p/config", map[string]any{}, &policy); err != nil {
+	policy, err := fetchNetwork(ctx, service)
+	if err != nil {
 		connectivity.Note(ctx, "network-fallback", "network", "连接配置暂不可用，使用公共 STUN", "继续尝试直连与可用的服务中继", "warning")
 		return connectivity.DefaultPolicy()
 	}
 	return policy
+}
+
+func fetchNetwork(ctx context.Context, service string) (connectivity.Policy, error) {
+	ctx, cancel := context.WithTimeout(ctx, connectivity.StageTimeout)
+	defer cancel()
+	var policy connectivity.Policy
+	err := Post(ctx, service, "", "/p2p/config", map[string]any{}, &policy)
+	return policy, err
+}
+
+// HostNetwork never substitutes an empty trust identity after discovery fails.
+func HostNetwork(ctx context.Context, service string) (connectivity.Policy, error) {
+	policy, err := fetchNetwork(ctx, service)
+	if err != nil {
+		return policy, fmt.Errorf("获取服务授权配置失败: %w", err)
+	}
+	key, err := base64.RawURLEncoding.DecodeString(policy.GrantPublicKey)
+	if err != nil || len(key) != ed25519.PublicKeySize {
+		return policy, fmt.Errorf("服务未提供有效的授权公钥")
+	}
+	if strings.TrimSpace(policy.ServiceID) == "" {
+		return policy, fmt.Errorf("服务未提供有效的服务标识")
+	}
+	return policy, nil
 }
 
 func CleartextAllowed(host string) bool {

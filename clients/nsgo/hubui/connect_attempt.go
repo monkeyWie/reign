@@ -331,15 +331,14 @@ func (s *State) connectionPanel(cx *core.Scope, id string, a *connectAttempt, in
 			s.changed()
 		})}
 	} else {
-		d.Footer = []core.Node{button(cx, "connection-done", "关闭", nil, "outline", close)}
 		if initial && a != nil && !a.complete {
 			d.Footer = append(d.Footer, button(cx, "connect-edit", "修改", nil, "outline", func() { s.scanned = copyObject(a.params); s.closeConnectAttempt(); s.dialog.Set("connect") }), button(cx, "connect-retry", "重试", lucide.RefreshCw, "primary", func() { s.connect(a.params) }))
 		} else if id != "" {
 			d.Footer = append(d.Footer, button(cx, "connection-retry", "重试", lucide.RefreshCw, "primary", func() { s.reconnectDevice(id) }))
 		}
 	}
-	d.Footer = append([]core.Node{s.copyButton(cx, "copy-connection-log", "复制日志", "outline", func() string { return s.connectionLog(id, a) })}, d.Footer...)
-	return d
+	d.Children = append(d.Children, core.View{Style: core.Style{Direction: core.Row, JustifyContent: core.JustifyEnd}, Children: []core.Node{s.copyButton(cx, "copy-connection-log", "复制日志", "ghost", func() string { return s.connectionLog(id, a) })}})
+	return modalDialog(cx, d, close)
 }
 
 func (a *connectAttempt) elapsed() time.Duration {

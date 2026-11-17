@@ -46,11 +46,6 @@ func StartEmbedded(ctx context.Context, c config.Config) (*Embedded, error) {
 	attachments := assets.New(filepath.Join(c.DataDir, "attachments"))
 	backend := codex.New(c, key, events.New(), attachments)
 	cli := codex.NewCLI(c, events.New(), attachments)
-	if c.ManagedAgents["codex-app"] {
-		if err := backend.Start(ctx); err != nil {
-			log.Printf("Codex provider: %v", err)
-		}
-	}
 	providers := map[string]provider.Provider{"codex-app": backend, "codex-cli": cli}
 	closers := []func() error{backend.Close, cli.Close}
 	for id, def := range agents.Catalog(c.Agents) {
@@ -76,11 +71,15 @@ func StartEmbedded(ctx context.Context, c config.Config) (*Embedded, error) {
 	// Each Agent owns its startup deadline. Slow third-party initialization cannot
 	// hold up the host service or the local-first controller UI.
 	for id, p := range providers {
-		if id == "codex-app" || !c.ManagedAgents[id] {
+		if !c.ManagedAgents[id] {
 			continue
 		}
 		go func(id string, p provider.Provider) {
-			setup, cancel := context.WithTimeout(r.ctx, 2*time.Minute)
+			budget := 2 * time.Minute
+			if id == "codex-app" {
+				budget = 15 * time.Second
+			}
+			setup, cancel := context.WithTimeout(r.ctx, budget)
 			defer cancel()
 			if err := p.Start(setup); err != nil {
 				log.Printf("Agent %s initialization: %v", id, err)
@@ -133,7 +132,7 @@ func (r *Embedded) Call(ctx context.Context, req control.Request, out any) error
 	return nil
 }
 
-func (r *Embedded) Path() string { return "FFI" }
+func (r *Embedded) Path() string { return "In-process" }
 
 func (r *Embedded) Close() error {
 	r.closeOnce.Do(func() {

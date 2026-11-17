@@ -33,8 +33,8 @@ jobs:
       - name: Validate build helpers
         run: |
           python3 -m unittest discover -s scripts/ci -p 'test_*.py' -v
-          python3 -m py_compile clients/nsgo/scripts/package-service.py clients/nsgo/scripts/build-android-host.py
-          sh -n clients/nsgo/scripts/build.sh clients/nsgo/scripts/go-toolexec.sh
+          python3 -m py_compile scripts/platform/package-server.py scripts/build-android-host.py
+          sh -n scripts/build.sh scripts/go-toolexec.sh scripts/platform/install-server.sh
 
   test:
     name: Test ${{ matrix.module }} (${{ matrix.os }})
@@ -104,9 +104,9 @@ jobs:
           cache-dependency-path: go.sum
       - name: Vet and test Windows provider
         run: |
-          go vet ./internal/system ./internal/codex ./internal/agents
+          go vet ./internal/system ./internal/codex ./internal/codexipc ./internal/agents
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          go test -timeout 3m ./internal/system ./internal/codex ./internal/agents
+          go test -timeout 3m ./internal/system ./internal/codex ./internal/codexipc ./internal/agents
 
   clients:
     name: Build ${{ matrix.name }} clients
@@ -142,11 +142,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y nsis p7zip-full
       - name: Build native clients
-        working-directory: clients/nsgo
         run: ./scripts/build.sh "$TARGETS" -version "$VERSION" -build-number "$BUILD_NUMBER"
       - name: Package public assets and checksums
         run: |
-          python3 scripts/ci/release.py collect --source clients/nsgo/dist \
+          python3 scripts/ci/release.py collect --source dist \
             --targets "$TARGETS" --version "$VERSION" --output dist/release
       - name: Validate native installer payloads
         run: python3 scripts/ci/smoke-installers.py --directory dist/release --version "$VERSION" --targets "$TARGETS"
@@ -207,7 +206,6 @@ jobs:
             exit 1
           fi
       - name: Build APK including native QR host
-        working-directory: clients/nsgo
         run: ./scripts/build.sh android_arm64 -version "$VERSION" -build-number "$BUILD_NUMBER"
       - name: Verify packaged APK version and signature
         run: |
@@ -215,7 +213,7 @@ jobs:
           import hashlib, os, re, ssl, subprocess
           from pathlib import Path
           tools = Path(os.environ['ANDROID_HOME']) / 'build-tools/35.0.0'
-          apk = Path('clients/nsgo/dist/releases') / ('reignhub-' + os.environ['VERSION'] + '-android-arm64.apk')
+          apk = Path('dist/releases') / ('reignhub-' + os.environ['VERSION'] + '-android-arm64.apk')
           badging = subprocess.check_output([str(tools / 'aapt'), 'dump', 'badging', str(apk)], text=True)
           assert "versionName='" + os.environ['VERSION'] + "'" in badging
           assert "versionCode='" + os.environ['BUILD_NUMBER'] + "'" in badging
@@ -237,7 +235,7 @@ jobs:
           PY
       - name: Collect APK
         run: |
-          python3 scripts/ci/release.py collect --source clients/nsgo/dist \
+          python3 scripts/ci/release.py collect --source dist \
             --targets android_arm64 --version "$VERSION" --output dist/release
       - uses: actions/upload-artifact@v7.0.2
         with:
@@ -270,8 +268,6 @@ jobs:
       - run: pnpm check
       - run: pnpm test
       - run: pnpm build:web
-        env:
-          SITE_URL: https://reignhub.example.com
       - name: Verify actual Worker to native host interoperability
         run: |
           pnpm exec wrangler d1 migrations apply DB --local
@@ -332,7 +328,7 @@ jobs:
           run_browser_test -env "AGENTHUB_NSGO_TEST_FIXTURE=$fixture_url" \
             -run 'TestBrowserP2PAndRelayWithExistingHost|TestBrowserDirectWithoutRelay|TestBrowserConnectDoesNotWaitForRelayOrAgentDiscovery' ./browserclient
           run_browser_test \
-            -run 'TestBrowserBackStaysInCompactWorkspace|TestBrowserBackStaysInWideWorkspace|TestDesktopNavigationAndDrafts|TestPhoneNavigation|TestComposerSubmit|TestWebNativePresentationParity|TestControllerIdentityRows|TestReconnectStatusShowsAnimatedIndicator|TestImageMarkersAreNotUserMessageText|TestMessageTimesUseControllerTimezone|TestResponsiveLayoutUsesWidthAcrossPlatforms|TestMobileHeaderOverlaysMessages|TestDeviceListShowsServerPresenceWithoutConnecting|TestVerifiedConnectionImmediatelyUpdatesIconAndIgnoresStalePresence|TestSavedDeviceOpensCachedMessagesWhileConnectingAndAfterFailure|TestConnectedSlowPeerShowsCacheBeforeLiveReadsComplete|TestNoCachedSessionsShowsLoadingAndStopsAfterConnectionFailure|TestLateDiskSnapshotCannotOverwriteNewerLiveMessages|TestInstalledUnsupportedAppDoesNotOfferEnable|TestLiveTextDoesNotWaitForSnapshotsOrApprovals|TestCaughtUpRunningAgentDoesNotShowSyncDotsDuringTailRefresh|TestFirstHistoryDisplaysMessagesBeforeTheFinalResponse|TestLongHistoryReplyRendersItsPrefixAndKeepsFollowingMessagesInOrder|TestLoadingSpinnersRemainMountedDuringSyncUpdates|TestSyncDotsOverlayDoesNotMoveMessages|TestLargeProgressiveHistoryKeepsNavigationResponsive|TestSendFirstFrameDoesNotSerializeHistoryOrRehashUploads|TestReconnectPreservesLiveReplyAndReplaysFromCursor' ./hubui
+            -run 'TestBrowserBackStaysInCompactWorkspace|TestBrowserBackStaysInWideWorkspace|TestDesktopNavigationAndDrafts|TestPhoneNavigation|TestComposerSubmit|TestWebNativePresentationParity|TestControllerIdentityRows|TestReconnectStatusShowsAnimatedIndicator|TestImageMarkersAreNotUserMessageText|TestMessageTimesUseControllerTimezone|TestResponsiveLayoutUsesWidthAcrossPlatforms|TestMobileHeaderOverlaysMessages|TestDeviceListShowsServerPresenceWithoutConnecting|TestVerifiedConnectionImmediatelyUpdatesIconAndIgnoresStalePresence|TestSavedDeviceOpensCachedMessagesWhileConnectingAndAfterFailure|TestConnectedSlowPeerShowsCacheBeforeLiveReadsComplete|TestNoCachedSessionsShowsLoadingAndStopsAfterConnectionFailure|TestLateDiskSnapshotCannotOverwriteNewerLiveMessages|TestInstalledUnsupportedAppDoesNotOfferEnable|TestLiveTextDoesNotWaitForSnapshotsOrApprovals|TestCaughtUpRunningAgentDoesNotShowSyncDotsDuringTailRefresh|TestFirstHistoryDisplaysMessagesBeforeTheFinalResponse|TestInitialHistoryDoesNotWaitForFailedOrBlockedSubscription|TestFailedHistoryShowsRetryWhileDeviceRemainsConnected|TestInitialHistoryRejectsReplacedStreamBoundary|TestInitialHistoryBeforeLiveJoinCannotSkipTheOwnersSnapshot|TestLongHistoryReplyRendersItsPrefixAndKeepsFollowingMessagesInOrder|TestLoadingSpinnersRemainMountedDuringSyncUpdates|TestSyncDotsOverlayDoesNotMoveMessages|TestLargeProgressiveHistoryKeepsNavigationResponsive|TestSendFirstFrameDoesNotSerializeHistoryOrRehashUploads|TestReconnectPreservesLiveReplyAndReplaysFromCursor' ./hubui
       - name: Upload provider support screenshots
         if: always()
         uses: actions/upload-artifact@v7.0.2
@@ -351,6 +347,72 @@ jobs:
       - uses: actions/upload-artifact@v7.0.2
         with:
           name: web-worker
+          path: dist/release/*
+          if-no-files-found: error
+          retention-days: 14
+
+  server:
+    name: Build standalone Go servers and package manager definitions
+    needs: [metadata, test, web]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      VERSION: ${{ needs.metadata.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-go@v7.0.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          name: web-worker
+          path: build/worker-release
+      - name: Reuse the verified Web build
+        run: |
+          mkdir -p build/worker-console
+          tar -xzf "build/worker-release/reignhub-web-worker-$VERSION.tar.gz" -C build/worker-console
+          python3 scripts/platform/package-server.py --version "$VERSION" --output dist/release \
+            --web-dir "build/worker-console/reignhub-web-worker-$VERSION/assets/assets/chat"
+      - name: Smoke test embedded Web, SQLite and integrated TCP/UDP
+        run: python3 scripts/ci/smoke-server.py --archive "dist/release/reignhub-server-$VERSION-linux-amd64.tar.gz"
+      - name: Verify real encrypted Go host and TypeScript controller over relay
+        run: |
+          mkdir -p build/server-smoke
+          tar -xzf "dist/release/reignhub-server-$VERSION-linux-amd64.tar.gz" -C build/server-smoke
+          "build/server-smoke/reignhub-server-$VERSION-linux-amd64/reignhub-server" \
+            --listen 127.0.0.1:18788 --state build/server-smoke/state.db \
+            --stun-listen 127.0.0.1:0 --tcp-stun-listen 127.0.0.1:0 > /tmp/reignhub-go-server.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:18788/healthz > /dev/null; then break; fi
+            sleep 1
+          done
+          pnpm exec tsx scripts/platform/smoke-worker.mts http://127.0.0.1:18788 --go-server
+      - name: Verify Docker deployment with a non-root read-only runtime
+        run: |
+          docker build --build-arg VERSION="$VERSION" -f deploy/service/Dockerfile -t reignhub-server:ci .
+          docker run -d --rm --name reignhub-server-ci --read-only \
+            --tmpfs /data:rw,noexec,nosuid,size=64m,uid=65532,gid=65532 \
+            -p 127.0.0.1:18789:26330/tcp -p 127.0.0.1:19031:26331/tcp -p 127.0.0.1:19031:26331/udp \
+            reignhub-server:ci --state=/data/reignhub.db \
+            --self-stun=stun:127.0.0.1:19031 --tcp-stun-public=127.0.0.1:19031
+          trap 'docker rm -f reignhub-server-ci > /dev/null 2>&1 || true' EXIT
+          for attempt in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:18789/healthz > /dev/null; then break; fi
+            sleep 1
+          done
+          pnpm exec tsx scripts/platform/smoke-worker.mts http://127.0.0.1:18789 --go-server
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: servers
           path: dist/release/*
           if-no-files-found: error
           retention-days: 14
@@ -388,7 +450,8 @@ jobs:
 
   assemble:
     name: Verify complete release bundle
-    needs: [metadata, test, windows-provider, clients, android, probe, web]
+    needs:
+      [metadata, test, windows-provider, clients, android, probe, web, server]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     env:
@@ -407,6 +470,10 @@ jobs:
       - uses: actions/download-artifact@v8.0.2
         with:
           name: web-worker
+          path: dist/release
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          name: servers
           path: dist/release
       - name: Verify complete assets and checksums
         run: python3 scripts/ci/release.py verify --version "$VERSION" --output dist/release
@@ -438,14 +505,15 @@ jobs:
       - name: Prepare release notes
         run: |
           cat > build-notes.md <<'NOTES'
-          ReignHub native clients, Cloudflare Worker with NSGo Web, and optional probes.
+          ReignHub native clients, Cloudflare Worker with NSGo Web, standalone Go servers, and optional probes.
 
           - macOS DMG: open and drag ReignHub into Applications. Builds are ad hoc signed and not notarized.
           - Windows setup EXE: includes installation, shortcuts and an uninstaller.
           - Linux: DEB, Arch Linux packages and AppImage for x64 and arm64; GTK 4 is required.
           - Android packages ending in `-debug.apk` use a temporary development signing key and cannot update previous builds with another key. A configured persistent signing identity removes this suffix.
           - iOS `-unsigned.ipa` requires your own signing/provisioning before installation.
-          - Probe binaries use TCP/UDP 26330 and do not contain Web or account services.
+          - Standalone reignhub-server binaries embed Web, use SQLite, and enable TCP/UDP discovery by default. Configure with --config server.json or --help. Package-manager definitions are included separately.
+          - Probe binaries use TCP/UDP 26331 and do not contain Web or account services.
           - Verify downloads against `SHA256SUMS` or the individual `.sha256` files.
           - Native clients default to https://reignhub.app; self-hosted services can be configured in settings. Web uses its current origin.
           NOTES

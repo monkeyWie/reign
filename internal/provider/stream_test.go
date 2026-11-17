@@ -65,3 +65,26 @@ func TestProbeReturnsCaughtUpBoundaryWithoutLongPolling(t *testing.T) {
 		t.Fatal("probe accepted stale epoch", batch, err)
 	}
 }
+
+func TestBusySessionCannotEvictQuietSessionReplay(t *testing.T) {
+	log := NewEventLog()
+	epoch, cursor := log.Position()
+	log.Publish(StreamEvent{SessionID: "quiet", Kind: "text", Delta: "keep me"})
+	for i := 0; i < 3000; i++ {
+		log.Publish(StreamEvent{SessionID: "busy", Kind: "text", Delta: strings.Repeat("x", 2048)})
+	}
+	got, err := log.Probe(context.Background(), "quiet", epoch, cursor)
+	if err != nil || got.Reset || len(got.Events) != 1 || got.Events[0].Delta != "keep me" {
+		t.Fatal(got, err)
+	}
+	busy, err := log.Probe(context.Background(), "busy", epoch, cursor)
+	if err != nil || !busy.Reset {
+		t.Fatal("lost busy-session cursor accepted", busy, err)
+	}
+	for i := 0; i < 150; i++ {
+		log.Publish(StreamEvent{SessionID: strings.Repeat("s", i+1), Kind: "text", Delta: "x"})
+	}
+	if len(log.sessions) > replaySessionLimit || log.bytes > replayTotalBytes {
+		t.Fatal("unbounded sessions", len(log.sessions), log.bytes)
+	}
+}

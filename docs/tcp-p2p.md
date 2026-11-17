@@ -4,7 +4,7 @@
 
 ## 链路
 
-1. 服务 `26331/TCP` 提供登记、配对、信令、中继和可选 Web；`26330/TCP + UDP` 分别提供 TCP 与 UDP STUN Binding。
+1. 服务 `26330/TCP` 提供登记、配对、信令、中继和可选 Web；`26331/TCP + UDP` 分别提供 TCP 与 UDP STUN Binding。
 2. `/v2/network` 的 `tcpStun` 是独立的 `host:port` 列表。不能复用 UDP 的映射，更不能把 STUN TCP 探测误当成已经建立 TCP P2P。
 3. 原生端按 IPv4/IPv6 建立可复用源端口的 TCP listener，用同一端口连接 TCP STUN，并保留探测连接。局域网/全局 IPv6 的 host 候选与探测出的 srflx 候选通过加密信令交换。
 4. 双方保持监听，并从该源端口同时拨号对方候选。使用有界随机重试处理 SYN 时序；搜索最长 25 秒。不做端口预测或大范围扫描。

@@ -1,27 +1,33 @@
-# Include inside Nginx's http block (for example, conf.d/agenthub.conf).
-# Replace the certificate paths with your existing certificate files.
-map $http_upgrade $agenthub_connection_upgrade {
+# Include inside Nginx's http block; replace certificate paths before loading.
+map $http_upgrade $reignhub_connection_upgrade {
     default upgrade;
-    ''      close;
+    '' close;
 }
 
 server {
     listen 443 ssl;
-    server_name ras.lihuipeng.love;
+    server_name reignhub.example.com;
+    ssl_certificate /etc/letsencrypt/live/reignhub.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/reignhub.example.com/privkey.pem;
 
-    ssl_certificate /etc/letsencrypt/live/ras.lihuipeng.love/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/ras.lihuipeng.love/privkey.pem;
+    gzip on;
+    gzip_vary on;
+    gzip_min_length 1024;
+    gzip_types application/wasm application/javascript text/javascript application/json;
 
     location / {
-        proxy_pass http://127.0.0.1:26331;
+        proxy_pass http://127.0.0.1:26330;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection $agenthub_connection_upgrade;
+        proxy_set_header Connection $reignhub_connection_upgrade;
         proxy_read_timeout 3600s;
         proxy_send_timeout 3600s;
         proxy_buffering off;
     }
 }
 
-# TCP and UDP STUN use 26330 directly; ordinary HTTP proxying does not forward them.
+# Both TCP and UDP 26331 are STUN probes, exposed directly (not HTTP proxy).
+# Behind this proxy, use --listen 127.0.0.1:26330.

@@ -331,7 +331,7 @@ func mergeLatest(old, latest Object) Object {
 	return out
 }
 
-// Event offsets are UTF-16, matching Codex and the existing Flutter client.
+// Event offsets are UTF-16, matching Codex and the shared event protocol.
 // Snapshots can already contain an event; overlap must be idempotent.
 func applyEvents(source Object, events []Object) (Object, bool) {
 	if len(events) == 0 {

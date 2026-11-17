@@ -7,16 +7,16 @@ description: Run native, Web and Worker clients with isolated data.
 
 Use Git, Node.js 24 and pnpm 10.34.5. Go versions are specified by the root and native-module go.mod files. NSGo needs platform toolchains: run doctor first and install only your target platforms' tools.
 
-| Path                   | Responsibility                                           |
-| ---------------------- | -------------------------------------------------------- |
-| `apps/site`            | Website, Fumadocs and Web routes                         |
-| `packages/account-ui`  | Website account and administration UI                                       |
-| `packages/client-sdk`  | Pairing, encrypted RPC, direct connections and IndexedDB |
-| `packages/protocol`    | TypeScript connection and entitlement interfaces         |
-| `packages/worker-core` | Self-hosted Worker, D1 and DO                            |
-| `clients/nsgo`         | Shared controller UI, host capabilities and platform builds         |
-| `internal`             | Go providers, networking and local storage               |
-| `cmd/reignhub-probe`      | Optional public TCP/UDP probe                            |
+| Path                   | Responsibility                                              |
+| ---------------------- | ----------------------------------------------------------- |
+| `apps/site`            | Website, Fumadocs and Web routes                            |
+| `packages/account-ui`  | Website account and administration UI                       |
+| `packages/client-sdk`  | Pairing, encrypted RPC, direct connections and IndexedDB    |
+| `packages/protocol`    | TypeScript connection and entitlement interfaces            |
+| `packages/worker-core` | Self-hosted Worker, D1 and DO                               |
+| `clients/nsgo`         | Shared controller UI, host capabilities and platform builds |
+| `internal`             | Go providers, networking and local storage                  |
+| `cmd/reignhub-probe`   | Optional public TCP/UDP probe                               |
 
 ## Web and local Worker
 
@@ -29,7 +29,7 @@ pnpm exec wrangler d1 migrations apply DB --local
 pnpm exec wrangler dev --port 8787
 ```
 
-Open `http://localhost:8787/chat`. For website/docs only, use `pnpm dev`; full connection testing and browser language selection need the Worker environment above. English pages have no language prefix; Chinese pages use `/zh-CN`. Set `SITE_URL` at build time to test absolute SEO metadata.
+Open `http://localhost:8787/chat`. This Worker includes only the console and service. For the official website/docs, use `pnpm dev:site`. To verify website routing and browser language selection, run `pnpm build:site`, apply local D1 migrations with `--config apps/site/wrangler.jsonc`, then start Wrangler with that same config. English pages have no language prefix; Chinese pages use `/zh-CN`. Set `SITE_URL` for website SEO checks.
 
 ## Native UI
 
@@ -39,7 +39,14 @@ go tool nsgo doctor
 AGENTHUB_NSGO_DEMO=1 go tool nsgo dev
 ```
 
-Demo mode uses isolated data without real agents. Native builds use `./scripts/build.sh`.
+Demo mode uses isolated data without real agents. Build native and Web clients from the repository root:
+
+```sh
+cd ../..
+./scripts/build.sh macos_arm64,web
+```
+
+The root `scripts/build.sh` selects the NSGo module automatically. Default artifacts go to root `dist/`; archives go to `dist/releases/`. For `-output DIR`, relative paths are resolved from your current directory.
 
 ## Checks and tests
 

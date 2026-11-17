@@ -62,7 +62,7 @@ func linuxWindowControls(cx *core.Scope) []core.Node {
 			Style:   core.Style{Width: core.Pt(28), Height: core.Pt(28), Margin: core.Edges{Right: 6}, CornerRadius: 14, AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter, FlexShrink: 0},
 			StyleFunc: func() core.Style {
 				c := palette(cx)
-				return core.Style{Color: c.foreground, Background: c.selected, Hover: &core.Style{Background: c.border}, FocusVisible: &core.Style{OutlineWidth: 2, OutlineColor: c.accent}}
+				return core.Style{Color: c.foreground, Background: c.selected, Hover: &core.Style{Background: c.border}, Active: &core.Style{Opacity: core.Alpha(.65)}, FocusVisible: &core.Style{OutlineWidth: 2, OutlineColor: c.accent}}
 			},
 			Children: []core.Node{core.Icon{SVG: icon(), Style: core.Style{Width: core.Pt(14), Height: core.Pt(14)}}},
 		}

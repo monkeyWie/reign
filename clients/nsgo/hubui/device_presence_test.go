@@ -54,7 +54,7 @@ func TestDeviceListShowsServerPresenceWithoutConnecting(t *testing.T) {
 	app.WaitFor("text:请在被控电脑的 ReignHub 中允许此次连接", time.Second)
 	f.finish <- errors.New("被控设备离线")
 	app.WaitFor("text:被控电脑不在线", time.Second)
-	app.Press("id:connection-done")
+	app.Press("id:dialog-connection-status-close")
 	if !app.Exists("id:session-sidebar") || f.calls.Load() != 1 {
 		t.Fatal("failed connection discarded cached page or retried")
 	}

@@ -7,9 +7,9 @@
     "@reignhub/worker-core": "workspace:*"
   },
   "scripts": {
-    "dev": "wrangler dev --port 18787",
+    "dev": "node ../../scripts/platform/build-console.mjs --self-hosted && wrangler dev --port 18787",
     "deploy": "wrangler d1 migrations apply DB --remote && wrangler deploy",
-    "build": "wrangler deploy --dry-run --outdir dist",
+    "build": "node ../../scripts/platform/build-console.mjs --self-hosted && wrangler deploy --dry-run --outdir ../../build/worker",
     "check": "tsc --noEmit"
   }
 }

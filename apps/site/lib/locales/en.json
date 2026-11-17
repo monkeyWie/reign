@@ -70,7 +70,7 @@
   "原生端通过 Pion WebRTC 尝试 UDP 数据通道，同时尝试原生 TCP 打洞；浏览器使用标准 RTCPeerConnection。公共与可选自建 STUN 并行收集候选。": "Native clients use Pion WebRTC for UDP data channels while also attempting native TCP hole punching. Browsers use RTCPeerConnection. Public and optional self-hosted STUN gather candidates in parallel.",
   "原生 TCP": "Native TCP",
   "一个地址，发现能力": "One URL discovers capabilities",
-  "客户端只填服务根地址，探测地址从 /p2p/config 下发。可选 Go 探测器在同一 26330 端口监听 TCP 和 UDP。": "Clients need only the service root URL. Probe endpoints come from /p2p/config. The optional Go probe listens on TCP and UDP port 26330.",
+  "客户端只填服务根地址，探测地址从 /p2p/config 下发。可选 Go 探测器在同一 26331 端口监听 TCP 和 UDP。": "Clients need only the service root URL. Probe endpoints come from /p2p/config. The optional Go probe listens on TCP and UDP port 26331.",
   "阅读连接策略": "Read the connection strategy",
   "一个 Worker，协调所有连接。": "One Worker coordinates your devices.",
   "Cloudflare Worker 承载网站、Web 客户端和 /p2p/*。Durable Objects 为设备房间提供有状态协调与可休眠 WebSocket，D1 持久化设备与配对元数据。": "Cloudflare Workers host the website, Web client and /p2p/*. Durable Objects coordinate device rooms with hibernating WebSockets; D1 persists device and pairing metadata.",

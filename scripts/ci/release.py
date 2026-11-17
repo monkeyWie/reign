@@ -27,6 +27,12 @@ def desktop_assets(v):
             for t in DESKTOP for suffix in desktop_suffixes(t)]
 
 
+def server_assets(v):
+    archives = [f'reignhub-server-{v}-{o}-{a}' + ('.zip' if o == 'windows' else '.tar.gz')
+                for o in ('linux', 'darwin', 'windows') for a in ('amd64', 'arm64')]
+    return archives + [f'reignhub-server-packaging-{v}.tar.gz']
+
+
 def digest(path):
     h = hashlib.sha256()
     with path.open('rb') as f:
@@ -104,6 +110,7 @@ def verify(args):
         raise SystemExit('Expected exactly one Android APK')
     expected += [apks[0].name]
     expected += [f'reignhub-probe-{args.version}-linux-{arch}.tar.gz' for arch in ('amd64', 'arm64')]
+    expected += server_assets(args.version)
     actual = {p.name for p in output.iterdir() if p.is_file() and p.suffix != '.sha256' and p.name != 'SHA256SUMS'}
     if actual != set(expected):
         raise SystemExit(f'Release assets differ: missing={set(expected) - actual}, unexpected={actual - set(expected)}')

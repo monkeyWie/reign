@@ -82,6 +82,7 @@ func (s *State) loadCatalogue(ctx context.Context, cancel context.CancelFunc, ge
 			return
 		}
 		s.polling = false
+		s.manualRefresh = false
 		s.pollCancel = nil
 		s.setConnectionIssue(target, "catalogue", err)
 		s.changed()

@@ -1,18 +1,18 @@
 # P2P 技术选型复核（2026-11-10）
 
-本文保留早期选型记录；最新产品采用 Flutter + Go，Web 直接使用浏览器 WebRTC，无需 Wasm。P2P 与 relay 是独立于设备 ID / 授权的传输能力，不再以全部网络服务必须运行在 CF Worker 为前提。当前方向见 [产品 v2 基准](product-v2.md)。
+本文保留 2026-11-10 的网络选型记录，不是待实施路线。当前客户端采用 NSGo + Go，Web 使用 Go WASM + DOM 并接入浏览器 WebRTC；服务可部署 Go 或 Cloudflare Worker。当前实现见 [后端架构](engineering/architecture.md) 与 [连接协议](platform/protocol.md)。
 
 WebRTC DataChannel 是成熟的通用方案，原生 Go 中通过 Pion 调用 ICE / DTLS / SCTP，不依赖浏览器或 WebView。当前 MVP 选择它，是为了在纯 Go 客户端中获得现成的 NAT traversal 与可靠双向消息，而不是因为原生应用只能用 WebRTC。
 
 本产品以桌面/未来手机原生端为主，应区分协议成熟度、具体 SDK 稳定性和自主部署难度。
 
-| 候选 | 适合之处 | 主要取舍 |
-|---|---|---|
-| Tailscale / tsnet | 成熟的 WireGuard、网络发现、NAT traversal、DERP 回退；tsnet 可以嵌入 Go 应用 | 有 tailnet 身份与控制面模型，需要设计用户加入和管理方式；不是把任意 WSS 地址填作 DERP 即可 |
-| Tailcat | Tailscale 官方开源，Go library；复用 magicsock / WireGuard / DERP，不要求 Tailscale 账户，也不需要 root 或修改系统路由 | 项目较新，官方明确不承诺 Go API、CLI 或 wire format 稳定；公共 relay 也无 SLA，须固定版本与实测 |
-| Iroh | 面向原生应用的 QUIC、打洞、relay、密钥身份；Rust 核心和 Swift/Kotlin 等官方绑定适合移动端 | Go 为社区 FFI 绑定，官方表列平台覆盖明显有限；当前 MyGo Go 客户端引入 Rust / FFI 需要额外维护 |
-| go-libp2p | Go 原生，QUIC/TCP、Circuit Relay、DCUtR，网络协议组件完整 | 需配置 relay、发现、资源限制等；对小型 Agent RPC 产品集成面更大 |
-| Pion WebRTC | 当前已集成；原生 Go；与 WSS 信令、应用 relay 能清晰分离 | ICE / SDP / DataChannel 状态要管理；当前代码的重连、切网、移动后台恢复尚需产品级完善 |
+| 候选              | 适合之处                                                                                                               | 主要取舍                                                                                        |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Tailscale / tsnet | 成熟的 WireGuard、网络发现、NAT traversal、DERP 回退；tsnet 可以嵌入 Go 应用                                           | 有 tailnet 身份与控制面模型，需要设计用户加入和管理方式；不是把任意 WSS 地址填作 DERP 即可      |
+| Tailcat           | Tailscale 官方开源，Go library；复用 magicsock / WireGuard / DERP，不要求 Tailscale 账户，也不需要 root 或修改系统路由 | 项目较新，官方明确不承诺 Go API、CLI 或 wire format 稳定；公共 relay 也无 SLA，须固定版本与实测 |
+| Iroh              | 面向原生应用的 QUIC、打洞、relay、密钥身份；Rust 核心和 Swift/Kotlin 等官方绑定适合移动端                              | Go 为社区 FFI 绑定，官方表列平台覆盖明显有限；当前 MyGo Go 客户端引入 Rust / FFI 需要额外维护   |
+| go-libp2p         | Go 原生，QUIC/TCP、Circuit Relay、DCUtR，网络协议组件完整                                                              | 需配置 relay、发现、资源限制等；对小型 Agent RPC 产品集成面更大                                 |
+| Pion WebRTC       | 当前已集成；原生 Go；与 WSS 信令、应用 relay 能清晰分离                                                                | ICE / SDP / DataChannel 状态要管理；当前代码的重连、切网、移动后台恢复尚需产品级完善            |
 
 ## 建议
 

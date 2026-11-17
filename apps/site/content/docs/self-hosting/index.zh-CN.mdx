@@ -1,15 +1,20 @@
 ---
 title: 自建服务概览
-description: 一个 Cloudflare Worker，提供 Web、信令和自己的加密中继。
+description: 选择独立 Go 服务或 Cloudflare Worker 部署。
 ---
 
 ## 你会部署什么
 
-开源部署包括官网、文档、Web 控制端 `/chat`、连接协议 `/p2p/*`、D1 数据库和设备房间 Durable Object。无需账号体系、OAuth 或支付配置，也不执行官方商业套餐额度。
+可选独立 Go 服务（本地 SQLite、内置 TCP/UDP 探测）或 Cloudflare Worker（D1、Durable Objects），两者提供相同的配对与加密传输接口。两种部署均只内嵌 Web 控制台，根地址跳转 `/chat/`；官网与文档通过独立官方 CI 构建与发布。
 
-你只需要 Cloudflare 账号。默认的 `workers.dev` 地址自带 HTTPS，不要求购买域名，也不强制购买公网服务器。
+Cloudflare 部署仅包括 Web 控制端 `/chat`、连接协议 `/p2p/*`、D1 数据库和设备房间 Durable Object。无需账号体系、OAuth 或支付配置，也不执行官方商业套餐额度。
+
+选择 Worker 时需要 Cloudflare 账号。默认的 `workers.dev` 地址自带 HTTPS，不要求购买域名，也不强制购买公网服务器。
 
 <Cards>
+  <Card title="部署 Go 服务" href="/docs/self-hosting/go">
+    单二进制或 Docker Compose，本地 SQLite，默认开启全部功能。
+  </Card>
   <Card title="部署到 Cloudflare" href="/docs/self-hosting/cloudflare">
     从一键入口或命令行开始。
   </Card>
@@ -29,4 +34,4 @@ description: 一个 Cloudflare Worker，提供 Web、信令和自己的加密中
 
 ## 客户端怎么配置
 
-所有端填写同一个 Worker 根地址，例如 `https://reignhub.example.workers.dev`。Web 就是该地址下的 `/chat`。探测器地址由服务下发，不需要再配置第二个地址栏。
+所有端填写同一个 Go 服务或 Worker 根地址，例如 `https://reignhub.example.workers.dev`。Web 就是该地址下的 `/chat`。探测器地址由服务下发，不需要再配置第二个地址栏。

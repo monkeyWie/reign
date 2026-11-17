@@ -15,15 +15,15 @@ Use the Go version in `go.mod`, or Linux amd64/arm64 probe artifacts when availa
 
 ```sh
 go build -o reignhub-probe ./cmd/reignhub-probe
-./reignhub-probe --listen :26330
+./reignhub-probe --listen :26331
 ```
 
 Allow both in the server firewall and cloud security group:
 
 | Port  | Protocol | Purpose                                    |
 | ----- | -------- | ------------------------------------------ |
-| 26330 | UDP      | STUN Binding / mapped-address discovery    |
-| 26330 | TCP      | Native TCP probe and hole-punch candidates |
+| 26331 | UDP      | STUN Binding / mapped-address discovery    |
+| 26331 | TCP      | Native TCP probe and hole-punch candidates |
 
 An ordinary Nginx HTTP proxy cannot forward these protocols. Use **DNS only** for the probe hostname, without Cloudflare's HTTP proxy.
 
@@ -32,8 +32,8 @@ An ordinary Nginx HTTP proxy cannot forward these protocols. Use **DNS only** fo
 Set Worker variables and redeploy:
 
 ```text
-SELF_STUN=stun:probe.example.com:26330
-TCP_STUN=probe.example.com:26330
+SELF_STUN=stun:probe.example.com:26331
+TCP_STUN=probe.example.com:26331
 ```
 
 Clients still configure only the Worker HTTPS URL. `/p2p/config` publishes these endpoints.

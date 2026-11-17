@@ -1,0 +1,28 @@
+---
+title: Engineering standards
+description: Shared architecture, design and maintenance rules for both service runtimes and all controllers.
+---
+
+ReignHub uses one public service contract implemented by Go and Cloudflare Worker. Public API and behavior changes require reviewing both implementations, updating affected code and validating both deployments. Runtime details such as SQLite versus D1/Durable Objects can differ; an internal change does not require an artificial edit to the other implementation.
+
+## Repository knowledge base
+
+Start with [AGENTS.md](https://github.com/monkeyWie/reignhub/blob/main/AGENTS.md) and the [engineering index](https://github.com/monkeyWie/reignhub/blob/main/docs/engineering/README.md). These files are maintained with code and provide the authoritative contribution rules:
+
+| Topic                                                  | Reference                                                                                                |
+| ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------- |
+| Controller, host, Provider and service boundaries      | [Backend architecture](https://github.com/monkeyWie/reignhub/blob/main/docs/engineering/architecture.md) |
+| Common API and runtime differences                     | [Go/Worker parity](https://github.com/monkeyWie/reignhub/blob/main/docs/engineering/service-parity.md)   |
+| Themes, icons, loading, messages and platform behavior | [Frontend design](https://github.com/monkeyWie/reignhub/blob/main/docs/engineering/frontend-design.md)   |
+| Errors, concurrency, storage and privacy               | [Code standards](https://github.com/monkeyWie/reignhub/blob/main/docs/engineering/code-standards.md)     |
+| Checks, isolated fixtures and coverage limits          | [Validation](https://github.com/monkeyWie/reignhub/blob/main/docs/engineering/validation.md)             |
+| Failure symptoms, recovery and regression references   | [Troubleshooting](https://github.com/monkeyWie/reignhub/blob/main/docs/engineering/troubleshooting.md)   |
+| Cross-cutting choices and their rationale              | [Architecture decisions](https://github.com/monkeyWie/reignhub/blob/main/docs/engineering/decisions.md)  |
+
+Repository instructions and engineering references use English; public user documentation retains its supported translations. This page is a navigation guide; keeping full rules in the repository avoids maintaining divergent copies.
+
+## Review expectations
+
+PRs describe the problem, resulting behavior, checks actually run and remaining limits. For public service changes, explain how both runtimes satisfy the contract, including when one needs no code edit. UI changes include relevant light/dark and desktop/narrow-screen evidence. Update the corresponding knowledge page when changing a shared rule or recovery behavior.
+
+Use isolated Agent fixtures and temporary databases. Do not change real conversations as test data. Builds, fixture tests and real vendor integration checks provide different evidence; report them separately. Existing shared smoke tests exercise both services but do not cover every endpoint or failure combination.

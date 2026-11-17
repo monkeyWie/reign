@@ -1,0 +1,99 @@
+{
+  "scope": "Offline installed handler registration + isolated Unix socket. Executor is synthetic; no live App/model calls.",
+  "manifest": {
+    "appVersion": "26.1106.51428",
+    "sourceAsset": "app-source/.vite/build/early-bootstrap-631-9880b56d55f301d1.js",
+    "sourceSha256": "bce29a615bb1ab7019b9db27acdff7018ddaae8a2c7d6ede4b6c983b01f90ebe",
+    "extractedSha256": "9c2be27e3887a7c5324dd96a7cf46745e2e0301abad53c4d0604078bbe07c242",
+    "scope": "Offline evaluation of installed owner handler registration; no live App access"
+  },
+  "registeredMethods": [
+    "thread-owner-discovery",
+    "thread-follower-start-turn",
+    "thread-follower-load-complete-history",
+    "thread-follower-compact-thread",
+    "thread-follower-steer-turn",
+    "thread-follower-interrupt-turn",
+    "thread-follower-update-thread-settings",
+    "thread-follower-update-daybreak",
+    "thread-follower-read-model-settings",
+    "thread-follower-edit-last-user-turn",
+    "thread-follower-command-approval-decision",
+    "thread-follower-file-approval-decision",
+    "thread-follower-permissions-request-approval-response",
+    "thread-follower-submit-user-input",
+    "thread-follower-submit-mcp-server-elicitation-response",
+    "thread-follower-set-queued-follow-ups-state",
+    "thread-follower-remove-queued-message",
+    "thread-follower-clear-queued-messages"
+  ],
+  "registeredCount": 18,
+  "results": [
+    {
+      "name": "isolated socket initialized",
+      "passed": true
+    },
+    {
+      "name": "installed discovery handler accepts held thread",
+      "passed": true
+    },
+    {
+      "name": "installed discovery handler rejects unknown thread",
+      "passed": true
+    },
+    {
+      "name": "installed discovery handler rejects wrong host",
+      "passed": true
+    },
+    {
+      "name": "thread-follower-start-turn forwarded by installed handler",
+      "passed": true
+    },
+    {
+      "name": "thread-follower-interrupt-turn forwarded by installed handler",
+      "passed": true
+    },
+    {
+      "name": "thread-follower-command-approval-decision forwarded by installed handler",
+      "passed": true
+    },
+    {
+      "name": "thread-follower-load-complete-history forwarded by installed handler",
+      "passed": true
+    },
+    {
+      "name": "thread-follower-set-queued-follow-ups-state forwarded by installed handler",
+      "passed": true
+    },
+    {
+      "name": "thread/list has no installed owner handler",
+      "passed": true
+    },
+    {
+      "name": "thread/read has no installed owner handler",
+      "passed": true
+    },
+    {
+      "name": "thread/search has no installed owner handler",
+      "passed": true
+    },
+    {
+      "name": "thread/start has no installed owner handler",
+      "passed": true
+    },
+    {
+      "name": "thread/turns/list has no installed owner handler",
+      "passed": true
+    }
+  ],
+  "passed": 14,
+  "failed": 0,
+  "capabilitiesNotVerified": [
+    "real App discovery",
+    "real message execution",
+    "real snapshot/patch contents",
+    "cross-window input",
+    "model execution",
+    "complete App workflow"
+  ]
+}

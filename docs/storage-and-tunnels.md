@@ -1,16 +1,16 @@
 # 数据与 Cloudflare 备用线路
 
-当前 UI 是 NSGo，业务与连接核心是 Go；Flutter / CF Worker 目录仅保留历史原型。
+当前 UI 是 NSGo，业务与连接核心是 Go；服务同时维护 Go 和 Cloudflare Worker 两种实现。当前部署与协议以 [自部署](platform/self-hosting.md) 和 [双服务一致性](engineering/service-parity.md) 为准；下文 Cloudflare Tunnel 章节是早期备用线路方案，不是 Worker 部署的必要依赖。
 
 ## 存储
 
-| 位置 | 格式与内容 |
-| --- | --- |
-| 原生端 `settings.db` | SQLite：服务地址、设备名、界面/连接配置 |
-| 原生端 `identity.db` | SQLite：被控设备身份、密码哈希、配对授权 |
-| 原生端既有缓存数据库 | SQLite：控制设备、会话、增量游标与附件索引 |
-| Web | IndexedDB：身份、设备、消息和附件缓存；不再加载 SQLite WASM |
-| 自部署服务 `data/reignhub.db` | GORM + SQLite：设备、令牌哈希、授权、服务身份 |
+| 位置                          | 格式与内容                                                  |
+| ----------------------------- | ----------------------------------------------------------- |
+| 原生端 `settings.db`          | SQLite：服务地址、设备名、界面/连接配置                     |
+| 原生端 `identity.db`          | SQLite：被控设备身份、密码哈希、配对授权                    |
+| 原生端既有缓存数据库          | SQLite：控制设备、会话、增量游标与附件索引                  |
+| Web                           | IndexedDB：身份、设备、消息和附件缓存；不再加载 SQLite WASM |
+| 自部署服务 `data/reignhub.db` | GORM + SQLite：设备、令牌哈希、授权、服务身份               |
 
 原生 SQLite 使用纯 Go 驱动，开启 WAL、忙等待、限制文件权限。服务不会保存客户端的原始设备 token 或端到端会话密钥。JSON 旧配置可读入，但新的写入进入 SQLite；不删除旧文件。服务端旧 JSON registry 不做自动迁移，需换新的数据库路径和重新登记。
 

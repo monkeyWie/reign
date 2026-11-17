@@ -87,7 +87,7 @@ func TestAutomaticConnectionErrorsUseStatusInsteadOfOverlay(t *testing.T) {
 	if app.Exists("id:connection-error-raw") || app.Exists("id:error-banner") {
 		t.Fatal("recovered connection retained an error")
 	}
-	app.Press("id:connection-done")
+	app.Press("id:dialog-connection-status-close")
 	if app.Find("id:chat-input").Text != "保留草稿" || f.sends.Load() != 0 {
 		t.Fatalf("recovery changed or sent the draft: text=%q sends=%d", app.Find("id:chat-input").Text, f.sends.Load())
 	}

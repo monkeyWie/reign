@@ -1,4 +1,4 @@
-// Package bridge is a JSON request boundary for Flutter FFI and gomobile.
+// Package bridge is the in-process JSON request boundary for native controllers.
 package bridge
 
 import (
@@ -45,7 +45,7 @@ func embeddedHost(dir, uiPath string) (*app.Embedded, error) {
 			return nil, err
 		}
 	}
-	// The lifetime belongs to the application, never to a short-lived FFI call.
+	// The lifetime belongs to the application, never to a short-lived UI call.
 	h, err := app.StartEmbedded(context.Background(), c)
 	if err != nil {
 		return nil, err
@@ -209,7 +209,7 @@ func CallContext(parent context.Context, raw string) string {
 			return answer(nil, err)
 		}
 		if in.Method == "host.bootstrap" {
-			out = map[string]any{"ready": true, "pid": os.Getpid(), "transport": "ffi"}
+			out = map[string]any{"ready": true, "pid": os.Getpid(), "transport": "embedded"}
 		} else {
 			r := in.Request
 			r.Method = in.Method

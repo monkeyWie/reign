@@ -1,3 +1,4 @@
+export { handleConsole } from "./console";
 import { drizzle } from "drizzle-orm/d1";
 import { and, eq, gt, inArray } from "drizzle-orm";
 import { APIError, PROTOCOL, routes, type Device } from "@reignhub/protocol";

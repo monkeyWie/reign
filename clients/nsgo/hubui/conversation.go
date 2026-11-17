@@ -22,10 +22,10 @@ func (s *State) conversation(cx *core.Scope, narrow bool) core.Node {
 	floatingHeader := s.width.GetUntracked() < wideBreakpoint
 	header := []core.Node{}
 	if narrow {
-		header = append(header, button(cx, "back-sessions", "", lucide.ArrowLeft, "ghost", s.backSessions))
+		header = append(header, labelledIconButton(cx, "back-sessions", "返回会话列表", lucide.ArrowLeft, s.backSessions))
 	}
 	header = append(header, core.View{Style: core.Style{FlexGrow: 1, FlexShrink: 1, Gap: 4}, Children: []core.Node{singleLine(cx, func() string { s.read(); return str(s.selected, "title") }, 14, false), singleLine(cx, func() string { s.read(); return str(s.selected, "cwd") }, 11, true)}})
-	header = append(header, s.connectionIndicator(cx, func() string { return s.target }), glyph(cx, sessionIcon(s.selected), 18), button(cx, "attachment-cache", "", lucide.HardDrive, "ghost", func() { s.dialog.Set("clear-cache") }))
+	header = append(header, s.connectionIndicator(cx, func() string { return s.target }), glyph(cx, sessionIcon(s.selected), 18), labelledIconButton(cx, "attachment-cache", "管理附件缓存", lucide.HardDrive, func() { s.dialog.Set("clear-cache") }))
 	if !floatingHeader {
 		children = append(children, core.View{TestID: "conversation-header", Style: core.Style{Padding: core.Symmetric(16, 20)}, StyleFunc: func() core.Style { return core.Style{BorderColor: palette(cx).border} }, Children: []core.Node{row(header...)}})
 	}
@@ -76,10 +76,17 @@ func (s *State) conversation(cx *core.Scope, narrow bool) core.Node {
 		}
 		return n
 	}
+	tailKey := func(i int) string {
+		s.read()
+		if i < len(s.approvals) {
+			return "approval:" + str(s.approvals[i], "id")
+		}
+		return "thinking"
+	}
 	list := core.List{TestID: "chat-message-list", Ref: listRef, Inverted: true, EstimatedSize: 120, Style: fill, Count: func() int { return len(rows.Get()) + tailCount() }, Key: func(i int) any {
 		offset := tailCount()
 		if i < offset {
-			return fmt.Sprint("tail-", i)
+			return tailKey(i)
 		}
 		return rows.Get()[i-offset].ID
 	},
@@ -101,7 +108,7 @@ func (s *State) conversation(cx *core.Scope, narrow bool) core.Node {
 				i := r.Index()
 				offset := tailCount()
 				if i < offset {
-					return fmt.Sprint("tail-", i)
+					return tailKey(i)
 				}
 				v := rows.Get()
 				if i-offset < len(v) {
@@ -111,7 +118,7 @@ func (s *State) conversation(cx *core.Scope, narrow bool) core.Node {
 			})
 			return core.Dynamic(func(cx *core.Scope) core.Node {
 				id := key.Get()
-				if strings.HasPrefix(id, "tail-") {
+				if strings.HasPrefix(id, "approval:") || id == "thinking" {
 					i := core.Untracked(cx, r.Index)
 					if i < len(s.approvals) {
 						return s.approvalCard(cx, s.approvals[i])
@@ -129,7 +136,7 @@ func (s *State) conversation(cx *core.Scope, narrow bool) core.Node {
 				return s.messageInset(cx, s.message(cx, get))
 			})
 		}, Footer: core.View{TestID: "history-start-inset", Style: core.Style{Padding: core.Edges{Top: choose(floatingHeader, core.Points(88), core.Points(0))}}, Children: []core.Node{core.Show{When: func() bool { s.read(); return str(s.transcript, "nextCursor") != "" }, Then: func(cx *core.Scope) core.Node {
-			return button(cx, "load-older", "加载更早消息", nil, "ghost", s.older)
+			return busyButton(cx, "load-older", "加载更早消息", nil, "ghost", func() bool { return s.actionPending("history:" + s.key()) }, s.older)
 		}}}},
 	}
 	timelineChildren := []core.Node{list, s.emptyTranscript(cx), s.syncIndicator(cx), core.Show{When: func() bool { return !s.narrowLayout() }, Then: func(cx *core.Scope) core.Node { return s.messageNavigation(cx, rows, listRef, viewport, tailCount) }}, core.Show{When: func() bool { return !atBottom.Get() }, Then: func(cx *core.Scope) core.Node {
@@ -151,7 +158,7 @@ func (s *State) compactConversationHeader(cx *core.Scope, back bool) core.Node {
 	}
 	buttons := []core.Node{}
 	if back {
-		buttons = append(buttons, pill(button(cx, "back-sessions", "", lucide.ArrowLeft, "ghost", s.backSessions)))
+		buttons = append(buttons, pill(labelledIconButton(cx, "back-sessions", "返回会话列表", lucide.ArrowLeft, s.backSessions)))
 	}
 	buttons = append(buttons, core.View{TestID: "conversation-title-pill", Style: core.Style{FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0), Height: core.Pt(52), CornerRadius: 26, JustifyContent: core.JustifyCenter, Padding: core.Symmetric(6, 16), Gap: 2}, StyleFunc: func() core.Style { return core.Style{Background: palette(cx).background} }, Children: []core.Node{
 		singleLine(cx, func() string { s.read(); return str(s.selected, "title") }, 14, false),
@@ -163,7 +170,7 @@ func (s *State) compactConversationHeader(cx *core.Scope, back bool) core.Node {
 			}
 			return cwd
 		}, 11, true),
-	}}, pill(s.connectionIndicator(cx, func() string { return s.target }), button(cx, "attachment-cache", "", lucide.HardDrive, "ghost", func() { s.dialog.Set("clear-cache") })))
+	}}, pill(s.connectionIndicator(cx, func() string { return s.target }), labelledIconButton(cx, "attachment-cache", "管理附件缓存", lucide.HardDrive, func() { s.dialog.Set("clear-cache") })))
 	return core.View{TestID: "conversation-header", PointerEvents: core.PointerEventsBoxNone, Style: core.Style{Position: core.Absolute, Top: core.Pt(0), Left: core.Pt(0), Right: core.Pt(0), Height: core.Pt(100), ZIndex: 5}, Children: []core.Node{
 		core.View{TestID: "conversation-header-fade", PointerEvents: core.PointerEventsNone, Style: core.Style{Position: core.Absolute, Top: core.Pt(0), Bottom: core.Pt(0), Left: core.Pt(0), Right: core.Pt(0)}, StyleFunc: func() core.Style {
 			bg := palette(cx).background
@@ -203,16 +210,7 @@ func (s *State) message(cx *core.Scope, get func() Message) core.Node {
 	if user {
 		bodyWidth = core.Length{}
 	}
-	content := []core.Node{}
-	content = append(content, core.Each(func() []Object {
-		out := []Object{}
-		for _, a := range get().Attachments {
-			if str(a, "kind") == "image" && !flag(a, "inline") {
-				out = append(out, a)
-			}
-		}
-		return out
-	}, func(a Object) string { return str(a, "id") }, func(cx *core.Scope, a func() Object, _ func() int) core.Node { return s.imageTile(cx, get, a) }))
+	content := []core.Node{s.attachmentGallery(cx, get)}
 	bodyText := smoothReply(cx, func() string {
 		if user {
 			return strings.TrimRight(displayText(get()), " \t\r\n")
@@ -268,41 +266,12 @@ func (s *State) message(cx *core.Scope, get func() Message) core.Node {
 			return core.Style{Background: palette(cx).muted, CornerRadius: 16, Padding: core.Symmetric(10, 16)}
 		}
 		return core.Style{}
-	}, Children: []core.Node{core.Show{When: func() bool { return strings.TrimSpace(displayText(get())) != "" }, Then: func(*core.Scope) core.Node { return bodyContent }}, core.Each(func() []Object {
-		out := []Object{}
-		for _, a := range get().Attachments {
-			if str(a, "kind") != "image" && !flag(a, "inline") {
-				out = append(out, a)
-			}
-		}
-		return out
-	}, func(a Object) string { return str(a, "id") }, func(cx *core.Scope, a func() Object, _ func() int) core.Node { return s.fileTile(cx, a()) })}}
+	}, Children: []core.Node{bodyContent}}
 	var bubbleContent core.Node = bubble
 	if user {
 		bubbleContent = core.View{Style: core.Style{Direction: core.Row, Width: core.Pct(100), MinWidth: core.Pt(0), JustifyContent: core.JustifyEnd}, Children: []core.Node{bubble}}
 	}
-	// Images are a compact horizontal gallery above the bubble, not path text.
-	gallery := core.View{Style: core.Style{Direction: core.Row, Wrap: core.Wrap, Gap: 8, JustifyContent: choose(user, core.JustifyEnd, core.JustifyStart)}, Children: content}
-	content = []core.Node{core.Show{When: func() bool {
-		for _, a := range get().Attachments {
-			if str(a, "kind") == "image" && !flag(a, "inline") {
-				return true
-			}
-		}
-		return false
-	}, Then: func(*core.Scope) core.Node {
-		return core.View{Style: core.Style{Padding: core.Edges{Bottom: 12}}, Children: []core.Node{gallery}}
-	}}, core.Show{When: func() bool {
-		if strings.TrimSpace(displayText(get())) != "" {
-			return true
-		}
-		for _, a := range get().Attachments {
-			if str(a, "kind") != "image" && !flag(a, "inline") {
-				return true
-			}
-		}
-		return false
-	}, Then: func(*core.Scope) core.Node { return bubbleContent }}}
+	content = append(content, core.Show{When: func() bool { return strings.TrimSpace(displayText(get())) != "" }, Then: func(*core.Scope) core.Node { return bubbleContent }})
 	content = append(content, core.Show{When: func() bool { return get().Delivery != "" }, Then: func(cx *core.Scope) core.Node {
 		return core.View{TestID: "delivery-" + m.ID, Tooltip: dynamicText(cx, func() string { return get().DeliveryError }, 12, false), Style: core.Style{Padding: core.Edges{Top: 6}}, Children: []core.Node{core.Show{When: func() bool { return get().Delivery == "sending" }, Then: func(*core.Scope) core.Node {
 			return chat.Shimmer{Text: func() string { return "发送中…" }, Size: 11}
@@ -332,9 +301,23 @@ func (s *State) message(cx *core.Scope, get func() Message) core.Node {
 }
 func (s *State) activity(cx *core.Scope, get func() Message) core.Node {
 	open := core.NewSignal(cx, false)
+	hover := core.NewSignal(cx, false)
 	tools := func() []Object { return get().Tools }
 	title := func() string { return activityLabel(tools()) }
-	return core.View{TestID: "tool-group", Style: core.Style{Padding: core.Edges{Top: 10, Bottom: 10}, Gap: 8}, Children: []core.Node{core.View{Role: core.RoleButton, LabelFunc: title, OnPress: func(core.PressEvent) { open.Set(!open.Get()) }, Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 9, Padding: core.Symmetric(8, 0)}, Children: []core.Node{glyph(cx, lucide.Wrench, 16), core.Show{When: func() bool { return get().Live && s.connected() }, Then: func(*core.Scope) core.Node { return chat.Shimmer{Text: title, Size: 12} }, Else: func(cx *core.Scope) core.Node { return dynamicText(cx, title, 12, true) }}, core.Show{When: open.Get, Then: func(cx *core.Scope) core.Node { return glyph(cx, lucide.ChevronUp, 12) }}}}, core.Show{When: open.Get, Then: func(cx *core.Scope) core.Node {
+	color := func() core.Color {
+		if hover.Get() {
+			return palette(cx).foreground
+		}
+		return palette(cx).mutedText
+	}
+	icon := core.Icon{SVG: lucide.Wrench(), Style: core.Style{Width: core.Pt(16), Height: core.Pt(16), FlexShrink: 0}, StyleFunc: func() core.Style { return core.Style{Color: color()} }}
+	return core.View{TestID: "tool-group", Style: core.Style{Padding: core.Edges{Top: 10, Bottom: 10}, Gap: 8}, Children: []core.Node{core.View{TestID: "tool-group-toggle", Role: core.RoleButton, LabelFunc: title, OnMouseEnter: func(core.MouseEvent) { hover.Set(true) }, OnMouseLeave: func(core.MouseEvent) { hover.Set(false) }, OnPress: func(core.PressEvent) { open.Set(!open.Get()) }, Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 9, Padding: core.Symmetric(8, 0), CornerRadius: 8}, StyleFunc: func() core.Style {
+		return core.Style{Active: &core.Style{Opacity: core.Alpha(.65)}, FocusVisible: &core.Style{OutlineWidth: 2, OutlineColor: palette(cx).accent}}
+	}, Children: []core.Node{icon, core.Show{When: func() bool { return get().Live && s.connected() }, Then: func(*core.Scope) core.Node { return chat.Shimmer{Text: title, Size: 12, Color: color} }, Else: func(cx *core.Scope) core.Node {
+		text := dynamicText(cx, title, 12, true)
+		text.StyleFunc = func() core.Style { return core.Style{Color: color()} }
+		return text
+	}}, core.Show{When: open.Get, Then: func(cx *core.Scope) core.Node { return glyph(cx, lucide.ChevronUp, 12) }}}}, core.Show{When: open.Get, Then: func(cx *core.Scope) core.Node {
 		return core.List{Count: func() int { return len(tools()) }, EstimatedSize: 36, StyleFunc: func() core.Style {
 			return core.Style{Height: core.Pt(core.Points(min(8, len(tools()))) * 44), MaxHeight: core.Pt(352)}
 		}, Row: func(cx *core.Scope, r core.ListRow) core.Node {
@@ -368,7 +351,7 @@ func (s *State) composer(cx *core.Scope) core.Node {
 		return string(b) + "|" + s.model + "|" + fmt.Sprint(activeTurn(s.transcript) != nil)
 	})
 	running := func() bool { s.read(); return s.connected() && activeTurn(s.transcript) != nil }
-	disabled := func() bool { s.read(); return s.busy || !s.connected() }
+	disabled := func() bool { s.read(); return !s.connected() }
 	submit := core.SubmitBehaviorSubmit
 	if isMobile(cx) {
 		submit = core.SubmitBehaviorNewline
@@ -391,11 +374,9 @@ func (s *State) composer(cx *core.Scope) core.Node {
 			return core.Style{Height: core.Pt(inputHeight.Get()), Color: c.foreground, PlaceholderColor: c.mutedText}
 		}},
 		core.View{Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 10}, Children: []core.Node{core.Show{When: func() bool { return s.agentCapability("imageInput") || s.agentCapability("fileInput") }, Then: func(cx *core.Scope) core.Node {
-			return button(cx, "attach-files", "", lucide.Plus, "ghost", func() {
-				if !disabled() {
-					s.chooseFiles(cx)
-				}
-			})
+			v := labelledIconButton(cx, "attach-files", "添加附件", lucide.Plus, func() { s.chooseFiles(cx) }).(core.View)
+			v.Disabled = disabled
+			return v
 		}}, spacer(), core.Dynamic(func(cx *core.Scope) core.Node {
 			_ = modelCatalog.Get()
 			options := []chat.Option{}
@@ -433,22 +414,29 @@ func (s *State) composer(cx *core.Scope) core.Node {
 				return "Agent 默认模型"
 			}, Options: options, Selected: func() string { s.read(); return s.model }, OnChange: func(id string) { s.model = id; s.changed() }, Width: 300, SearchLabel: "搜索模型"}}}
 		}), core.Show{When: func() bool { return running() && s.agentCapability("interrupt") }, Then: func(cx *core.Scope) core.Node {
-			return core.View{TestID: "interrupt-generation", Role: core.RoleButton, Label: "停止生成", Tooltip: label(cx, "停止生成", 12, false), OnPress: func(core.PressEvent) { s.send("interrupt") }, Style: core.Style{Width: core.Pt(36), Height: core.Pt(36), CornerRadius: 18, FlexShrink: 0, AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter}, StyleFunc: func() core.Style {
-				return core.Style{Background: palette(cx).foreground}
-			}, Children: []core.Node{core.View{Style: core.Style{Width: core.Pt(11), Height: core.Pt(11), CornerRadius: 2}, StyleFunc: func() core.Style { return core.Style{Background: palette(cx).background} }}}}
+			return core.View{TestID: "interrupt-generation", Role: core.RoleButton, Label: "停止生成", Tooltip: label(cx, "停止生成", 12, false), Busy: func() bool { return s.pendingSend() == "interrupt" }, Disabled: func() bool { return !s.connected() || s.pendingSend() != "" }, OnPress: func(core.PressEvent) { s.send("interrupt") }, Style: core.Style{Width: core.Pt(36), Height: core.Pt(36), CornerRadius: 18, FlexShrink: 0, AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter}, StyleFunc: func() core.Style {
+				return pressStyle(cx).Merge(core.Style{Background: palette(cx).foreground, Active: &core.Style{Opacity: core.Alpha(.65)}})
+			}, Children: []core.Node{core.Show{When: func() bool { return s.pendingSend() == "interrupt" }, Then: func(cx *core.Scope) core.Node {
+				theme := *cx.Theme()
+				theme.Light.TextMuted, theme.Dark.TextMuted = theme.Light.Background, theme.Dark.Background
+				cx.SetTheme(&theme)
+				return actionSpinner(cx, "interrupt-loading", "正在停止生成", false, 18)
+			}, Else: func(cx *core.Scope) core.Node {
+				return core.View{Style: core.Style{Width: core.Pt(11), Height: core.Pt(11), CornerRadius: 2}, StyleFunc: func() core.Style { return core.Style{Background: palette(cx).background} }}
+			}}}}
 		}}, core.View{TestID: "send-message", Role: core.RoleButton, LabelFunc: func() string {
-			if s.pendingSend() != "" {
+			if s.pendingSend() != "" && s.pendingSend() != "interrupt" {
 				return "正在发送"
 			}
 			return "发送消息"
-		}, Disabled: func() bool { return !s.canSend() }, OnPress: func(core.PressEvent) { s.send(choose(running(), "steer", "send")) }, Style: core.Style{Width: core.Pt(36), Height: core.Pt(36), CornerRadius: 18, FlexShrink: 0, AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter}, StyleFunc: func() core.Style {
+		}, Busy: func() bool { return s.pendingSend() != "" && s.pendingSend() != "interrupt" }, Disabled: func() bool { return !s.canSend() }, OnPress: func(core.PressEvent) { s.send(choose(running(), "steer", "send")) }, Style: core.Style{Width: core.Pt(36), Height: core.Pt(36), CornerRadius: 18, FlexShrink: 0, AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter}, StyleFunc: func() core.Style {
 			c := palette(cx)
 			opacity := float32(1)
-			if !s.canSend() && s.pendingSend() == "" {
+			if !s.canSend() && (s.pendingSend() == "" || s.pendingSend() == "interrupt") {
 				opacity = .35
 			}
-			return core.Style{Background: c.foreground, Color: c.background, Opacity: core.Alpha(opacity)}
-		}, Children: []core.Node{core.Show{When: func() bool { return s.pendingSend() != "" }, Then: func(cx *core.Scope) core.Node {
+			return pressStyle(cx).Merge(core.Style{Background: c.foreground, Color: c.background, Opacity: core.Alpha(opacity), Active: &core.Style{Opacity: core.Alpha(.65)}})
+		}, Children: []core.Node{core.Show{When: func() bool { return s.pendingSend() != "" && s.pendingSend() != "interrupt" }, Then: func(cx *core.Scope) core.Node {
 			theme := *cx.Theme()
 			theme.Light.TextMuted = theme.Light.Background
 			theme.Dark.TextMuted = theme.Dark.Background
@@ -458,39 +446,6 @@ func (s *State) composer(cx *core.Scope) core.Node {
 			return core.Icon{SVG: lucide.ArrowUp(), Style: core.Style{Width: core.Pt(16), Height: core.Pt(16)}}
 		}}}}}},
 	}}}}
-}
-func (s *State) messageNavigation(cx *core.Scope, rows *core.Memo[[]Message], ref *core.Ref, viewport *core.Signal[core.Size], tailCount func() int) core.Node {
-	indices := core.NewMemoFunc(cx, func() []int {
-		out := []int{}
-		for i, m := range rows.Get() {
-			if m.Role == "user" {
-				out = append(out, i)
-			}
-		}
-		return out
-	}, nil)
-	return core.View{TestID: "message-navigation", Style: core.Style{Position: core.Absolute, Top: core.Pt(0), Bottom: core.Pt(0), Left: core.Pt(4), Width: core.Pt(30), JustifyContent: core.JustifyCenter}, Children: []core.Node{core.Dynamic(func(cx *core.Scope) core.Node {
-		v := indices.Get()
-		h := viewport.Get().Height
-		n := min(len(v), 24, max(1, int((h-48)/12)))
-		ticks := []core.Node{}
-		for i := 0; i < n; i++ {
-			idx := 0
-			if n > 1 {
-				idx = i * (len(v) - 1) / (n - 1)
-			}
-			rowIndex := v[idx]
-			message := rows.Get()[rowIndex]
-			tick := core.View{TestID: fmt.Sprintf("message-tick-%d", i), Role: core.RoleButton, Label: messagePreviewText(message), Tooltip: core.View{Style: core.Style{Width: core.Pt(300), Padding: core.All(16), CornerRadius: 14, BorderWidth: 1}, StyleFunc: func() core.Style {
-				c := palette(cx)
-				return core.Style{Background: c.background, BorderColor: c.border}
-			}, Children: []core.Node{core.Text{Content: messagePreviewText(message), MaxLines: 5, Style: core.Style{FontSize: 12}}}}, OnPress: func(core.PressEvent) { ref.ScrollToIndexAt(rowIndex+tailCount(), 0.5, 0, true) }, Style: core.Style{Height: core.Pt(12), Width: core.Pt(30), JustifyContent: core.JustifyCenter, Padding: core.Edges{Left: 8, Right: 11}}, Children: []core.Node{core.View{Style: core.Style{Height: core.Pt(2), CornerRadius: 1}, StyleFunc: func() core.Style {
-				return core.Style{Background: palette(cx).mutedText, Opacity: core.Alpha(.4), Hover: &core.Style{Opacity: core.Alpha(1)}}
-			}}}}
-			ticks = append(ticks, tick)
-		}
-		return core.View{Style: core.Style{Gap: 0, MaxHeight: core.Pt(288)}, Children: ticks}
-	})}}
 }
 func (s *State) approvalCard(cx *core.Scope, a Object) core.Node {
 	params := object(a["params"])
@@ -511,6 +466,15 @@ func (s *State) approvalCard(cx *core.Scope, a Object) core.Node {
 	if len(buttons) == 0 {
 		buttons = []core.Node{button(cx, "approve-"+str(a, "id"), "允许", nil, "primary", func() { s.decision(a, "accept") }), button(cx, "deny-"+str(a, "id"), "拒绝", nil, "outline", func() { s.decision(a, "decline") })}
 	}
+	for i, node := range buttons {
+		if v, ok := node.(core.View); ok {
+			v.Disabled = func() bool { return !s.connected() || s.actionPending(s.approvalKey(a)) }
+			buttons[i] = v
+		}
+	}
+	buttons = append(buttons, core.Show{When: func() bool { return s.actionPending(s.approvalKey(a)) }, Then: func(cx *core.Scope) core.Node {
+		return row(actionSpinner(cx, "approval-loading-"+str(a, "id"), "正在提交授权", false, 16), label(cx, "正在提交…", 12, true))
+	}})
 	title := str(params, "title")
 	if title == "" {
 		title = str(a, "method")
@@ -520,7 +484,7 @@ func (s *State) approvalCard(cx *core.Scope, a Object) core.Node {
 func (s *State) openLink(cx *core.Scope, m Message, url string) {
 	for _, a := range m.Attachments {
 		if str(a, "source") == url {
-			s.download(cx, a)
+			s.previewAttachment(m, a)
 			return
 		}
 	}

@@ -10,6 +10,7 @@ import (
 	_ "image/jpeg"
 	_ "image/png"
 	"strings"
+	"time"
 
 	"github.com/liyue201/goqr"
 	"github.com/nsgo-dev/nsgo/base"
@@ -53,12 +54,45 @@ func (s *State) dialogView(cx *core.Scope, kind string) core.Node {
 	if kind == "" {
 		return nil
 	}
-	close := s.closeDialog
+	mounted := true
+	dialogTarget := s.target
+	cx.Cleanup(func() { mounted = false })
+	close := func() {
+		if mounted {
+			s.closeDialog()
+		}
+	}
+	pending := func() bool {
+		key := ""
+		switch {
+		case kind == "agent-config" || strings.HasPrefix(kind, "agent-config:"):
+			key = "save-agent"
+		case kind == "account":
+			return s.actionPending("account-start") || s.actionPending("account-refresh")
+		case kind == "password" || kind == "service-settings":
+			key = "dialog-save"
+		case strings.HasPrefix(kind, "activate:"):
+			key = "confirm-activate"
+		case kind == "create":
+			key = "create-session-confirm:" + dialogTarget
+		case kind == "clear-cache":
+			key = "confirm-clear-cache:" + dialogTarget
+		case kind == "forget":
+			key = "confirm-forget:" + dialogTarget
+		case strings.HasPrefix(kind, "authorize:"):
+			key = "host-respond:" + strings.TrimPrefix(kind, "authorize:")
+		}
+		return key != "" && s.actionPending(key)
+	}
 	title := ""
 	children := []core.Node{}
-	footer := []core.Node{button(cx, "dialog-cancel", "取消", nil, "outline", close)}
+	cancelButton := button(cx, "dialog-cancel", "取消", nil, "outline", close).(core.View)
+	cancelButton.Label = ""
+	cancelButton.LabelFunc = func() string { return choose(pending(), "关闭", "取消") }
+	cancelButton.Children = []core.Node{dynamicText(cx, func() string { return choose(pending(), "关闭", "取消") }, 13, false)}
+	footer := []core.Node{cancelButton}
 	field := func(id, placeholder string, value *core.Signal[string], masked bool) core.Node {
-		return ui.Input{TestID: id, Placeholder: placeholder, Label: placeholder, Value: value.Get, OnChange: value.Set, Masked: masked, Style: core.Style{MinHeight: core.Pt(40), FontSize: 13}}
+		return ui.Input{TestID: id, Placeholder: placeholder, Label: placeholder, Value: value.Get, OnChange: value.Set, Disabled: pending, Masked: masked, Style: core.Style{MinHeight: core.Pt(40), FontSize: 13}}
 	}
 	d := ui.Dialog{TestID: "dialog-" + strings.Split(kind, ":")[0], Open: func() bool { return true }, OnOpenChange: func(v bool, _ base.Reason) {
 		if !v {
@@ -79,18 +113,19 @@ func (s *State) dialogView(cx *core.Scope, kind string) core.Node {
 		initial, _ := json.MarshalIndent(def, "", "  ")
 		id := core.NewSignal(cx, idValue)
 		settings := core.NewSignal(cx, string(initial))
-		children = append(children, label(cx, "Agent 在这台电脑上运行。先安装并登录对应 CLI；参数为 JSON 数组，每个元素是一个原样参数。", 13, true), field("agent-id", "Agent ID（如 my-agent）", id, false), core.Input{TestID: "agent-settings", Label: "Agent 配置 JSON", Value: settings.Get, OnChange: settings.Set, Multiline: true, Style: core.Style{Height: core.Pt(230), FontSize: 12}}, label(cx, "支持 acp 和 pi。保存后重启 ReignHub 生效。环境变量只保存在本机，不会同步给控制端。", 12, true))
-		footer = append(footer, button(cx, "save-agent", "保存配置", nil, "primary", func() {
+		children = append(children, label(cx, "Agent 在这台电脑上运行。先安装并登录对应 CLI；参数为 JSON 数组，每个元素是一个原样参数。", 13, true), field("agent-id", "Agent ID（如 my-agent）", id, false), core.Input{TestID: "agent-settings", Disabled: pending, Label: "Agent 配置 JSON", Value: settings.Get, OnChange: settings.Set, Multiline: true, Style: core.Style{Height: core.Pt(230), FontSize: 12}}, label(cx, "支持 acp 和 pi。保存后重启 ReignHub 生效。环境变量只保存在本机，不会同步给控制端。", 12, true))
+		footer = append(footer, s.actionButton(cx, "save-agent", "保存配置", nil, "primary", func() {
 			var value Object
 			if err := json.Unmarshal([]byte(settings.Get()), &value); err != nil {
 				s.error = "配置 JSON 无效：" + err.Error()
 				s.changed()
 				return
 			}
-			s.call("host.agent.save", Object{"id": id.Get(), "agent": value}, func(any) { close(); s.notice = "Agent 配置已保存，重启 ReignHub 后生效"; s.changed() })
+			s.call("save-agent", "host.agent.save", Object{"id": id.Get(), "agent": value}, func(any) { close(); s.notice = "Agent 配置已保存，重启 ReignHub 后生效"; s.changed() })
 		}))
 	case kind == "account":
 		title = "账号与设备同步"
+		footer = nil
 		prefix := "client.account."
 		origin := serviceOrigin()
 		if s.api.CanHost() && str(s.host, "serviceUrl") != "" {
@@ -118,17 +153,29 @@ func (s *State) dialogView(cx *core.Scope, kind string) core.Node {
 				s.connect(Object{"service": service.Get(), "code": str(d, "connectionId"), "public": str(d, "public"), "remember": true, "name": s.clientName})
 			}))
 		}
-		footer = append(footer, button(cx, "account-start", "登录与绑定", nil, "primary", func() {
+		footer = append(footer, s.actionButton(cx, "account-start", "登录与绑定", nil, "primary", func() {
 			params["service"] = service.Get()
-			s.call(prefix+"start", params, func(v any) { s.accountLogin = object(v); cx.OpenURL(str(s.accountLogin, "url"), nil) })
-		}), button(cx, "account-refresh", "刷新账号设备", nil, "outline", func() {
-			if s.accountLogin != nil {
-				p := Object{"service": serviceOrigin(), "name": s.clientName, "id": str(s.accountLogin, "id")}
-				s.call(prefix+"poll", p, nil)
-			}
-			params["service"] = service.Get()
-			s.call(prefix+"status", params, func(v any) { s.accountStatus = object(v) })
-			s.call(prefix+"devices", params, func(v any) { s.accountDevices = objects(object(v)["devices"]) })
+			s.call("account-start", prefix+"start", params, func(v any) { s.accountLogin = object(v); cx.OpenURL(str(s.accountLogin, "url"), nil) })
+		}), s.actionButton(cx, "account-refresh", "刷新账号设备", nil, "outline", func() {
+			params := Object{"service": service.Get(), "name": s.clientName}
+			loginID := str(s.accountLogin, "id")
+			s.runAction("account-refresh", func(ctx context.Context) (any, error) {
+				if loginID != "" {
+					if _, err := s.api.Call(ctx, prefix+"poll", Object{"service": params["service"], "name": params["name"], "id": loginID}, "", nil); err != nil {
+						return nil, err
+					}
+				}
+				status, err := s.api.Call(ctx, prefix+"status", params, "", nil)
+				if err != nil {
+					return nil, err
+				}
+				devices, err := s.api.Call(ctx, prefix+"devices", params, "", nil)
+				return Object{"status": status, "devices": object(devices)["devices"]}, err
+			}, func(v any) {
+				result := object(v)
+				s.accountStatus = object(result["status"])
+				s.accountDevices = objects(result["devices"])
+			})
 		}))
 	case kind == "session-access-help":
 		help := sessionAccessHelp(s.error, s.failure)
@@ -185,12 +232,11 @@ func (s *State) dialogView(cx *core.Scope, kind string) core.Node {
 			children = append(children, button(cx, "account-settings", "账号与设备同步", nil, "outline", func() { s.dialog.Set("account") }))
 			children = append(children, field("server-url", "服务地址", service, false), field("device-name", "设备名称", name, false), label(cx, "优先尝试 P2P 直连；允许中继时自动回退到所选服务的 WSS 中继。", 12, true))
 		}
-		footer = append(footer, button(cx, "dialog-save", "保存", nil, "primary", func() {
-			close()
+		footer = append(footer, s.actionButton(cx, "dialog-save", "保存", nil, "primary", func() {
 			if kind == "password" {
-				s.call("host.password", Object{"password": password.Get()}, nil)
+				s.call("dialog-save", "host.password", Object{"password": password.Get()}, func(any) { close() })
 			} else {
-				s.call("host.configure", Object{"serviceUrl": strings.TrimSpace(service.Get()), "name": strings.TrimSpace(name.Get())}, nil)
+				s.call("dialog-save", "host.configure", Object{"serviceUrl": strings.TrimSpace(service.Get()), "name": strings.TrimSpace(name.Get())}, func(any) { close() })
 			}
 		}))
 	case kind == "qr":
@@ -205,22 +251,7 @@ func (s *State) dialogView(cx *core.Scope, kind string) core.Node {
 		children = append(children, label(cx, "扫码后仍需主机确认或密码授权。", 12, true), s.copyButton(cx, "copy-pairing", "复制连接信息", "outline", func() string { return code }))
 		footer = []core.Node{button(cx, "dialog-done", "完成", nil, "primary", close)}
 	case strings.HasPrefix(kind, "authorize:"):
-		title = "允许远程连接？"
-		id := strings.TrimPrefix(kind, "authorize:")
-		var pending Object
-		for _, p := range objects(s.host["pending"]) {
-			if str(p, "id") == id {
-				pending = p
-				break
-			}
-		}
-		if pending == nil {
-			return nil
-		}
-		d.NoCloseOnBackdropPress = true
-		d.NoCloseOnEscape = true
-		children = append(children, controllerIdentity(cx, func() Object { return pending }), label(cx, "请求访问这台电脑上的 Agent。", 13, false), label(cx, "设备指纹："+str(pending, "fingerprint"), 11, true), label(cx, choose(flag(pending, "remember"), "允许后记住此控制设备，可在授权列表撤销。", "临时授权 8 小时，期间可再次连接。"), 12, true))
-		footer = []core.Node{button(cx, "deny-host-request", "拒绝", nil, "outline", func() { close(); s.call("host.respond", Object{"id": id, "allow": false}, nil) }), button(cx, "approve-host-request", "允许连接", nil, "primary", func() { close(); s.call("host.respond", Object{"id": id, "allow": true}, nil) })}
+		return s.hostAuthorizationDialog(cx, strings.TrimPrefix(kind, "authorize:"), close)
 	case strings.HasPrefix(kind, "activate:"):
 		provider := strings.TrimPrefix(kind, "activate:")
 		var p Object
@@ -231,14 +262,12 @@ func (s *State) dialogView(cx *core.Scope, kind string) core.Node {
 			}
 		}
 		title = "接入 " + str(p, "name")
-		children = append(children, label(cx, "接入需要正常退出并重新打开官方 App。请先处理当前任务；不会强制结束进程。", 13, false))
+		children = append(children, label(cx, "通过本地 IPC 连接正在运行的官方 App，无需重启；远程新建的会话也可在 App 中查看和继续操作。", 13, false))
 		expected := p["instances"]
-		footer = append(footer, button(cx, "confirm-activate", "确认接入", nil, "primary", func() {
-			close()
-			s.busy = true
-			s.async(func(ctx context.Context) (any, error) {
-				return s.api.Call(ctx, "host.activate", Object{"provider": provider}, "", Object{"expected": expected, "confirmRestart": true})
-			}, func(any) { s.poll() })
+		footer = append(footer, s.actionButton(cx, "confirm-activate", "确认接入", nil, "primary", func() {
+			s.runAction("confirm-activate", func(ctx context.Context) (any, error) {
+				return s.api.Call(ctx, "host.activate", Object{"provider": provider}, "", Object{"expected": expected, "confirmRestart": false})
+			}, func(any) { close(); s.poll() })
 		}))
 	case kind == "create":
 		title = "新建会话"
@@ -253,15 +282,14 @@ func (s *State) dialogView(cx *core.Scope, kind string) core.Node {
 		if len(options) > 0 {
 			provider.Set(options[0].Value)
 		}
-		children = append(children, ui.Select[string]{TestID: "new-session-provider", Label: "Agent", Options: options, Value: provider.Get, OnChange: provider.Set}, field("new-session-cwd", "工作目录（被控电脑上的绝对路径）", cwd, false))
-		footer = append(footer, button(cx, "create-session-confirm", "创建", nil, "primary", func() {
-			target, p, directory := s.target, provider.Get(), cwd.Get()
-			close()
-			s.busy = true
-			s.async(func(ctx context.Context) (any, error) {
+		children = append(children, ui.Select[string]{TestID: "new-session-provider", Disabled: pending, Label: "Agent", Options: options, Value: provider.Get, OnChange: provider.Set}, field("new-session-cwd", "工作目录（被控电脑上的绝对路径）", cwd, false))
+		footer = append(footer, busyButton(cx, "create-session-confirm", "创建", nil, "primary", pending, func() {
+			target, p, directory := dialogTarget, provider.Get(), cwd.Get()
+			s.runAction("create-session-confirm:"+dialogTarget, func(ctx context.Context) (any, error) {
 				return rpc(ctx, s.api, target, p, "", "create", Object{"options": Object{"cwd": directory}})
 			}, func(v any) {
-				if s.target == target {
+				if mounted && s.target == target {
+					close()
 					s.selectSession(object(v))
 					s.poll()
 				}
@@ -269,6 +297,7 @@ func (s *State) dialogView(cx *core.Scope, kind string) core.Node {
 		}))
 	case kind == "directory":
 		title = "项目"
+		footer = nil
 		count := 0
 		path := ""
 		paths := []string{}
@@ -298,18 +327,24 @@ func (s *State) dialogView(cx *core.Scope, kind string) core.Node {
 	case kind == "clear-cache":
 		title = "清除这台设备的附件缓存？"
 		children = append(children, label(cx, "仅清除控制端已下载的附件，下次查看时会从被控端重新读取。", 13, true))
-		target := s.target
-		footer = append(footer, button(cx, "confirm-clear-cache", "清除缓存", nil, "primary", func() {
-			close()
-			s.async(func(ctx context.Context) (any, error) {
+		target := dialogTarget
+		footer = append(footer, busyButton(cx, "confirm-clear-cache", "清除缓存", nil, "primary", pending, func() {
+			s.runAction("confirm-clear-cache:"+dialogTarget, func(ctx context.Context) (any, error) {
 				return s.api.Call(ctx, "client.assetCache.clear", Object{}, target, nil)
-			}, func(any) { s.images = map[string][]byte{}; s.notice = "附件缓存已清除" })
+			}, func(any) { close(); s.images = map[string][]byte{}; s.notice = "附件缓存已清除" })
 		}))
 	case kind == "forget":
 		title = "移除设备？"
 		children = append(children, label(cx, "删除本机保存的配对身份与该设备的消息、附件缓存。", 13, false))
-		id := s.target
-		footer = append(footer, button(cx, "confirm-forget", "移除", nil, "primary", func() { close(); s.call("client.forget", Object{"id": id}, func(any) { s.selectDevice("") }) }))
+		id := dialogTarget
+		footer = append(footer, busyButton(cx, "confirm-forget", "移除", nil, "primary", pending, func() {
+			s.call("confirm-forget:"+dialogTarget, "client.forget", Object{"id": id}, func(any) {
+				close()
+				if s.target == id {
+					s.selectDevice("")
+				}
+			})
+		}))
 	case kind == "scan":
 		return s.scanView(cx, close)
 	case kind == "preview":
@@ -318,9 +353,99 @@ func (s *State) dialogView(cx *core.Scope, kind string) core.Node {
 		return nil
 	}
 	d.Title = title
+	children = append(children, core.Show{When: pending, Then: func(cx *core.Scope) core.Node {
+		return label(cx, "请求处理中，关闭窗口不会取消已提交的操作。", 12, true)
+	}}, core.Show{When: func() bool { s.read(); return s.error != "" }, Then: func(cx *core.Scope) core.Node {
+		return dynamicText(cx, func() string { s.read(); return s.error }, 12, false)
+	}})
 	d.Children = children
 	d.Footer = footer
+	return modalDialog(cx, d, close)
+}
+
+// Keep dismissal in the header; the footer belongs to the dialog's decisions.
+func modalDialog(cx *core.Scope, d ui.Dialog, close func()) ui.Dialog {
+	if d.Label == "" {
+		d.Label = d.Title
+	}
+	header := dialogHeader(cx, d.TestID+"-close", d.Title, close)
+	children := []core.Node{header}
+	if d.Description != "" {
+		children = append(children, label(cx, d.Description, 13, true))
+	}
+	d.Title, d.Description = "", ""
+	d.Children = append(children, d.Children...)
 	return d
+}
+
+func dialogHeader(cx *core.Scope, id, title string, close func()) core.Node {
+	x := labelledIconButton(cx, id, "关闭弹窗", lucide.X, close).(core.View)
+	x.Style.Width, x.Style.Height = core.Pt(36), core.Pt(36)
+	x.Style.Padding = core.All(8)
+	t := core.Text{Content: title, Role: core.RoleHeader, Style: ui.TypeTitle.Merge(core.Style{FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0)})}
+	return core.View{TestID: id + "-header", Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 12, Margin: core.Edges{Top: -8, Right: -8}}, Children: []core.Node{t, x}}
+}
+
+func (s *State) hostAuthorizationDialog(cx *core.Scope, id string, close func()) core.Node {
+	mounted := true
+	cx.Cleanup(func() { mounted = false })
+	find := func() Object {
+		s.read()
+		for _, p := range objects(s.host["pending"]) {
+			if str(p, "id") == id {
+				return p
+			}
+		}
+		return nil
+	}
+	request := core.Untracked(cx, find)
+	expired := core.NewSignal(cx, request == nil)
+	if deadline := number(request, "expires"); deadline > 0 {
+		remaining := time.Until(time.Unix(deadline, 0))
+		if remaining <= 0 {
+			expired.Set(true)
+		} else {
+			cx.AfterFunc(remaining, func() { expired.Set(true) })
+		}
+	}
+	ended := core.NewMemo(cx, func() bool { return expired.Get() || find() == nil })
+	return core.Dynamic(func(cx *core.Scope) core.Node {
+		terminal := ended.Get()
+		title := choose(terminal, "连接请求已失效", "允许远程连接？")
+		children := []core.Node{controllerIdentity(cx, func() Object { return request })}
+		var footer []core.Node
+		if terminal {
+			children = append(children, label(cx, "此授权请求已过期或已被撤回。请在控制端重新发起连接。", 13, true))
+		} else {
+			children = append(children, label(cx, "请求访问这台电脑上的 Agent。", 13, false), label(cx, "设备指纹："+str(request, "fingerprint"), 11, true), label(cx, choose(flag(request, "remember"), "允许后记住此控制设备，可在授权列表撤销。", "临时授权 8 小时，期间可再次连接。"), 12, true))
+			pending := func() bool { return s.actionPending("host-respond:" + id) }
+			respond := func(allow bool) {
+				s.runAction("host-respond:"+id, func(ctx context.Context) (any, error) {
+					v, err := s.api.Call(ctx, "host.respond", Object{"id": id, "allow": allow}, "", nil)
+					// The host can reject a stale local snapshot before its next poll.
+					if err != nil && strings.Contains(err.Error(), "授权请求已过期") {
+						return false, nil
+					}
+					return v, err
+				}, func(v any) {
+					if valid, ok := v.(bool); ok && !valid {
+						if mounted {
+							expired.Set(true)
+						}
+						return
+					}
+					close()
+					s.pollLocal()
+				})
+			}
+			footer = append(footer, busyButton(cx, "deny-host-request", "拒绝", nil, "outline", pending, func() { respond(false) }), busyButton(cx, "approve-host-request", "允许连接", nil, "primary", pending, func() { respond(true) }))
+		}
+		return modalDialog(cx, ui.Dialog{TestID: "dialog-authorize", Title: title, Open: func() bool { return true }, OnOpenChange: func(open bool, _ base.Reason) {
+			if !open {
+				close()
+			}
+		}, Style: core.Style{Width: core.Pt(448), MaxWidth: core.Pct(96)}, Children: children, Footer: footer}, close)
+	})
 }
 func (s *State) imagePreview(cx *core.Scope, close func()) core.Node {
 	index := core.NewMemo(cx, func() int { return s.previewIndex.Get() })
@@ -331,11 +456,11 @@ func (s *State) imagePreview(cx *core.Scope, close func()) core.Node {
 	}
 	cx.OnKey("left", func() { move(-1) })
 	cx.OnKey("right", func() { move(1) })
-	toolbar := row(button(cx, "preview-close", "", lucide.X, "ghost", close), spacer(), dynamicText(cx, func() string { return fmt.Sprintf("%d / %d", index.Get()+1, len(s.preview)) }, 12, true), button(cx, "preview-download", "下载", lucide.Download, "ghost", func() {
+	toolbar := row(dynamicText(cx, func() string { return fmt.Sprintf("%d / %d", index.Get()+1, len(s.preview)) }, 12, true), spacer(), button(cx, "preview-download", "下载", lucide.Download, "ghost", func() {
 		if len(s.preview) > 0 {
 			s.download(cx, s.preview[index.Get()])
 		}
-	}))
+	}), labelledIconButton(cx, "preview-close", "关闭图片预览", lucide.X, close))
 	content := core.Dynamic(func(cx *core.Scope) core.Node {
 		if len(s.preview) == 0 {
 			return nil

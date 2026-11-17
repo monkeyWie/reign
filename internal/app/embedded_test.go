@@ -180,7 +180,7 @@ func TestEmbeddedShutdownCancelsOutstandingCalls(t *testing.T) {
 			t.Fatal(err)
 		}
 	case <-time.After(3 * time.Second):
-		t.Fatal("shutdown waited indefinitely for an FFI request")
+		t.Fatal("shutdown waited indefinitely for an in-process request")
 	}
 	if err := <-callDone; err == nil {
 		t.Fatal("in-flight call was not canceled")

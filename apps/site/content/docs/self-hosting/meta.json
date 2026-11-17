@@ -1,4 +1,4 @@
 {
   "title": "Self-hosting",
-  "pages": ["index", "cloudflare", "probe", "operations"]
+  "pages": ["index", "cloudflare", "go", "probe", "operations"]
 }

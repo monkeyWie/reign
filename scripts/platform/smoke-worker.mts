@@ -1,4 +1,4 @@
-// Run against an isolated local Worker with its D1 migrations applied.
+// Run against an isolated Worker or Go server (--go-server).
 // The spawned host only exposes a fake Agent, never real local sessions.
 import assert from "node:assert/strict";
 import { smokeSite } from "./smoke-site.mts";
@@ -55,20 +55,59 @@ try {
       reject(Error(`Fixture exited ${n}: ${stderr}`));
     });
   });
-  await smokeSite(origin);
-  for (const path of ["/chat", "/account"]) {
-    const response = await fetch(origin + path);
-    assert.equal(response.status, 200, path);
-    assert.match(await response.text(), /ReignHub/);
+  if (process.argv[3] === "--site") {
+    await smokeSite(origin);
+  } else {
+    const root = await fetch(origin + "/", { redirect: "manual" });
+    assert.ok(
+      [302, 307].includes(root.status),
+      `root redirect: ${root.status}`,
+    );
+    assert.equal(
+      new URL(root.headers.get("location")!, origin).pathname,
+      "/chat/",
+    );
+    for (const path of [
+      "/healthz",
+      "/chat/",
+      "/assets/chat/nsgo.json",
+      "/api/account",
+    ]) {
+      assert.equal((await fetch(origin + path)).status, 200, path);
+    }
+    for (const path of [
+      "/docs",
+      "/zh-CN/docs",
+      "/download",
+      "/_next/static/missing.js",
+      "/api/releases",
+    ]) {
+      assert.equal((await fetch(origin + path)).status, 404, path);
+    }
+    const shell = await (await fetch(origin + "/chat/")).text();
+    assert.match(shell, /assets\/chat\/icon.svg/);
+    assert.doesNotMatch(shell, /_next\//);
+    assert.equal((await fetch(origin + "/assets/chat/icon.svg")).status, 200);
+    const manifest = (await (
+      await fetch(origin + "/assets/chat/nsgo.json")
+    ).json()) as {
+      wasmSize: number;
+      wasmParts: { file: string; size: number }[];
+    };
+    assert.ok(manifest.wasmParts.length > 1);
+    let bytes = 0;
+    for (const part of manifest.wasmParts) {
+      const response = await fetch(origin + "/assets/chat/" + part.file);
+      assert.equal(response.status, 200, part.file);
+      assert.equal(
+        (await response.arrayBuffer()).byteLength,
+        part.size,
+        part.file,
+      );
+      bytes += part.size;
+    }
+    assert.equal(bytes, manifest.wasmSize);
   }
-  const releaseResponse = await fetch(origin + "/api/releases");
-  assert.equal(releaseResponse.status, 200, "release catalogue");
-  assert.match(releaseResponse.headers.get("Cache-Control") || "", /max-age=/);
-  const catalogue = (await releaseResponse.json()) as {
-    release: unknown;
-    stale: boolean;
-  };
-  assert.ok("release" in catalogue && typeof catalogue.stale === "boolean");
   const service = new Service(origin, cache);
   const config = await service.config();
   assert.equal(config.deployment, "self-hosted");
@@ -79,6 +118,8 @@ try {
     await service.identity(),
     config,
   ).connect();
+  if (process.argv[3] === "--go-server")
+    assert.equal(client.path, "Relay · encrypted");
   const providers = await client.call<{ id: string }[]>({
     method: "providers",
   });
@@ -101,7 +142,7 @@ try {
   });
   assert.match(JSON.stringify(transcript), /signed-lease smoke test/);
   console.log(
-    "Worker pages, D1 identity, encrypted consent pairing, signed host access, sessions and send passed",
+    "Service HTTP, encrypted consent pairing, signed host access, sessions and send passed",
   );
 } finally {
   client?.close();

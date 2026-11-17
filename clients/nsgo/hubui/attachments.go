@@ -364,20 +364,88 @@ func (s *State) imageTile(cx *core.Scope, message func() Message, get func() Obj
 	thumb := flag(a, "thumbnail")
 	s.loadImage(a, thumb)
 	key := s.key() + "|" + str(a, "id") + fmt.Sprint("|", thumb)
-	return core.View{TestID: "image-" + str(a, "id"), Label: "查看图片", Role: core.RoleButton, OnPress: func(core.PressEvent) {
-		images := []Object{}
-		for _, v := range message().Attachments {
-			if str(v, "kind") == "image" {
-				if str(v, "id") == str(a, "id") {
-					s.previewIndex.Set(len(images))
-				}
-				images = append(images, v)
-			}
-		}
-		s.preview = images
-		s.dialog.Set("preview")
-	}, Style: core.Style{Width: core.Pt(96), Height: core.Pt(80), CornerRadius: 10, Overflow: core.Hidden, BorderWidth: 1}, StyleFunc: func() core.Style { return core.Style{BorderColor: palette(cx).border, Background: palette(cx).muted} }, Children: []core.Node{core.Image{SourceFunc: func() core.ImageSource { s.read(); return core.ImageSource{Data: s.images[key]} }, ResizeMode: core.Cover, Style: core.Style{Width: core.Pt(96), Height: core.Pt(80)}}}}
+	image := core.Image{Label: str(a, "name"), SourceFunc: func() core.ImageSource { s.read(); return core.ImageSource{Data: s.images[key]} }, ResizeMode: core.Cover, Style: core.Style{Width: core.Pct(100), Height: core.Pt(128)}}
+	return s.attachmentCard(cx, a, func() { s.previewAttachment(message(), a) }, image)
 }
 func (s *State) fileTile(cx *core.Scope, a Object) core.Node {
-	return core.View{Style: core.Style{Padding: core.Edges{Top: 8}}, Children: []core.Node{button(cx, "download-"+str(a, "id"), str(a, "name"), lucide.FileDown, "outline", func() { s.download(cx, a) })}}
+	// Unsupported previews are read-only content, not a misleading button.
+	return s.attachmentCard(cx, a, nil)
+}
+
+func (s *State) attachmentCard(cx *core.Scope, a Object, preview func(), content ...core.Node) core.Node {
+	name := str(a, "name")
+	if name == "" {
+		name = "附件"
+	}
+	download := labelledIconButton(cx, "download-"+str(a, "id"), "下载 "+name, lucide.Download, func() { s.download(cx, a) }).(core.View)
+	download.Style.Position, download.Style.Right, download.Style.Bottom = core.Absolute, core.Pt(6), core.Pt(6)
+	caption := singleLine(cx, func() string { return name }, 12, false)
+	captionView := core.View{TestID: "attachment-name-" + str(a, "id"), Tooltip: label(cx, name, 12, false), Style: core.Style{FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0)}, Children: []core.Node{caption}}
+	footer := []core.Node{}
+	if str(a, "kind") != "image" {
+		footer = append(footer, glyph(cx, lucide.FileText, 18))
+	}
+	footer = append(footer, captionView)
+	content = append(content, core.View{Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, MinWidth: core.Pt(0), MinHeight: core.Pt(48), Padding: core.Edges{Top: 6, Bottom: 6, Left: 10, Right: 52}, Gap: 6}, Children: footer})
+	body := core.View{Style: core.Style{MinWidth: core.Pt(0)}, Children: content}
+	if preview != nil {
+		body.TestID, body.Role, body.Label = "image-"+str(a, "id"), core.RoleButton, "预览图片 "+name
+		body.OnPress = func(core.PressEvent) { preview() }
+		body.StyleFunc = func() core.Style { return pressStyle(cx) }
+	}
+	return core.View{TestID: "attachment-" + str(a, "id"), Style: core.Style{MinWidth: core.Pt(0), Width: core.Pct(100), AlignSelf: core.AlignStart, CornerRadius: 10, Overflow: core.Hidden, BorderWidth: 1}, StyleFunc: func() core.Style {
+		return core.Style{BorderColor: palette(cx).border, Background: palette(cx).muted}
+	}, Children: []core.Node{body, download}}
+}
+
+func (s *State) previewAttachment(message Message, a Object) {
+	if str(a, "kind") != "image" {
+		return
+	}
+	images := []Object{}
+	index := 0
+	for _, v := range message.Attachments {
+		if str(v, "kind") == "image" {
+			if str(v, "id") == str(a, "id") {
+				index = len(images)
+			}
+			images = append(images, v)
+		}
+	}
+	s.preview = images
+	s.previewIndex.Set(index)
+	s.dialog.Set("preview")
+}
+
+const attachmentCardMinimum core.Points = 180
+const attachmentCardGap core.Points = 12
+
+func (s *State) attachmentGallery(cx *core.Scope, get func() Message) core.Node {
+	attachments := core.NewMemoFunc(cx, func() []Object {
+		out := []Object{}
+		for _, a := range get().Attachments {
+			// Inline images render at their Markdown location. Inline file
+			// links still need an explicit download action in this collection.
+			if !flag(a, "inline") || str(a, "kind") != "image" {
+				out = append(out, a)
+			}
+		}
+		return out
+	}, nil)
+	return core.Show{When: func() bool { return len(attachments.Get()) > 0 }, Then: func(cx *core.Scope) core.Node {
+		grid := cardGrid(cx, "attachments-"+get().ID, attachmentCardMinimum, attachmentCardGap,
+			core.Each(attachments.Get, func(a Object) string { return str(a, "id") }, func(cx *core.Scope, a func() Object, _ func() int) core.Node {
+				if str(a(), "kind") == "image" {
+					return s.imageTile(cx, get, a)
+				}
+				return s.fileTile(cx, a())
+			}))
+		return core.View{Style: core.Style{Width: core.Pct(100), MinWidth: core.Pt(0), Padding: core.Edges{Bottom: 12}}, StyleFunc: func() core.Style {
+			// Keep sparse galleries compact while dense collections fill the
+			// same message column. User attachments retain right alignment.
+			count := len(attachments.Get())
+			limit := choose(get().Role == "user", core.Points(680), core.Points(820))
+			return core.Style{MaxWidth: core.Pt(min(limit, core.Points(count)*attachmentCardMinimum+core.Points(max(0, count-1))*attachmentCardGap))}
+		}, Children: []core.Node{grid}}
+	}}
 }

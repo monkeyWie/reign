@@ -3,9 +3,12 @@ module github.com/monkeyWie/reignhub
 go 1.27.3
 
 require (
+	github.com/Microsoft/go-winio v0.6.2
 	github.com/coder/acp-go-sdk v0.13.5
 	github.com/coder/websocket v1.8.15
 	github.com/egoist/mygo v0.8.3
+	github.com/evanphx/json-patch/v5 v5.9.0
+	github.com/google/uuid v1.6.0
 	github.com/pion/stun/v3 v3.0.2
 	github.com/pion/transport/v3 v3.1.1
 	github.com/pion/webrtc/v4 v4.1.8
@@ -24,7 +27,6 @@ require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/ebitengine/purego v0.11.1 // indirect
 	github.com/go-text/typesetting v0.3.5 // indirect
-	github.com/google/uuid v1.6.0 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
@@ -43,6 +45,7 @@ require (
 	github.com/pion/sdp/v3 v3.0.16 // indirect
 	github.com/pion/srtp/v3 v3.0.9 // indirect
 	github.com/pion/turn/v4 v4.1.3 // indirect
+	github.com/pkg/errors v0.8.1 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	golang.org/x/exp v0.0.0-20250620022241-b7579e27df2b // indirect
 	golang.org/x/net v0.59.0 // indirect

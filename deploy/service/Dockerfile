@@ -1,23 +1,39 @@
-FROM ghcr.io/cirruslabs/flutter:3.41.6 AS ui
-WORKDIR /src
-COPY clients/flutter/ ./
-RUN flutter pub get && flutter build web --release --no-web-resources-cdn
-
-FROM golang:1.27.3 AS core
+# syntax=docker/dockerfile:1
+FROM --platform=$BUILDPLATFORM golang:1.27.3-bookworm AS go-toolchain
+FROM --platform=$BUILDPLATFORM node:24-bookworm-slim AS build
+COPY --from=go-toolchain /usr/local/go /usr/local/go
+COPY --from=go-toolchain /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+ENV PATH="/usr/local/go/bin:${PATH}"
 WORKDIR /src
 COPY go.mod go.sum ./
-RUN go mod download
-COPY internal/ ./internal/
-COPY pkg/ ./pkg/
-COPY cmd/agenthub-service/ ./cmd/agenthub-service/
-RUN mkdir -p /data && chown 65532:65532 /data
-RUN CGO_ENABLED=0 go build -trimpath -o /agenthub-service ./cmd/agenthub-service
+COPY internal ./internal
+COPY pkg ./pkg
+COPY cmd/reignhub-server ./cmd/reignhub-server
+COPY clients/nsgo ./clients/nsgo
+COPY scripts/platform/build-console.mjs ./scripts/platform/build-console.mjs
+COPY apps/site/components/console-loading.css ./apps/site/components/console-loading.css
+COPY apps/site/app/icon.svg ./apps/site/app/icon.svg
+ARG VERSION=dev
+# A Docker build only needs Node built-ins and Go, not Next.js or Cloudflare.
+RUN --mount=type=cache,target=/root/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
+    VERSION="$VERSION" node scripts/platform/build-console.mjs --self-hosted \
+ && rm -rf internal/webui/assets \
+ && cp -R build/self-hosted-assets/assets/chat internal/webui/assets
+ARG TARGETOS
+ARG TARGETARCH
+RUN --mount=type=cache,target=/root/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS="$TARGETOS" GOARCH="$TARGETARCH" go build -trimpath \
+    -ldflags="-s -w -X github.com/monkeyWie/reignhub/internal/servercmd.Version=$VERSION" \
+    -o /reignhub-server ./cmd/reignhub-server \
+ && mkdir /data && chown 65532:65532 /data
 
-FROM gcr.io/distroless/static-debian12:nonroot
-COPY --from=core /agenthub-service /agenthub-service
-COPY --from=core --chown=65532:65532 /data /data
-COPY --from=ui /src/build/web /web
+FROM scratch
+COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+USER 65532:65532
+COPY --from=build /reignhub-server /reignhub-server
+COPY --from=build --chown=65532:65532 /data /data
+WORKDIR /data
 VOLUME /data
-EXPOSE 26331/tcp 26330/tcp 26330/udp
-ENTRYPOINT ["/agenthub-service"]
-CMD ["--listen","0.0.0.0:26331","--state","/data/reignhub.db","--web","/web"]
+EXPOSE 26330/tcp 26331/tcp 26331/udp
+ENTRYPOINT ["/reignhub-server"]
+CMD ["--state=/data/reignhub.db"]

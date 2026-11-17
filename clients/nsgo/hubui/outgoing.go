@@ -71,6 +71,10 @@ func (s *State) restoreOutgoing(t Object) {
 func (s *State) snapshotProjection() Object {
 	t := copyObject(s.transcript)
 	t["localMessages"] = snapshotOutgoing(s.outgoing[s.key()])
+	delete(t, "resume")
+	if s.stream != nil && s.stream.current() && s.stream.baseline && !s.stream.snapshotInFlight && s.streamKey == s.key() && s.streamEpoch != "" {
+		t["resume"] = Object{"epoch": s.streamEpoch, "cursor": s.streamCursor}
+	}
 	return t
 }
 

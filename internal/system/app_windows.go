@@ -17,8 +17,8 @@ import (
 	"github.com/monkeyWie/reignhub/internal/provider"
 )
 
-const DesktopSupported = false
-const DesktopUnsupportedReason = "Windows 已支持 Codex App 检测，暂不支持接入远控"
+const DesktopSupported = true
+const DesktopUnsupportedReason = ""
 
 // Only installation locations are cached. Executables and running processes
 // are revalidated on every probe, including after an App update or uninstall.

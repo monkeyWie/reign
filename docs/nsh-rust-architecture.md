@@ -1,10 +1,10 @@
 # NSH + Rust 技术栈调整（已归档）
 
-状态：2026-11-11 已被 [Flutter + Go 产品 v2 基准](product-v2.md) 取代。以下保留历史调研，不再作为实施要求；其中“桌面不支持会话管理”的职责限制也已取消。未安装 NSH 或迁移 Rust 代码。
+状态：2026-11-11 历史调研，未实施。当前采用 [NSGo + Go 架构](engineering/architecture.md)。以下保留历史调研，不再作为实施要求；其中“桌面不支持会话管理”的职责限制也已取消。未安装 NSH 或迁移 Rust 代码。
 
 ## 决策与边界
 
-目标 UI 统一为 [Native Shell（NSH）](https://nsh.dev/)，核心逻辑统一为 Rust。MyGo 和 Flutter 不再作为后续目标 UI 栈。NSH 调研基线为官网 v0.4.0；实施时固定 CLI 与 crate 的兼容版本，不直接跟踪 main。
+目标 UI 统一为 [Native Shell（NSH）](https://nsh.dev/)，核心逻辑统一为 Rust。此处仅描述当时的候选方案，不是当前技术栈。NSH 调研基线为官网 v0.4.0；实施时固定 CLI 与 crate 的兼容版本，不直接跟踪 main。
 
 推荐先采用 NSH mixed 模式：共享 TSX 页面和组件，Rust 导出类型明确的应用服务。原生 TSX 在 QuickJS 执行，界面由原生后端呈现，不是在 WebView 中运行网页；Web 采用浏览器 JavaScript、DOM 与 Wasm。NSH 也支持纯 Rust UI，因此业务核心不应依赖 TSX，后续页面可按需要使用 Rust 组件。采用 mixed 是实现建议，不代表用户已单独选择 TSX 而排除纯 Rust UI。
 
@@ -47,13 +47,13 @@ flowchart TB
 
 NSH 负责 UI，不提供把任意 Rust UDP/QUIC 代码直接运行在浏览器里的能力。原生网络与浏览器网络仍需分别验证。
 
-| 候选 | 与 Rust 核心的关系 | 浏览器与自部署关注点 |
-|---|---|---|
-| Tailcat + derper | Tailcat 是 Go；须保留 Go sidecar 或封装跨语言桥，不能称为纯 Rust 栈 | 官方 Web 路径以 DERP 中继为主；derper 提供 STUN 和 DERP |
-| Iroh + 自建 relay | Rust 候选；此前 Go/FFI 的主要顾虑随本次调整而变化 | 必须核实所选版本的 Wasm、目标浏览器、relay 与直连支持，不直接承诺跨端 P2P |
-| WebRTC + coturn + 信令服务 | 原生端选 Rust WebRTC 实现；Web 使用浏览器 WebRTC 适配 | 一台公网服务器可承载信令、STUN/TURN；原生 Rust 库与浏览器互通需验证 |
+| 候选                       | 与 Rust 核心的关系                                                  | 浏览器与自部署关注点                                                      |
+| -------------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| Tailcat + derper           | Tailcat 是 Go；须保留 Go sidecar 或封装跨语言桥，不能称为纯 Rust 栈 | 官方 Web 路径以 DERP 中继为主；derper 提供 STUN 和 DERP                   |
+| Iroh + 自建 relay          | Rust 候选；此前 Go/FFI 的主要顾虑随本次调整而变化                   | 必须核实所选版本的 Wasm、目标浏览器、relay 与直连支持，不直接承诺跨端 P2P |
+| WebRTC + coturn + 信令服务 | 原生端选 Rust WebRTC 实现；Web 使用浏览器 WebRTC 适配               | 一台公网服务器可承载信令、STUN/TURN；原生 Rust 库与浏览器互通需验证       |
 
-暂不锁定网络库，不因为已经迁移 UI 就隐式选择 Tailcat 或 Iroh。既有 Pion/Flutter WebRTC 的测试证明的是旧实现互通，不能当作新 Rust 实现已通过验证。既有加密协议也不能在改语言时直接替换密钥派生/nonce 而继续使用同一协议版本。
+暂不锁定网络库，不因为已经迁移 UI 就隐式选择 Tailcat 或 Iroh。当时的 Pion/WebRTC 测试证明的是旧实现互通，不能当作新 Rust 实现已通过验证。既有加密协议也不能在改语言时直接替换密钥派生/nonce 而继续使用同一协议版本。
 
 公网服务器自部署是当前重点候选部署方式；不再以“所有网络能力必须放进 CF Worker”为架构前提。CF 仍可作为可选静态资源/API 平台。没有购买、创建或部署任何公网资源。
 
@@ -69,12 +69,12 @@ Rust 连接核心只接收经过验证的连接权限与隔离空间，不依赖
 
 1. 在 macOS、iOS、Android、Web 分别构建运行最小 NSH 应用；不是只在浏览器中预览手机布局。
 2. 跨端长列表、中文输入法、多行输入、历史分页、代码块/Markdown 与审批弹窗。
-3. 主机二维码生成、手机原生相机扫码，以及 Web 扫码/粘贴入口。相机权限和扫码插件须核实或实现原生适配，不能假设 NSH 自动具备 Flutter 插件的能力。
+3. 主机二维码生成、手机原生相机扫码，以及 Web 扫码/粘贴入口。相机权限和扫码插件须核实或实现原生适配，不能假设 NSH 自动具备其它框架插件的能力。
 4. Keychain/Keystore 等安全存储。通用文件/Storage API 不能默认当成安全密钥存储；Web 的配对凭据默认仅在内存。
 5. daemon 与 UI 独立生命周期、本机 IPC 认证、关闭窗口后仍可连接；不自动重启官方 Codex App。
 6. 固定网络库版本后验证真实双端连接、强制中继、跨 NAT、切网、前后台恢复及目标浏览器矩阵。
 
-官方当前列出的原生最低系统包括 macOS 14+、iOS 15+、Android API 26+、Windows 10 1809+；Linux 后端需要 GTK 4.14+。Android 最低版本相比现有 Flutter MVP 的 API 23 会提高，属于兼容范围变化。首次移植以 macOS 为主机端，移动端覆盖 iOS/Android，Web 为远程客户端，不把 UI 框架平台列表等同 Codex Provider 全平台已支持。
+官方当前列出的原生最低系统包括 macOS 14+、iOS 15+、Android API 26+、Windows 10 1809+；Linux 后端需要 GTK 4.14+。Android 最低版本相比当时原型的 API 23 会提高，属于兼容范围变化。首次移植以 macOS 为主机端，移动端覆盖 iOS/Android，Web 为远程客户端，不把 UI 框架平台列表等同 Codex Provider 全平台已支持。
 
 迁移按可运行功能进行：先验证 NSH 构建和平台桥接，再迁移 Rust 控制模型与 Codex 主机核心，最后以选定网络栈连通 NSH 远程客户端。确认功能与测试达到原 MVP 后再删除旧实现，避免只剩一个新 UI 空壳。
 

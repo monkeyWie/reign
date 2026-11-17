@@ -156,12 +156,12 @@ func TestPlainUserItemDoesNotRedownloadHistory(t *testing.T) {
 					snapshots++
 				}
 			}
-			want := 0
+			want, wantItems := 0, 1
 			if tc.snapshot {
-				want = 1
+				want, wantItems = 1, 0
 			}
-			if items != 1 || snapshots != want {
-				t.Fatalf("items=%d snapshots=%d, want 1/%d", items, snapshots, want)
+			if items != wantItems || snapshots != want {
+				t.Fatalf("items=%d snapshots=%d, want %d/%d", items, snapshots, wantItems, want)
 			}
 		})
 	}

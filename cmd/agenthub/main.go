@@ -1,4 +1,4 @@
-// Legacy MyGo UI. The maintained desktop app is clients/flutter.
+// Legacy MyGo UI. The maintained desktop app is clients/nsgo.
 package main
 
 import (

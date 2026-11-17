@@ -13,7 +13,6 @@ import (
 
 	"github.com/monkeyWie/reignhub/internal/assets"
 	"github.com/monkeyWie/reignhub/internal/config"
-	"github.com/monkeyWie/reignhub/internal/device"
 	"github.com/monkeyWie/reignhub/internal/events"
 	"github.com/monkeyWie/reignhub/internal/provider"
 	"github.com/monkeyWie/reignhub/internal/rpc"
@@ -38,7 +37,7 @@ type Provider struct {
 	client     *rpc.Client
 	created    map[string]*rpc.Client
 	endpoint   string
-	shared     sharedRuntime
+	ipc        *appIPC
 	lastError  string
 	pending    map[string]pending
 	next       uint64
@@ -71,16 +70,27 @@ func (p *Provider) Start(ctx context.Context) error {
 	return p.startAppServer(ctx)
 }
 
-// Closing Hub disconnects only its own RPC client. Codex App connects directly
-// to the independent official server and must keep working after Hub exits.
+// Closing Hub releases only its own executor and IPC identity. It never
+// terminates, relaunches, or rewrites the environment of the user's Codex App.
 func (p *Provider) Close() error {
+	p.connectMu.Lock()
+	defer p.connectMu.Unlock()
 	p.mu.Lock()
-	c := p.client
+	c, b := p.client, p.ipc
 	p.client = nil
+	p.ipc = nil
 	p.created = nil
+	p.pending = map[string]pending{}
 	p.mu.Unlock()
 	if c != nil {
 		_ = c.Close()
+		select {
+		case <-c.Done():
+		case <-time.After(2 * time.Second):
+		}
+	}
+	if b != nil {
+		b.close()
 	}
 	p.clearRoute("service")
 	return nil
@@ -91,50 +101,34 @@ func (p *Provider) Status(ctx context.Context) provider.Status {
 	}
 	app, appErr := system.FindAppContext(ctx, p.cfg.CodexApp)
 	instances, err := system.Discover(ctx, app)
-	connections, connectionErr := p.desktopConnected(ctx, instances)
 	p.mu.Lock()
-	defer p.mu.Unlock()
-	s := provider.Status{ID: "codex-app", Name: "Codex App", State: "unavailable", Instances: instances, DesktopClients: connections, Endpoint: p.endpoint, LastError: p.lastError, Capabilities: provider.Capabilities{Streaming: true, History: true, Create: true, Send: true, Steer: true, Interrupt: true, Approvals: true, Desktop: true, ImageInput: true, FileInput: true}}
-	s.Installed, s.Running, s.InstallPath = app != "", len(instances) > 0, app
-	if err != nil {
-		s.LastError = err.Error()
-	}
+	c, b, last := p.client, p.ipc, p.lastError
+	p.mu.Unlock()
+	s := provider.Status{ID: "codex-app", Name: "Codex App", State: "unavailable", Installed: app != "", Running: len(instances) > 0, InstallPath: app, Instances: instances, LastError: last, Capabilities: provider.Capabilities{Streaming: true, History: true, Create: true, Send: true, Steer: true, Interrupt: true, Approvals: true, Desktop: true, ImageInput: true, FileInput: true}}
 	if appErr != nil {
 		s.LastError = appErr.Error()
+	}
+	if err != nil {
+		s.LastError = err.Error()
 	}
 	if !system.DesktopSupported {
 		s.State = "unsupported"
 		s.Detail = system.DesktopUnsupportedReason
-		if appErr != nil {
-			s.Detail = "安装状态检测失败；" + s.Detail
-		} else if err != nil {
-			s.Detail = "运行状态检测失败；" + s.Detail
-		} else if app == "" {
-			s.Detail = "未检测到 Codex 桌面应用；" + s.Detail
-		}
 		return s
 	}
-	if p.client == nil || !p.client.Alive() {
-		s.Detail = "共享 app-server 未连接"
-		if app == "" {
-			s.Detail = "未检测到 Codex 桌面应用"
-		} else if s.Running {
-			s.Detail = "需重启接入；发现独立启动的 App"
-		}
-		return s
-	}
-	s.State = "awaitingActivation"
-	s.Detail = "共享后端已就绪；接入官方 App 后即可远控"
-	if len(instances) > 0 {
+	s.Detail = "请先打开 Codex App，再启用本地 IPC 接入"
+	if s.Running {
 		s.State = "detected"
-		s.Detail = "发现独立启动的 App；接入需正常退出后重新打开"
+		s.Detail = "可通过本地 IPC 接入，无需重启 Codex App"
 	}
-	if connectionErr != nil {
-		s.LastError = connectionErr.Error()
-	}
-	if connections > 0 {
-		s.State = "connected"
-		s.Detail = "已就绪，可以远控"
+	if b != nil {
+		ipc := b.client()
+		if s.Running && ipc != nil && ipc.Alive() && c != nil && c.Alive() {
+			s.State = "connected"
+			s.Detail = "已通过本地 IPC 接入"
+			s.Endpoint = "ipc"
+			s.DesktopClients = 1
+		}
 	}
 	return s
 }
@@ -215,6 +209,13 @@ func (p *Provider) TurnStatus(ctx context.Context, session, turn string) (provid
 }
 
 func (p *Provider) Transcript(ctx context.Context, id, cursor string) (provider.Transcript, error) {
+	if out, ok, err := p.ipcTranscript(ctx, id, cursor); ok {
+		if err == nil || strings.HasPrefix(cursor, "ipc:") || ctx.Err() != nil {
+			return out, err
+		}
+		// A broken follower must not hide persisted history. These app-server
+		// APIs only read; they neither resume the thread nor acquire its writer.
+	}
 	// Capture before reading: later events can safely replay over this snapshot.
 	epoch, boundary := p.stream().log.Position()
 	var metadata struct{ Thread thread }
@@ -272,7 +273,8 @@ func normalizeTurn(raw json.RawMessage) provider.Turn {
 			ID, Type, Text, Phase, Status string
 			DurationMS                    *int64
 			StartedAtMS, CompletedAtMS    *int64
-			Content                       json.RawMessage
+			Content, Input                json.RawMessage
+			RestoreMessage                struct{ CreatedAt *int64 }
 			Summary                       []string
 			Changes                       []struct {
 				Path, Diff string
@@ -284,8 +286,12 @@ func normalizeTurn(raw json.RawMessage) provider.Turn {
 		}
 		item := provider.Item{ID: i.ID, Type: i.Type, Text: i.Text, Status: t.Status, Phase: i.Phase}
 		switch i.Type {
-		case "userMessage":
+		case "userMessage", "steeringUserMessage":
 			item.Role = "user"
+			if i.Type == "steeringUserMessage" {
+				i.Content = i.Input
+				item.Status = i.Status
+			}
 			var content []struct{ Type, Text string }
 			if len(i.Content) > 0 && json.Unmarshal(i.Content, &content) != nil {
 				continue
@@ -312,7 +318,7 @@ func normalizeTurn(raw json.RawMessage) provider.Turn {
 					item.ReasoningSummary = summary
 				}
 			}
-		case "functionCallOutput", "hookPrompt", "contextCompaction", "enteredReviewMode", "exitedReviewMode":
+		case "functionCallOutput", "hookPrompt", "contextCompaction", "enteredReviewMode", "exitedReviewMode", "steered":
 			item.Role = "internal"
 			item.Text = ""
 		default:
@@ -331,7 +337,9 @@ func normalizeTurn(raw json.RawMessage) provider.Turn {
 		}
 		// Keep recorded message times; turn boundaries are an explicit fallback
 		// for older history without item timestamps, never the sync clock.
-		if i.StartedAtMS != nil {
+		if i.Type == "steeringUserMessage" && i.RestoreMessage.CreatedAt != nil {
+			item.TimestampMS = i.RestoreMessage.CreatedAt
+		} else if i.StartedAtMS != nil {
 			item.TimestampMS = i.StartedAtMS
 		} else if i.CompletedAtMS != nil {
 			item.TimestampMS = i.CompletedAtMS
@@ -363,7 +371,11 @@ func (p *Provider) Create(ctx context.Context, o provider.CreateOptions) (provid
 	if c == nil || !c.Alive() {
 		return provider.Session{}, provider.ErrUnavailable
 	}
-	if err := c.Call(ctx, "thread/start", params, &out); err != nil {
+	var createdRaw json.RawMessage
+	if err := c.Call(ctx, "thread/start", params, &createdRaw); err != nil {
+		return provider.Session{}, err
+	}
+	if err := json.Unmarshal(createdRaw, &out); err != nil {
 		return provider.Session{}, err
 	}
 	if out.Thread.ID == "" {
@@ -377,6 +389,9 @@ func (p *Provider) Create(ctx context.Context, o provider.CreateOptions) (provid
 		p.created[out.Thread.ID] = c
 	}
 	p.mu.Unlock()
+	if b := p.appBridge(); b != nil {
+		b.register(out.Thread.ID, createdRaw, true)
+	}
 	return p.session(out.Thread), nil
 }
 
@@ -400,6 +415,17 @@ func (p *Provider) threadClient(ctx context.Context, id string) (*rpc.Client, er
 		if err := c.Call(ctx, "thread/resume", map[string]any{"threadId": id, "excludeTurns": true}, &resumed); err != nil {
 			return nil, fmt.Errorf("无法接续原会话（不会另建会话）: %w", err)
 		}
+		if b := p.appBridge(); b != nil {
+			b.register(id, resumed, false)
+			p.mu.Lock()
+			if p.client == c {
+				if p.created == nil {
+					p.created = map[string]*rpc.Client{}
+				}
+				p.created[id] = c
+			}
+			p.mu.Unlock()
+		}
 	}
 	return c, nil
 }
@@ -411,15 +437,7 @@ func (p *Provider) SendWithModel(ctx context.Context, id, text, model string) er
 	if strings.TrimSpace(text) == "" {
 		return errors.New("消息不能为空")
 	}
-	c, err := p.threadClient(ctx, id)
-	if err != nil {
-		return err
-	}
-	params := map[string]any{"threadId": id, "input": []any{map[string]string{"type": "text", "text": text}}}
-	if model != "" {
-		params["model"] = model
-	}
-	return c.Call(ctx, "turn/start", params, nil)
+	return p.sendInput(ctx, id, []any{map[string]string{"type": "text", "text": text}}, model)
 }
 
 func (p *Provider) Models(ctx context.Context) ([]provider.Model, error) {
@@ -457,10 +475,22 @@ func (p *Provider) Models(ctx context.Context) ([]provider.Model, error) {
 	}
 }
 func (p *Provider) Steer(ctx context.Context, id, turn, text string) error {
-	return p.call(ctx, "turn/steer", map[string]any{"threadId": id, "expectedTurnId": turn, "input": []any{map[string]string{"type": "text", "text": text}}}, nil)
+	return p.steerInput(ctx, id, turn, []any{map[string]string{"type": "text", "text": text}})
 }
 func (p *Provider) Interrupt(ctx context.Context, id, turn string) error {
-	return p.call(ctx, "turn/interrupt", map[string]string{"threadId": id, "turnId": turn}, nil)
+	c, owner, err := p.writeRoute(ctx, id)
+	if err != nil {
+		return err
+	}
+	if owner != "" {
+		b := p.appBridge()
+		if b == nil {
+			return provider.ErrUnavailable
+		}
+		_, err = b.request(ctx, "thread-follower-interrupt-turn", map[string]any{"conversationId": id, "mode": "user-stop", "expectedTurnId": turn}, owner)
+		return err
+	}
+	return c.Call(ctx, "turn/interrupt", map[string]string{"threadId": id, "turnId": turn}, nil)
 }
 func (p *Provider) Approvals() []provider.Approval {
 	p.mu.Lock()
@@ -518,9 +548,17 @@ func (p *Provider) Decide(ctx context.Context, id string, d provider.Decision) e
 		return err
 	}
 	p.removePending(id)
+	if b := p.appBridge(); b != nil {
+		b.markDirty(a.approval.SessionID)
+	}
 	return nil
 }
 func (p *Provider) observe(m rpc.Message, reply func(context.Context, any) error) {
+	defer func() {
+		if b := p.appBridge(); b != nil {
+			b.observe(m)
+		}
+	}()
 	if len(m.ID) > 0 {
 		p.addPending(m, reply, "service")
 	} else {
@@ -537,63 +575,11 @@ func (p *Provider) observe(m rpc.Message, reply func(context.Context, any) error
 		p.broker.Publish("codex", m.Method, m.Params)
 	}
 }
-func (p *Provider) ConnectDesktop(ctx context.Context, expected []provider.Instance, confirm bool) error {
-	if p.kind == "cli" {
-		return p.Start(ctx)
-	}
-	if !system.DesktopSupported {
-		return errors.New(system.DesktopUnsupportedReason)
-	}
-	if !p.connectMu.TryLock() {
-		return errors.New("正在接入 App")
-	}
-	defer p.connectMu.Unlock()
-	p.mu.Lock()
-	alive := p.client != nil && p.client.Alive()
-	endpoint := p.endpoint
-	p.mu.Unlock()
-	if !alive {
-		return provider.ErrUnavailable
-	}
-	app := system.FindApp(p.cfg.CodexApp)
-	current, err := system.Discover(ctx, app)
-	if err != nil {
-		return err
-	}
-	if connections, _ := p.desktopConnected(ctx, current); connections > 0 {
-		return nil
-	}
-	if err := system.ConnectDesktop(ctx, app, endpoint, expected, confirm); err != nil {
-		return err
-	}
-	deadline := time.Now().Add(12 * time.Second)
-	for time.Now().Before(deadline) {
-		current, err := system.Discover(ctx, app)
-		if err != nil {
-			return err
-		}
-		connections, err := system.DesktopConnections(ctx, current, endpoint)
-		if err == nil && len(current) == 1 && connections > 0 {
-			p.mu.Lock()
-			state := p.shared
-			state.Desktop = current
-			p.shared = state
-			p.mu.Unlock()
-			if err := device.Save(p.runtimeFile(), state); err != nil {
-				p.mu.Lock()
-				p.shared.Desktop = nil
-				p.mu.Unlock()
-				return err
-			}
-			return nil
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(150 * time.Millisecond):
-		}
-	}
-	return errors.New("App 已启动，但尚未连接指定的共享 app-server；请检查 App 版本或 CODEX_APP_SERVER_FORCE_CLI 设置")
+
+// IPC connects to the already-running App. expected/confirm are obsolete
+// launch controls and are deliberately never used to restart another program.
+func (p *Provider) ConnectDesktop(ctx context.Context, _ []provider.Instance, _ bool) error {
+	return p.Start(ctx)
 }
 
 func (p *Provider) clearRoute(route string) {

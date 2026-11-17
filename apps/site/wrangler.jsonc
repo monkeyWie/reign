@@ -11,7 +11,7 @@
     "directory": ".open-next/assets",
     "binding": "ASSETS",
     "html_handling": "none",
-    "run_worker_first": ["/p2p/*", "/api/*"],
+    "run_worker_first": ["/chat", "/chat/", "/p2p/*", "/api/*"],
   },
   "d1_databases": [
     {
@@ -22,5 +22,6 @@
   "durable_objects": {
     "bindings": [{ "name": "ROOMS", "class_name": "RelayRoom" }],
   },
+  "triggers": { "crons": ["17 * * * *"] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RelayRoom"] }],
 }

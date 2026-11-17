@@ -255,7 +255,7 @@ export function AccountPage({
           )}
           <div className="login-actions">
             {providers.map((p) => (
-              <Button key={p} disabled={busy} onClick={() => void login(p)}>
+              <Button key={p} disabled={busy} onClick={() => login(p)}>
                 {p === "github" ? "GitHub" : "Google"} 登录
               </Button>
             ))}

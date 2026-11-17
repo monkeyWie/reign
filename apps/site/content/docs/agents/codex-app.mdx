@@ -1,36 +1,33 @@
 ---
 title: Connect Codex App
-description: Let ReignHub and the desktop App share one Codex app-server.
+description: Follow Codex App sessions over local IPC without restarting the App.
 ---
 
-## Why launch through ReignHub?
+## Local IPC integration
 
-Other clients may read Codex history, but the corresponding backend owns running sessions. Reading a record does not connect to that backend.
-
-ReignHub starts a shared Codex app-server and passes connection settings when launching Codex App. Both clients connect directly to the same backend, sharing session state and live output.
+ReignHub connects to the existing Codex App IPC router. The original App executes commands for its sessions and publishes live state. No launch arguments or App restart are required.
 
 <ArchitectureDiagram kind="codex" />
 
 ## Steps
 
-1. Install Codex App, sign in and confirm it works locally.
-2. Find Codex App in ReignHub **Settings → Agent** and check readiness.
-3. If it is running independently, wait for the task to finish and quit it.
-4. Use Enable / Launch through ReignHub, and wait for ready status.
-5. Connect from a controller and open an existing session or create one.
+1. Install Codex App, sign in, confirm local operation and leave it running.
+2. Find Codex App in ReignHub **Settings → Agent** and enable it.
+3. Wait for readiness, then connect from your phone or browser.
+4. Open an existing session or create a remote session.
 
-<Callout title="Protect running tasks" type="warn">
-  Do not terminate a working Codex App or app-server just to enable remote
-  control. Integration may require restarting the App; wait for the current task
-  to finish.
-</Callout>
+## Ownership and quitting
 
-## Independent launch and quitting ReignHub
+Existing sessions run through their original IPC owner. Remote sessions use ReignHub’s private Codex backend, which publishes state to the App and accepts input from App followers.
 
-An App opened directly through the OS may not use the shared backend and can require reintegration. Follow the dashboard instructions and wait for Ready before sending remote instructions.
+Closing the window keeps ReignHub in the tray. Explicitly quitting closes its private backend and releases its writer locks; tasks owned by that backend may stop. It does not terminate Codex App. Later App recovery depends on the App itself; uninterrupted continuation of running tasks is not guaranteed.
 
-The shared backend has an independently managed lifecycle. The shared backend continues to manage local Codex tasks after ReignHub closes. Killing the backend, logging out or losing connectivity can still disrupt connections.
+## Connection and retry
 
-## Compatibility boundaries
+After an interruption, ReignHub follows state again. A revision gap requires a new baseline. Commands with an unknown outcome are not automatically replayed: check the conversation first. If another writer remains active but IPC is unavailable, ReignHub returns a retryable access error rather than forcing ownership.
 
-This integration depends on Codex App connection and launch capabilities, which may change with upgrades. If the shared backend fails, restore normal local use first, then report the App and CLI versions.
+## Support boundaries
+
+Following existing conversations supports IPC state versions 11 and 13, including array-path patches and merging history with live messages. Publishing ReignHub-owned conversations still uses version 11. A protocol version does not identify whether an App or IDE created a conversation. Unknown versions fail explicitly, while the independent initial history read can load persisted messages through read-only APIs if the live subscription fails.
+
+IPC is an internal interface that can change with App upgrades. Isolated tests cover both state versions, routing, interruption, duplicate requests and history loading retries; real App interaction and Windows operation still require device validation.
