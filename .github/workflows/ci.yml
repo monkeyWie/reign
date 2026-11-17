@@ -133,9 +133,11 @@ jobs:
       - uses: actions/setup-go@v7.0.0
         with:
           go-version-file: go.mod
+          # Preserve cross-target compilation separately from native test caches.
           cache-dependency-path: |
             go.sum
             clients/nsgo/go.sum
+            scripts/build.sh
       - name: Install native installer tools
         if: runner.os == 'Linux'
         run: |

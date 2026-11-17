@@ -2,7 +2,11 @@
 // The spawned host only exposes a fake Agent, never real local sessions.
 import assert from "node:assert/strict";
 import { smokeSite } from "./smoke-site.mts";
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { Service } from "../../packages/client-sdk/src/service";
 import { Connection } from "../../packages/client-sdk/src/connection";
@@ -27,8 +31,24 @@ const cache = {
   identities: table(),
   devices: table(),
 } as unknown as ReignHubCache;
-const child = spawn("go", ["run", "./testsupport/workerfixture", origin], {
-  cwd: fileURLToPath(new URL("../../clients/nsgo", import.meta.url)),
+// Compile separately so cold dependency downloads do not consume the service
+// readiness budget. The actual fixture still has to become ready in 60 seconds.
+const fixtureDir = await mkdtemp(join(tmpdir(), "reignhub-service-smoke-"));
+const fixture = join(fixtureDir, "host");
+try {
+  await promisify(execFile)(
+    "go",
+    ["build", "-o", fixture, "./testsupport/workerfixture"],
+    {
+      cwd: fileURLToPath(new URL("../../clients/nsgo", import.meta.url)),
+      timeout: 180000,
+    },
+  );
+} catch (error) {
+  await rm(fixtureDir, { recursive: true, force: true });
+  throw error;
+}
+const child = spawn(fixture, [origin], {
   detached: true,
   stdio: ["ignore", "pipe", "pipe"],
 });
@@ -53,6 +73,10 @@ try {
     child.on("exit", (n) => {
       clearTimeout(timer);
       reject(Error(`Fixture exited ${n}: ${stderr}`));
+    });
+    child.on("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
     });
   });
   if (process.argv[3] === "--site") {
@@ -153,4 +177,5 @@ try {
   }
   child.stdout.destroy();
   child.stderr.destroy();
+  await rm(fixtureDir, { recursive: true, force: true });
 }
