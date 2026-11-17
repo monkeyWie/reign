@@ -10,6 +10,7 @@ COPY internal ./internal
 COPY pkg ./pkg
 COPY cmd/reignhub-server ./cmd/reignhub-server
 COPY clients/nsgo ./clients/nsgo
+COPY scripts/build.sh scripts/go-toolexec.sh ./scripts/
 COPY scripts/platform/build-console.mjs ./scripts/platform/build-console.mjs
 COPY apps/site/components/console-loading.css ./apps/site/components/console-loading.css
 COPY apps/site/app/icon.svg ./apps/site/app/icon.svg
