@@ -38,6 +38,7 @@ func (s *State) refreshAfterSend(key, target, provider, session string) {
 type outgoingMessage struct {
 	ID          string          `json:"id"`
 	Text        string          `json:"text"`
+	Model       string          `json:"model,omitempty"`
 	Status      string          `json:"status"`
 	Error       string          `json:"error,omitempty"`
 	Timestamp   int64           `json:"timestamp"`
@@ -91,7 +92,7 @@ func snapshotOutgoing(messages []*outgoingMessage) []*outgoingMessage {
 func (s *State) queueOutgoing(body string, uploads []*Upload) *outgoingMessage {
 	s.restoreOutgoing(s.transcript)
 	now := time.Now()
-	m := &outgoingMessage{ID: fmt.Sprintf("local-%d", now.UnixNano()), Text: body, Status: "sending", Timestamp: now.UnixMilli(), Known: map[string]bool{}}
+	m := &outgoingMessage{ID: fmt.Sprintf("local-%d", now.UnixNano()), Text: body, Model: s.model, Status: "sending", Timestamp: now.UnixMilli(), Known: map[string]bool{}}
 	for _, row := range s.messageRows {
 		if row.Role == "user" {
 			m.Known[row.ID] = true
@@ -117,6 +118,42 @@ func (s *State) queueOutgoing(body string, uploads []*Upload) *outgoingMessage {
 	// aligns the top of a tall message and leaves its end below the viewport.
 	s.timeline.ScrollToIndexAt(0, 0, 0, false)
 	return m
+}
+
+func (s *State) retryOutgoing(id string) {
+	if !s.canSubmitMessage() {
+		return
+	}
+	for _, m := range s.outgoing[s.key()] {
+		if m.ID != id || m.Status != "failed" {
+			continue
+		}
+		ids := []string{}
+		for _, a := range m.Attachments {
+			ids = append(ids, str(a, "id"))
+		}
+		method := "send"
+		if activeTurn(s.transcript) != nil {
+			method = "steer"
+		}
+		extra := Object{"text": m.Text, "attachments": ids, "turn": str(activeTurn(s.transcript), "id")}
+		if m.Model != "" {
+			extra["model"] = m.Model
+		}
+		m.Status, m.Error, m.FinishedAt = "sending", "", time.Time{}
+		// Change only the local delivery row before the first pending frame;
+		// retrying does not require projecting the entire remote history again.
+		rows := append([]Message(nil), s.messageRows...)
+		for i := range rows {
+			if rows[i].ID == m.ID {
+				rows[i].Delivery, rows[i].DeliveryError = m.Status, ""
+			}
+		}
+		s.messageRows = rows
+		s.scheduleSnapshot()
+		s.submitMessage(method, extra, m)
+		return
+	}
 }
 
 func matchesOutgoing(m *outgoingMessage, row Message) bool {
@@ -170,7 +207,9 @@ func (s *State) reconcileOutgoing(freshSince time.Time) {
 			m.Status = "confirmed"
 			continue
 		}
-		if !freshSince.IsZero() && !m.FinishedAt.IsZero() && !m.FinishedAt.After(freshSince) {
+		// A failed message remains available for explicit retry, including after
+		// reconnect and a fresh snapshot that proves it never reached the Agent.
+		if m.Status != "failed" && !freshSince.IsZero() && !m.FinishedAt.IsZero() && !m.FinishedAt.After(freshSince) {
 			continue
 		}
 		kept = append(kept, m)

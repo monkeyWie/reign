@@ -478,12 +478,18 @@ func (s *State) pendingSend() string {
 	s.read()
 	return s.pendingSends[s.key()]
 }
-func (s *State) canSend() bool {
+func (s *State) canSubmitMessage() bool {
 	s.read()
 	if s.selected == nil || s.busy || !s.connected() || s.pendingSend() != "" {
 		return false
 	}
 	if activeTurn(s.transcript) != nil && !s.agentCapability("steer") {
+		return false
+	}
+	return true
+}
+func (s *State) canSend() bool {
+	if !s.canSubmitMessage() {
 		return false
 	}
 	for _, u := range s.uploads {
@@ -503,7 +509,6 @@ func (s *State) send(method string) {
 	if method != "interrupt" && !s.canSend() {
 		return
 	}
-	key, target, p, id := s.key(), s.target, str(s.selected, "providerId"), str(s.selected, "id")
 	body := strings.TrimSpace(s.draft.Get())
 	sent := append([]*Upload{}, s.uploads...)
 	ids := []string{}
@@ -519,15 +524,21 @@ func (s *State) send(method string) {
 			extra["model"] = s.model
 		}
 	}
-	if s.pendingSends == nil {
-		s.pendingSends = map[string]string{}
-	}
-	s.pendingSends[key] = method
-	s.changed()
 	var outgoing *outgoingMessage
 	if method != "interrupt" {
 		outgoing = s.queueOutgoing(body, sent)
 	}
+	s.submitMessage(method, extra, outgoing)
+}
+
+// Initial sends and explicit retries share completion, session isolation and
+// delivery tracking. Retrying never consumes the current composer's draft.
+func (s *State) submitMessage(method string, extra Object, outgoing *outgoingMessage) {
+	key, target, p, id := s.key(), s.target, str(s.selected, "providerId"), str(s.selected, "id")
+	if s.pendingSends == nil {
+		s.pendingSends = map[string]string{}
+	}
+	s.pendingSends[key] = method
 	s.error = ""
 	s.changed()
 	failure := &sessionOperationError{target: target, device: str(s.device(), "name"), provider: p, session: id, source: str(s.selected, "sourceKind"), method: method}

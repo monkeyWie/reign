@@ -39,7 +39,7 @@ func TestOutgoingReconcilesNewEchoWithoutMatchingOldIdenticalText(t *testing.T) 
 func TestOnlyFreshSnapshotAfterRPCSettlesRemovesAbsentLocalMessage(t *testing.T) {
 	s := outgoingFixture()
 	now := time.Now()
-	m := &outgoingMessage{ID: "local", Text: "missing", Status: "failed", FinishedAt: now}
+	m := &outgoingMessage{ID: "local", Text: "missing", Status: "accepted", FinishedAt: now}
 	s.outgoing[s.key()] = []*outgoingMessage{m}
 	s.transcript = outgoingTranscript()
 	for _, started := range []time.Time{{}, now.Add(-time.Second)} {
@@ -51,6 +51,12 @@ func TestOnlyFreshSnapshotAfterRPCSettlesRemovesAbsentLocalMessage(t *testing.T)
 	s.reconcileOutgoing(now.Add(time.Second))
 	if len(s.outgoing[s.key()]) != 0 {
 		t.Fatal("authoritatively absent message retained")
+	}
+	m.Status = "failed"
+	s.outgoing[s.key()] = []*outgoingMessage{m}
+	s.reconcileOutgoing(now.Add(time.Second))
+	if len(s.outgoing[s.key()]) != 1 {
+		t.Fatal("failed message disappeared before the user could retry")
 	}
 	m.FinishedAt = time.Time{}
 	m.Status = "sending"

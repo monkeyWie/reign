@@ -245,9 +245,12 @@ func (s *State) message(cx *core.Scope, get func() Message) core.Node {
 	}}
 	var bodyContent core.Node = body
 	if user {
+		// A menu/selection belongs to these text views. Polls, delivery changes,
+		// and other messages must not dispose them while this text is unchanged.
+		text := core.NewMemo(cx, func() string { return displayText(get()) })
 		bodyContent = core.Dynamic(func(cx *core.Scope) core.Node {
 			children := []core.Node{}
-			for _, part := range messagecontent.Parse(displayText(get())) {
+			for _, part := range messagecontent.Parse(text.Get()) {
 				if len(part.Replies) > 0 {
 					children = append(children, questionReplyCard(cx, part.Replies))
 				} else if strings.TrimSpace(part.Text) != "" {
@@ -309,9 +312,15 @@ func (s *State) message(cx *core.Scope, get func() Message) core.Node {
 	}})
 	content = append(content, core.Show{When: func() bool { return !get().Live && get().Delivery != "sending" }, Then: func(cx *core.Scope) core.Node {
 		return core.View{TestID: "message-actions-" + m.ID, Style: core.Style{Height: core.Pt(32), Direction: core.Row, AlignItems: core.AlignCenter, Gap: 8}, StyleFunc: func() core.Style {
-			visible := hover.Get() || s.narrowLayout()
+			visible := hover.Get() || s.narrowLayout() || get().Delivery == "failed"
 			return core.Style{Opacity: core.Alpha(choose(visible, float32(1), float32(0))), PointerEvents: choose(visible, core.PointerEventsAuto, core.PointerEventsNone)}
-		}, Children: []core.Node{s.copyButton(cx, "copy-message-"+m.ID, "", "ghost", func() string { return messageCopyText(get()) }), dynamicText(cx, func() string {
+		}, Children: []core.Node{core.Show{When: func() bool { return user && get().Delivery == "failed" }, Then: func(cx *core.Scope) core.Node {
+			retry := button(cx, "retry-message-"+m.ID, "", lucide.RotateCcw, "ghost", func() { s.retryOutgoing(m.ID) }).(core.View)
+			retry.Label = "重试发送"
+			retry.Tooltip = label(cx, "重试发送", 12, false)
+			retry.Disabled = func() bool { return !s.canSubmitMessage() }
+			return retry
+		}}, s.copyButton(cx, "copy-message-"+m.ID, "", "ghost", func() string { return messageCopyText(get()) }), dynamicText(cx, func() string {
 			ts := get().Timestamp
 			if ts == 0 {
 				return "时间未知"
