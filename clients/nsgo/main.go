@@ -4,8 +4,11 @@ import (
 	"github.com/monkeyWie/reignhub/clients/nsgo/hubui"
 	"github.com/monkeyWie/reignhub/clients/nsgo/nativecap"
 	"github.com/nsgo-dev/nsgo"
+	"github.com/nsgo-dev/nsgo/core"
 )
 
 func main() {
-	nsgo.Run(hubui.Root, append([]nsgo.Option{nsgo.WindowSize(1320, 880)}, nativecap.Options()...)...)
+	// App mode gives every desktop a managed window that can hide to the
+	// tray. Phones and browsers still use the same single main view.
+	nsgo.Run(func(app *core.Scope) { nsgo.SetMainView(app, hubui.Root) }, append([]nsgo.Option{nsgo.WindowSize(1320, 880)}, nativecap.Options()...)...)
 }

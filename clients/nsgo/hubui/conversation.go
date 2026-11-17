@@ -32,6 +32,14 @@ func (s *State) conversation(cx *core.Scope, narrow bool) core.Node {
 	listRef := s.timeline
 	atBottom := core.NewSignal(cx, true)
 	viewport := core.NewSignal(cx, core.Size{})
+	anchor := messageScrollAnchor{following: true}
+	keepLatest := func() { listRef.ScrollToIndexAt(0, 0, 0, false) }
+	updateScroll := func(e core.ScrollEvent) {
+		if anchor.scroll(e) {
+			keepLatest()
+		}
+		atBottom.Set(anchor.following)
+	}
 	// Connection/approval polling must not rebuild the entire list's data and
 	// navigation index. Message projections are replaced, never edited in place.
 	source := core.NewMemoFunc(cx, func() []Message { s.read(); return s.messageRows }, func(a, b []Message) bool {
@@ -75,7 +83,19 @@ func (s *State) conversation(cx *core.Scope, narrow bool) core.Node {
 		}
 		return rows.Get()[i-offset].ID
 	},
-		OnLayout: func(b core.Bounds) { viewport.Set(b.Size) }, OnScroll: func(e core.ScrollEvent) { atBottom.Set(e.ContentSize.Height-e.Size.Height-e.Offset.Y < 48) },
+		OnLayout: func(b core.Bounds) {
+			viewport.Set(b.Size)
+			if anchor.layout(b.Size) {
+				keepLatest()
+			}
+		}, OnScroll: updateScroll,
+		OnScrollDragStart: func(e core.ScrollEvent) {
+			anchor.dragging, anchor.restoring = true, false
+			updateScroll(e)
+		}, OnScrollDragEnd: func(e core.ScrollEvent) {
+			updateScroll(e)
+			anchor.dragging = false
+		},
 		Row: func(cx *core.Scope, r core.ListRow) core.Node {
 			key := core.NewMemo(cx, func() string {
 				i := r.Index()

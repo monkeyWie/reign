@@ -66,6 +66,33 @@ func TestSendingLongMessageAndJumpToLatestReachTheBottom(t *testing.T) {
 	app.Screenshot("long-message-follows-bottom")
 }
 
+func TestKeyboardRoundTripKeepsLatestMessageVisible(t *testing.T) {
+	transcript := Object{"turns": []Object{{"id": "keyboard", "status": "completed", "items": []Object{{"id": "answer", "role": "assistant", "text": strings.Repeat("回复中的一段文字。\n\n", 80) + "最后一行"}}}}}
+	app, s := conversationFixture(t, newDemoAPI(), 390, transcript, true)
+	app.WaitUntil(time.Second, func() bool { return !app.Exists("id:jump-to-latest") })
+	app.Focus("id:chat-input")
+	for _, height := range []core.Points{120, 300, 180, 0, 300, 0} {
+		app.SetEnvironment(core.Environment{OS: core.OSAndroid, Idiom: core.IdiomPhone, KeyboardHeight: height})
+		app.Post(func() { s.cx.Post(func() { s.draft.Set("第一行\n第二行\n第三行\n第四行") }) })
+		app.Settle()
+		app.WaitUntil(time.Second, func() bool { return !app.Exists("id:jump-to-latest") })
+		app.WaitUntil(time.Second, func() bool {
+			list := app.Find("id:chat-message-list")
+			return list.Content.Height-list.Frame.Size.Height-list.Offset.Y < 1
+		})
+	}
+	app.Screenshot("keyboard-closed-at-latest")
+	// Opening the keyboard while reading history must not pull us to latest.
+	app.Scroll("id:chat-message-list", -200)
+	app.WaitFor("id:jump-to-latest", time.Second)
+	for _, height := range []core.Points{300, 0} {
+		app.SetEnvironment(core.Environment{OS: core.OSAndroid, Idiom: core.IdiomPhone, KeyboardHeight: height})
+		app.WaitFor("id:jump-to-latest", time.Second)
+	}
+	app.Press("id:jump-to-latest")
+	app.WaitUntil(time.Second, func() bool { return !app.Exists("id:jump-to-latest") })
+}
+
 func testMobileMultilineMessage(t *testing.T, width core.Points) {
 	t.Helper()
 	text := "发现的问题\n\n1. 网站页脚没有公示任何有效的客服联系方式（如联系邮箱、联系电话或在线客服），用户在其他页面也难以直接找到官方客服渠道。\n\n修改建议\n\n1. 请在网站全站页脚公示至少一种有效的联系方式，例如联系邮箱、联系电话或在线客服入口，方便用户随时联系。\n\n" + "https://example.com/" + strings.Repeat("long-path-", 30) + "\n\n```text\n" + strings.Repeat("long-code-", 30) + "\n```"

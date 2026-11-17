@@ -12,6 +12,11 @@ import (
 func (s *State) phonePages(cx *core.Scope) core.Node {
 	nav := base.NewNav(cx, "devices")
 	s.phoneNav = nav
+	cx.Effect(func() {
+		if nav.Depth() > 0 {
+			s.clearRootBack()
+		}
+	})
 	cx.Cleanup(func() {
 		if s.phoneNav == nav {
 			s.phoneNav = nil

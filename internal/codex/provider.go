@@ -26,24 +26,27 @@ type pending struct {
 	route, requestID string
 }
 type Provider struct {
-	assets    *assets.Store
-	probeMu   sync.Mutex
-	probeAt   time.Time
-	probeInfo cliDaemonInfo
-	probeErr  error
-	kind      string
-	cfg       config.Config
-	broker    *events.Broker
-	mu        sync.Mutex
-	client    *rpc.Client
-	created   map[string]*rpc.Client
-	endpoint  string
-	shared    sharedRuntime
-	lastError string
-	pending   map[string]pending
-	next      uint64
-	connectMu sync.Mutex
-	live      *liveStream
+	assets     *assets.Store
+	probeMu    sync.Mutex
+	probeAt    time.Time
+	probeInfo  cliDaemonInfo
+	probeErr   error
+	kind       string
+	cfg        config.Config
+	broker     *events.Broker
+	mu         sync.Mutex
+	client     *rpc.Client
+	created    map[string]*rpc.Client
+	endpoint   string
+	shared     sharedRuntime
+	lastError  string
+	pending    map[string]pending
+	next       uint64
+	connectMu  sync.Mutex
+	live       *liveStream
+	projectMu  sync.Mutex
+	projectsAt time.Time
+	projects   *projectIndex
 }
 
 func New(c config.Config, _ string, b *events.Broker, stores ...*assets.Store) *Provider {
@@ -148,7 +151,8 @@ func (p *Provider) call(ctx context.Context, method string, params, out any) err
 type thread struct {
 	ID, Name, Preview, Cwd string
 	Model                  string
-	UpdatedAt              int64 `json:"updatedAt"`
+	ProjectID              string `json:"projectId"`
+	UpdatedAt              int64  `json:"updatedAt"`
 	Source                 json.RawMessage
 	Originator             string
 	Status                 struct {
@@ -186,6 +190,7 @@ func (p *Provider) Sessions(ctx context.Context, cursor string) (provider.Sessio
 	if err := p.call(ctx, "thread/list", params, &out); err != nil {
 		return provider.SessionPage{}, err
 	}
+	p.refreshProjects(ctx)
 	page := provider.SessionPage{Sessions: []provider.Session{}, NextCursor: out.NextCursor}
 	for _, t := range out.Data {
 		s := p.session(t)

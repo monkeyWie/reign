@@ -139,6 +139,8 @@ func Root(cx *core.Scope) core.Node {
 func RootWithAPI(cx *core.Scope, api API, start bool) core.Node {
 	s := newState(cx, api)
 	s.loadAppearance()
+	installScrollbars(cx)
+	s.installDesktopTray(cx)
 	s.installWorkspaceNavigation()
 	s.observeNativeBackground()
 	if start {
@@ -314,28 +316,28 @@ func (s *State) welcome(cx *core.Scope) core.Node {
 }
 
 type directoryRow struct {
-	ID, Title, Path string
-	Session         Object
-	Header, More    bool
+	ID, Title, Path, Group string
+	Session                Object
+	Header, More           bool
 }
 
 func (s *State) directoryRows() []directoryRow {
 	s.read()
 	rows := []directoryRow{}
 	for _, g := range directories(s.sessions) {
-		rows = append(rows, directoryRow{ID: "dir:" + g.Path, Title: g.Title, Path: g.Path, Header: true})
-		if s.collapsed[s.target+"|"+g.Path] {
+		rows = append(rows, directoryRow{ID: "dir:" + g.Key, Title: g.Title, Path: g.Path, Group: g.Key, Header: true})
+		if s.collapsed[s.target+"|"+g.Key] {
 			continue
 		}
 		visible := g.Sessions
-		if !s.expanded[s.target+"|"+g.Path] && len(visible) > 5 {
+		if !s.expanded[s.target+"|"+g.Key] && len(visible) > 5 {
 			visible = visible[:5]
 		}
 		for _, ss := range visible {
-			rows = append(rows, directoryRow{ID: str(ss, "providerId") + "|" + str(ss, "id"), Title: str(ss, "title"), Path: g.Path, Session: ss})
+			rows = append(rows, directoryRow{ID: str(ss, "providerId") + "|" + str(ss, "id"), Title: str(ss, "title"), Path: str(ss, "cwd"), Group: g.Key, Session: ss})
 		}
 		if len(g.Sessions) > 5 {
-			rows = append(rows, directoryRow{ID: "more:" + g.Path, Path: g.Path, More: true})
+			rows = append(rows, directoryRow{ID: "more:" + g.Key, Path: g.Path, Group: g.Key, More: true})
 		}
 	}
 	return rows
@@ -382,9 +384,9 @@ func (s *State) directory(cx *core.Scope) core.Node {
 			return core.Dynamic(func(cx *core.Scope) core.Node {
 				_ = key.Get()
 				data := core.Untracked(cx, item)
-				groupKey := s.target + "|" + data.Path
+				groupKey := s.target + "|" + data.Group
 				if data.More {
-					return core.View{Style: core.Style{Padding: core.Edges{Left: 43, Right: 12}}, Children: []core.Node{leftButton(button(cx, "more-"+data.Path, choose(s.expanded[groupKey], "收起", "展开显示"), nil, "ghost", brake.action(func() {
+					return core.View{Style: core.Style{Padding: core.Edges{Left: 43, Right: 12}}, Children: []core.Node{leftButton(button(cx, "more-"+data.Group, choose(s.expanded[groupKey], "收起", "展开显示"), nil, "ghost", brake.action(func() {
 						s.expanded[groupKey] = !s.expanded[groupKey]
 						groups.Update(func(v int) int { return v + 1 })
 						s.changed()
@@ -404,7 +406,7 @@ func (s *State) directory(cx *core.Scope) core.Node {
 							groups.Update(func(v int) int { return v + 1 })
 							s.changed()
 						})()
-					}, Style: core.Style{FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0), Direction: core.Row, AlignItems: core.AlignCenter, Gap: 10, Padding: core.Symmetric(8, 12)}, Children: []core.Node{folder, singleLine(cx, func() string { return item().Title }, 14, false)}}, button(cx, "directory-info-"+data.Path, "", lucide.Ellipsis, "ghost", brake.action(func() { s.directoryInfo = data.Path; s.dialog.Set("directory") })), button(cx, "directory-create-"+data.Path, "", lucide.SquarePen, "ghost", brake.action(func() { s.createDirectory = data.Path; s.dialog.Set("create") })))}}
+					}, Style: core.Style{FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0), Direction: core.Row, AlignItems: core.AlignCenter, Gap: 10, Padding: core.Symmetric(8, 12)}, Children: []core.Node{folder, singleLine(cx, func() string { return item().Title }, 14, false)}}, button(cx, "directory-info-"+data.Group, "", lucide.Ellipsis, "ghost", brake.action(func() { s.directoryInfo = data.Group; s.dialog.Set("directory") })), button(cx, "directory-create-"+data.Group, "", lucide.SquarePen, "ghost", brake.action(func() { s.createDirectory = data.Path; s.dialog.Set("create") })))}}
 				}
 				return core.View{TestID: "session-" + str(data.Session, "id"), Role: core.RoleButton, LabelFunc: func() string { return item().Title }, OnPress: func(core.PressEvent) { brake.action(func() { s.selectSession(item().Session) })() }, Style: core.Style{MinHeight: core.Pt(36), Padding: core.Edges{Top: 8, Bottom: 8, Left: 34, Right: 12}, Margin: core.Symmetric(1, 10), CornerRadius: 12}, StyleFunc: func() core.Style {
 					s.read()

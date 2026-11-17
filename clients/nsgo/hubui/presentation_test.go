@@ -2,6 +2,8 @@ package hubui
 
 import (
 	"fmt"
+	"github.com/nsgo-dev/nsgo/core"
+	"github.com/nsgo-dev/nsgo/nsgotest"
 	"strings"
 	"testing"
 )
@@ -166,5 +168,54 @@ func TestImageMarkersAreNotUserMessageText(t *testing.T) {
 	m.Text = "解释 [localImage] 的意思，看看这张图。"
 	if got := displayText(m); got != m.Text {
 		t.Fatal("removed inline literal text")
+	}
+}
+
+func TestProjectGroupingCombinesWorktreesAndKeepsExecutionDirectories(t *testing.T) {
+	project := Object{"id": "gopeed", "name": "Gopeed", "root": "/projects/gopeed"}
+	sessions := []Object{
+		{"id": "main", "providerId": "codex-app", "cwd": "/projects/gopeed", "project": project, "updatedAt": 10},
+		{"id": "work", "providerId": "codex-cli", "cwd": "/worktrees/feature", "project": project, "updatedAt": 40},
+		{"id": "other", "providerId": "codex-app", "cwd": "/other/gopeed", "project": Object{"id": "other", "name": "Gopeed", "root": "/other/gopeed"}, "updatedAt": 30},
+		{"id": "plain", "providerId": "claude-code", "cwd": "/plain/project", "updatedAt": 20},
+	}
+	groups := directories(sessions)
+	if len(groups) != 3 || groups[0].Title != "Gopeed" || groups[0].Key != "project:codex:gopeed" || groups[0].Path != "/projects/gopeed" || len(groups[0].Sessions) != 2 {
+		t.Fatalf("incorrect project grouping: %+v", groups)
+	}
+	if str(groups[0].Sessions[0], "cwd") != "/worktrees/feature" {
+		t.Fatal("changed a session's execution directory")
+	}
+	var state *State
+	nsgotest.Start(t, func(cx *core.Scope) core.Node {
+		state = newState(cx, newDemoAPI())
+		state.sessions = sessions
+		state.target = "device"
+		return core.View{}
+	})
+	rows := state.directoryRows()
+	if rows[0].Path != "/projects/gopeed" || rows[1].Path != "/worktrees/feature" || rows[1].Group != rows[0].Group {
+		t.Fatalf("group key leaked into execution path: %+v", rows)
+	}
+}
+
+func TestProjectWithoutRootUsesRealDirectoryForNewSessions(t *testing.T) {
+	sessions := []Object{
+		{"id": "a", "providerId": "codex-app", "cwd": "/work/a", "project": Object{"id": "p", "name": "Project"}, "updatedAt": 10},
+		{"id": "b", "providerId": "codex-cli", "cwd": "/work/b", "project": Object{"id": "p", "name": "Project"}, "updatedAt": 20},
+	}
+	groups := directories(sessions)
+	if len(groups) != 1 || groups[0].Title != "Project" || groups[0].Path != "/work/b" || groups[0].Key == groups[0].Path {
+		t.Fatalf("project ID became an execution directory: %+v", groups)
+	}
+}
+
+func TestDistinctProjectsSharingDirectoryRemainDistinct(t *testing.T) {
+	groups := directories([]Object{
+		{"id": "a", "providerId": "codex-app", "cwd": "/repo", "project": Object{"id": "a", "name": "Work", "root": "/repo"}},
+		{"id": "b", "providerId": "codex-app", "cwd": "/repo", "project": Object{"id": "b", "name": "Review", "root": "/repo"}},
+	})
+	if len(groups) != 2 {
+		t.Fatal("directory overrode explicit project identity")
 	}
 }

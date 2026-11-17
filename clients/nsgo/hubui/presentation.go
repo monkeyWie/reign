@@ -11,8 +11,8 @@ import (
 )
 
 type Directory struct {
-	Path, Title string
-	Sessions    []Object
+	Key, Path, Title string
+	Sessions         []Object
 }
 type Message struct {
 	ID, Role, Text, Turn    string
@@ -43,20 +43,9 @@ func directories(sessions []Object) []Directory {
 			unique[key] = s
 		}
 	}
-	groups := map[string][]Object{}
+	groups := map[string]*Directory{}
 	for _, s := range unique {
 		path := str(s, "cwd")
-		groups[path] = append(groups[path], s)
-	}
-	out := []Directory{}
-	for path, items := range groups {
-		sort.Slice(items, func(i, j int) bool {
-			a, b := number(items[i], "updatedAt"), number(items[j], "updatedAt")
-			if a != b {
-				return a > b
-			}
-			return str(items[i], "providerId")+str(items[i], "id") < str(items[j], "providerId")+str(items[j], "id")
-		})
 		name := "无工作目录"
 		if path != "" {
 			parts := strings.FieldsFunc(path, func(r rune) bool { return r == '/' || r == '\\' })
@@ -65,14 +54,62 @@ func directories(sessions []Object) []Directory {
 				name = parts[len(parts)-1]
 			}
 		}
-		out = append(out, Directory{path, name, items})
+		key := path
+		project := object(s["project"])
+		if id := str(project, "id"); id != "" {
+			family := str(s, "providerId")
+			if strings.HasPrefix(family, "codex-") {
+				family = "codex"
+			}
+			key = "project:" + family + ":" + id
+			path = str(project, "root")
+		} else if title := str(project, "name"); title != "" {
+			key = "project-name:" + title + "|" + str(project, "root")
+			path = str(project, "root")
+		} else if root := str(project, "root"); root != "" {
+			key = root
+			path = root
+		}
+		if title := str(project, "name"); title != "" {
+			name = title
+		}
+		group := groups[key]
+		if group == nil {
+			group = &Directory{Key: key, Path: path, Title: name}
+			groups[key] = group
+		}
+		if group.Path == "" && path != "" {
+			group.Path = path
+		}
+		// Project titles are independent of worktree directory names.
+		if str(project, "name") != "" {
+			group.Title = name
+		}
+		group.Sessions = append(group.Sessions, s)
 	}
+	out := []Directory{}
+	for _, group := range groups {
+		items := group.Sessions
+		sort.Slice(items, func(i, j int) bool {
+			a, b := number(items[i], "updatedAt"), number(items[j], "updatedAt")
+			if a != b {
+				return a > b
+			}
+			return str(items[i], "providerId")+str(items[i], "id") < str(items[j], "providerId")+str(items[j], "id")
+		})
+		// Without a canonical project root, use the most recent session's real cwd.
+		if group.Path == "" {
+			group.Path = str(items[0], "cwd")
+		}
+		out = append(out, *group)
+	}
+
 	sort.Slice(out, func(i, j int) bool {
 		a, b := number(out[i].Sessions[0], "updatedAt"), number(out[j].Sessions[0], "updatedAt")
 		if a != b {
 			return a > b
 		}
-		return out[i].Path < out[j].Path
+		return out[i].Key < out[j].Key
 	})
 	return out
 }

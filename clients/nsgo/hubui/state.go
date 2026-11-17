@@ -93,6 +93,7 @@ type State struct {
 	nativeTaskMonitors                                      map[string]*nativeTaskMonitor
 
 	appearance, settingsReturn, settingsSection string
+	rootBackDeadline                            time.Time
 }
 
 func newState(cx *core.Scope, api API) *State {

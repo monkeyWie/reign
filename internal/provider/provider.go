@@ -58,14 +58,22 @@ type AutoConnector interface {
 	AutoConnect(context.Context) error
 }
 
+// Project identifies an Agent project independently of a session's execution directory.
+type Project struct {
+	ID   string `json:"id,omitempty"`
+	Name string `json:"name,omitempty"`
+	Root string `json:"root,omitempty"`
+}
+
 type Session struct {
-	ID         string `json:"id"`
-	ProviderID string `json:"providerId"`
-	Title      string `json:"title"`
-	Preview    string `json:"preview"`
-	CWD        string `json:"cwd"`
-	Status     string `json:"status"`
-	Source     string `json:"source"`
+	ID         string   `json:"id"`
+	ProviderID string   `json:"providerId"`
+	Title      string   `json:"title"`
+	Preview    string   `json:"preview"`
+	CWD        string   `json:"cwd"`
+	Project    *Project `json:"project,omitempty"`
+	Status     string   `json:"status"`
+	Source     string   `json:"source"`
 	// SourceKind describes the recorded creation client, independently of ProviderID
 	// (the connection used to read/control this session). Source retains the raw value.
 	SourceKind   string `json:"sourceKind,omitempty"`

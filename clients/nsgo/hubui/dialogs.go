@@ -270,14 +270,31 @@ func (s *State) dialogView(cx *core.Scope, kind string) core.Node {
 	case kind == "directory":
 		title = "项目"
 		count := 0
+		path := ""
+		paths := []string{}
+		seen := map[string]bool{}
 		for _, g := range directories(s.sessions) {
-			if g.Path == s.directoryInfo {
+			if g.Key == s.directoryInfo {
 				title = g.Title
 				count = len(g.Sessions)
+				path = g.Path
+				for _, ss := range g.Sessions {
+					cwd := str(ss, "cwd")
+					if cwd != "" && !seen[cwd] {
+						seen[cwd] = true
+						paths = append(paths, cwd)
+					}
+				}
 			}
 		}
-		children = append(children, label(cx, fmt.Sprintf("%d 次聊天", count), 13, true), core.Text{Content: s.directoryInfo, Selectable: core.SelectableOn, Style: core.Style{FontSize: 13}})
-		footer = append(footer, s.copyButton(cx, "copy-directory", "复制路径", "outline", func() string { return s.directoryInfo }))
+		children = append(children, label(cx, fmt.Sprintf("%d 次聊天", count), 13, true), core.Text{Content: path, Selectable: core.SelectableOn, Style: core.Style{FontSize: 13}})
+		footer = append(footer, s.copyButton(cx, "copy-directory", "复制路径", "outline", func() string { return path }))
+		if len(paths) > 1 {
+			children = append(children, label(cx, "工作区", 13, true))
+			for _, cwd := range paths {
+				children = append(children, core.Text{Content: cwd, Selectable: core.SelectableOn, Style: core.Style{FontSize: 12}})
+			}
+		}
 	case kind == "clear-cache":
 		title = "清除这台设备的附件缓存？"
 		children = append(children, label(cx, "仅清除控制端已下载的附件，下次查看时会从被控端重新读取。", 13, true))

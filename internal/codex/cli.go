@@ -155,6 +155,7 @@ func (p *Provider) cliStatus(ctx context.Context) provider.Status {
 
 func (p *Provider) session(t thread) provider.Session {
 	s := t.session()
+	s.Project = p.sessionProject(t)
 	s.ProviderID = "codex-app"
 	if p.kind == "cli" {
 		s.ProviderID = "codex-cli"

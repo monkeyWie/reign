@@ -53,6 +53,7 @@ func TestSessionCreationSourceIsIndependentOfAccessProvider(t *testing.T) {
 }
 
 func TestSessionListExcludesSDKAndPreservesPagination(t *testing.T) {
+	t.Setenv("CODEX_HOME", t.TempDir())
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ws, err := websocket.Accept(w, r, nil)
 		if err != nil {
@@ -73,6 +74,8 @@ func TestSessionListExcludesSDKAndPreservesPagination(t *testing.T) {
 			case "initialize":
 			case "initialized":
 				continue
+			case "project/list":
+				result = json.RawMessage(`{"data":[{"id":"project","name":"Project","roots":[{"path":"/project"}]}]}`)
 			case "thread/list":
 				var params struct {
 					SourceKinds                    []string
@@ -118,6 +121,9 @@ func TestSessionListExcludesSDKAndPreservesPagination(t *testing.T) {
 	}
 	if len(first.Sessions) != 2 || first.NextCursor != "page-2" || first.Sessions[0].SourceKind != "app" || first.Sessions[1].SourceKind != "cli" {
 		t.Fatalf("bad first page: %+v", first)
+	}
+	if first.Sessions[0].Project == nil || first.Sessions[0].Project.Name != "Project" {
+		t.Fatal("project metadata missing from session page")
 	}
 	second, err := p.Sessions(ctx, first.NextCursor)
 	if err != nil {

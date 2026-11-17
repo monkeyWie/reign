@@ -354,6 +354,9 @@ func (s *State) observeLifecycle() {
 	})
 }
 func (s *State) setBackground(background bool) {
+	if background {
+		s.clearRootBack()
+	}
 	wasBackground := s.backgrounded
 	s.backgrounded = background
 	if wasBackground != background {
