@@ -174,13 +174,13 @@ func TestImageMarkersAreNotUserMessageText(t *testing.T) {
 func TestProjectGroupingCombinesWorktreesAndKeepsExecutionDirectories(t *testing.T) {
 	project := Object{"id": "gopeed", "name": "Gopeed", "root": "/projects/gopeed"}
 	sessions := []Object{
-		{"id": "main", "providerId": "codex-app", "cwd": "/projects/gopeed", "project": project, "updatedAt": 10},
-		{"id": "work", "providerId": "codex-cli", "cwd": "/worktrees/feature", "project": project, "updatedAt": 40},
-		{"id": "other", "providerId": "codex-app", "cwd": "/other/gopeed", "project": Object{"id": "other", "name": "Gopeed", "root": "/other/gopeed"}, "updatedAt": 30},
+		{"id": "main", "providerId": "codex-app", "cwd": "/projects/gopeed", "projectDir": "/projects/gopeed", "project": project, "updatedAt": 10},
+		{"id": "work", "providerId": "codex-cli", "cwd": "/worktrees/feature", "projectDir": "/projects/gopeed", "project": project, "updatedAt": 40},
+		{"id": "other", "providerId": "codex-app", "cwd": "/other/gopeed", "projectDir": "/other/gopeed", "project": Object{"id": "other", "name": "Gopeed", "root": "/other/gopeed"}, "updatedAt": 30},
 		{"id": "plain", "providerId": "claude-code", "cwd": "/plain/project", "updatedAt": 20},
 	}
 	groups := directories(sessions)
-	if len(groups) != 3 || groups[0].Title != "Gopeed" || groups[0].Key != "project:codex:gopeed" || groups[0].Path != "/projects/gopeed" || len(groups[0].Sessions) != 2 {
+	if len(groups) != 3 || groups[0].Title != "Gopeed" || groups[0].Key != "/projects/gopeed" || groups[0].Path != "/projects/gopeed" || len(groups[0].Sessions) != 2 {
 		t.Fatalf("incorrect project grouping: %+v", groups)
 	}
 	if str(groups[0].Sessions[0], "cwd") != "/worktrees/feature" {
@@ -199,23 +199,60 @@ func TestProjectGroupingCombinesWorktreesAndKeepsExecutionDirectories(t *testing
 	}
 }
 
-func TestProjectWithoutRootUsesRealDirectoryForNewSessions(t *testing.T) {
+func TestMissingProjectDirectoryFallsBackToExecutionDirectory(t *testing.T) {
 	sessions := []Object{
 		{"id": "a", "providerId": "codex-app", "cwd": "/work/a", "project": Object{"id": "p", "name": "Project"}, "updatedAt": 10},
 		{"id": "b", "providerId": "codex-cli", "cwd": "/work/b", "project": Object{"id": "p", "name": "Project"}, "updatedAt": 20},
 	}
 	groups := directories(sessions)
-	if len(groups) != 1 || groups[0].Title != "Project" || groups[0].Path != "/work/b" || groups[0].Key == groups[0].Path {
-		t.Fatalf("project ID became an execution directory: %+v", groups)
+	if len(groups) != 2 || groups[0].Path != "/work/b" || groups[1].Path != "/work/a" {
+		t.Fatalf("native project ID overrode directory grouping: %+v", groups)
 	}
 }
 
-func TestDistinctProjectsSharingDirectoryRemainDistinct(t *testing.T) {
+func TestDirectoryGroupingIsIndependentOfAgentAndNativeProjectID(t *testing.T) {
+	sessions := []Object{
+		{"id": "same", "providerId": "codex-app", "cwd": "/worktrees/one", "projectDir": "/repo/gopeed", "project": Object{"id": "codex-project", "name": "Gopeed"}, "updatedAt": 10},
+		{"id": "same", "providerId": "claude-code", "cwd": "/repo/gopeed", "projectDir": "/repo/gopeed", "project": Object{"id": "claude-project"}, "updatedAt": 20},
+		{"id": "same", "providerId": "pi", "cwd": "/worktrees/two", "projectDir": "/repo/gopeed", "updatedAt": 30},
+		{"id": "new", "providerId": "future-acp", "cwd": "/repo/gopeed/src", "projectDir": "/repo/gopeed", "updatedAt": 40},
+		{"id": "independent", "providerId": "codex-app", "cwd": "/worktrees/standalone", "projectDir": "/worktrees/standalone", "project": Object{"id": "new-project", "name": "Gopeed"}, "updatedAt": 5},
+		{"id": "other", "providerId": "pi", "cwd": "/other/gopeed", "projectDir": "/other/gopeed", "updatedAt": 4},
+	}
+	groups := directories(sessions)
+	if len(groups) != 3 || groups[0].Key != "/repo/gopeed" || groups[0].Path != "/repo/gopeed" || groups[0].Title != "Gopeed" || len(groups[0].Sessions) != 4 {
+		t.Fatalf("Agents did not share the host's project directory: %+v", groups)
+	}
+	if str(groups[0].Sessions[1], "cwd") != "/worktrees/two" || str(groups[0].Sessions[3], "providerId") != "codex-app" {
+		t.Fatal("aggregation changed execution directory or provider route", groups[0])
+	}
+	// Input order must not change the title or session order.
+	for i, j := 0, len(sessions)-1; i < j; i, j = i+1, j-1 {
+		sessions[i], sessions[j] = sessions[j], sessions[i]
+	}
+	again := directories(sessions)
+	if again[0].Title != groups[0].Title || str(again[0].Sessions[0], "providerId") != "future-acp" {
+		t.Fatal("aggregation depends on input order", again)
+	}
+}
+
+func TestDifferentNativeProjectsAtSameDirectoryShareOneGroup(t *testing.T) {
 	groups := directories([]Object{
-		{"id": "a", "providerId": "codex-app", "cwd": "/repo", "project": Object{"id": "a", "name": "Work", "root": "/repo"}},
-		{"id": "b", "providerId": "codex-app", "cwd": "/repo", "project": Object{"id": "b", "name": "Review", "root": "/repo"}},
+		{"id": "a", "providerId": "codex-app", "cwd": "/repo", "projectDir": "/repo", "project": Object{"id": "a", "name": "Work"}},
+		{"id": "b", "providerId": "codex-app", "cwd": "/repo", "projectDir": "/repo", "project": Object{"id": "b", "name": "Review"}},
+	})
+	if len(groups) != 1 || len(groups[0].Sessions) != 2 {
+		t.Fatal("native project IDs split one directory")
+	}
+}
+
+func TestHostWindowsPathsGroupOnAnyController(t *testing.T) {
+	groups := directories([]Object{
+		{"id": "a", "providerId": "codex-app", "cwd": `C:\Gopeed`, "projectDir": `C:\Gopeed\`},
+		{"id": "b", "providerId": "pi", "cwd": `C:\worktree`, "projectDir": "c:/gopeed"},
+		{"id": "c", "providerId": "pi", "cwd": "/other", "projectDir": "c:/gopeed-other"},
 	})
 	if len(groups) != 2 {
-		t.Fatal("directory overrode explicit project identity")
+		t.Fatal("Windows host paths were interpreted using controller OS", groups)
 	}
 }

@@ -44,6 +44,28 @@ T3 Code uses dedicated SDKs for Cursor and Muse. We use their currently publishe
 
 Local command configuration takes effect after restarting ReignHub. The dispatcher provider map stays immutable after startup, avoiding concurrent map mutation while paired clients issue requests. Multiple instance IDs do not imply isolated Agent credentials; use the Agent's own home/environment settings for that.
 
+## Project identity across Agents
+
+All session metadata carries `projectDir` (the project used for grouping) and
+`cwd` (the actual execution directory). The host normalizes `projectDir` once at
+the common API/sync boundary for every provider: an adapter's explicit project
+directory wins, followed by its native project root, then the Git repository's
+main directory for linked worktrees, and finally the working directory. Git and
+symlink resolution use the host filesystem without launching a Git subprocess.
+
+Controllers group by `projectDir || cwd`, independently of Agent or native
+project ID. Codex, Claude Code, Pi and future ACP sessions in the same project
+therefore share a group while keeping their own provider/session routes and
+execution directories. Titles are display metadata, never identity; unrelated
+directories called `gopeed` remain separate. An explicitly assigned standalone
+worktree uses its own project directory. Two native project IDs pointing to the
+same directory intentionally share one group.
+
+The same metadata is returned in the first session page, incremental catalogue,
+new-session response and transcript snapshot, and remains available offline in
+the controller's existing cache. No Agent-specific grouping or filesystem
+inspection runs on the controller.
+
 ## Persistence and recovery
 
 The new `agents.db` uses the existing private-permission SQLite settings store. It stores per-instance metadata indexes and separate per-session history records; no cloud schema is required. Persist history before including a new ID in the index. Serialize snapshot writes so an older completion cannot overwrite a newer transcript.

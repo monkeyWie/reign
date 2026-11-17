@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/monkeyWie/reignhub/internal/provider"
+	"github.com/monkeyWie/reignhub/internal/workspace"
 )
 
 type codexProject struct {
@@ -74,7 +75,7 @@ func newProjectIndex(projects []codexProject) *projectIndex {
 			if root.Path == "" {
 				continue
 			}
-			index.roots = append(index.roots, projectRoot{canonicalPath(root.Path), workspaceGitDir(root.Path), info})
+			index.roots = append(index.roots, projectRoot{workspace.CanonicalPath(root.Path), workspace.GitCommonDir(root.Path), info})
 		}
 	}
 	return index
@@ -106,7 +107,7 @@ func (index *projectIndex) forDirectory(cwd string) *provider.Project {
 	if cached, ok := index.directories.Load(cwd); ok {
 		return cached.(*provider.Project)
 	}
-	path := canonicalPath(cwd)
+	path := workspace.CanonicalPath(cwd)
 	var best *provider.Project
 	longest := 0
 	for _, root := range index.roots {
@@ -117,7 +118,7 @@ func (index *projectIndex) forDirectory(cwd string) *provider.Project {
 		}
 	}
 	if best == nil {
-		gitDir := workspaceGitDir(path)
+		gitDir := workspace.GitCommonDir(path)
 		if gitDir != "" {
 			for _, root := range index.roots {
 				if root.gitDir == gitDir {
@@ -130,48 +131,6 @@ func (index *projectIndex) forDirectory(cwd string) *provider.Project {
 	}
 	index.directories.Store(cwd, best)
 	return best
-}
-func canonicalPath(path string) string {
-	if resolved, err := filepath.EvalSymlinks(path); err == nil {
-		path = resolved
-	}
-	return filepath.Clean(path)
-}
-
-// Read Git's worktree pointers directly. No per-session subprocess, repository
-// mutation, or assumption that a worktree's basename equals its project name.
-func workspaceGitDir(path string) string {
-	for dir := filepath.Clean(path); ; dir = filepath.Dir(dir) {
-		marker := filepath.Join(dir, ".git")
-		if info, err := os.Stat(marker); err == nil {
-			if info.IsDir() {
-				return canonicalPath(marker)
-			}
-			raw, err := os.ReadFile(marker)
-			if err != nil {
-				return ""
-			}
-			text := strings.TrimSpace(string(raw))
-			if !strings.HasPrefix(text, "gitdir:") {
-				return ""
-			}
-			gitDir := strings.TrimSpace(strings.TrimPrefix(text, "gitdir:"))
-			if !filepath.IsAbs(gitDir) {
-				gitDir = filepath.Join(dir, gitDir)
-			}
-			if raw, err = os.ReadFile(filepath.Join(gitDir, "commondir")); err == nil {
-				common := strings.TrimSpace(string(raw))
-				if !filepath.IsAbs(common) {
-					common = filepath.Join(gitDir, common)
-				}
-				gitDir = common
-			}
-			return canonicalPath(gitDir)
-		}
-		if filepath.Dir(dir) == dir {
-			return ""
-		}
-	}
 }
 
 // Desktop can still own assignments while its app-server migration is pending.

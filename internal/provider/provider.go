@@ -58,7 +58,8 @@ type AutoConnector interface {
 	AutoConnect(context.Context) error
 }
 
-// Project identifies an Agent project independently of a session's execution directory.
+// Project retains an Agent's native project metadata. Its ID is Agent-local;
+// controllers group by Session.ProjectDir, never by this ID or project name.
 type Project struct {
 	ID   string `json:"id,omitempty"`
 	Name string `json:"name,omitempty"`
@@ -72,8 +73,11 @@ type Session struct {
 	Preview    string   `json:"preview"`
 	CWD        string   `json:"cwd"`
 	Project    *Project `json:"project,omitempty"`
-	Status     string   `json:"status"`
-	Source     string   `json:"source"`
+	// ProjectDir is the host-resolved project directory across all Agents.
+	// CWD remains the session's actual execution directory, including worktrees.
+	ProjectDir string `json:"projectDir,omitempty"`
+	Status     string `json:"status"`
+	Source     string `json:"source"`
 	// SourceKind describes the recorded creation client, independently of ProviderID
 	// (the connection used to read/control this session). Source retains the raw value.
 	SourceKind   string `json:"sourceKind,omitempty"`

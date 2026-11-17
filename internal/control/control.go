@@ -12,6 +12,7 @@ import (
 
 	"github.com/monkeyWie/reignhub/internal/assets"
 	"github.com/monkeyWie/reignhub/internal/provider"
+	"github.com/monkeyWie/reignhub/internal/workspace"
 )
 
 type Request struct {
@@ -81,7 +82,7 @@ func (d *Dispatcher) Handle(ctx context.Context, r Request) Response {
 		out.Error = err.Error()
 		return out
 	}
-	out.Result, err = json.Marshal(result)
+	out.Result, err = json.Marshal(workspace.Result(result))
 	if err != nil {
 		out.Error = err.Error()
 	}

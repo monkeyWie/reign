@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/monkeyWie/reignhub/internal/provider"
 	"github.com/monkeyWie/reignhub/internal/store"
+	"github.com/monkeyWie/reignhub/internal/workspace"
 	"sync"
 )
 
@@ -21,6 +22,7 @@ func (i *Index) Sync(ctx context.Context, p provider.Provider, scope, epoch stri
 	items := map[string]json.RawMessage{}
 	cursor := ""
 	seen := map[string]bool{}
+	var workspaces workspace.Resolver
 	for pages := 0; ; pages++ {
 		if pages >= 200 {
 			return store.Delta{}, fmt.Errorf("会话目录过大，请缩小范围")
@@ -30,7 +32,7 @@ func (i *Index) Sync(ctx context.Context, p provider.Provider, scope, epoch stri
 			return store.Delta{}, e
 		}
 		for _, s := range page.Sessions {
-			b, e := json.Marshal(s)
+			b, e := json.Marshal(workspaces.Session(s))
 			if e != nil {
 				return store.Delta{}, e
 			}

@@ -33,57 +33,38 @@ func directories(sessions []Object) []Directory {
 		if !visibleSession(s) || str(s, "sourceKind") == "vscode" {
 			continue
 		}
-		family := p
-		if strings.HasPrefix(p, "codex-") {
-			family = "codex"
-		}
+		family := agentFamily(p)
 		key := family + "|" + str(s, "id")
 		old := unique[key]
 		if old == nil || preferred(s) && !preferred(old) || preferred(s) == preferred(old) && number(s, "updatedAt") > number(old, "updatedAt") {
 			unique[key] = s
 		}
 	}
+	ordered := make([]Object, 0, len(unique))
+	for _, session := range unique {
+		ordered = append(ordered, session)
+	}
+	sort.Slice(ordered, func(i, j int) bool {
+		if a, b := number(ordered[i], "updatedAt"), number(ordered[j], "updatedAt"); a != b {
+			return a > b
+		}
+		return str(ordered[i], "providerId")+"|"+str(ordered[i], "id") < str(ordered[j], "providerId")+"|"+str(ordered[j], "id")
+	})
 	groups := map[string]*Directory{}
-	for _, s := range unique {
-		path := str(s, "cwd")
-		name := "无工作目录"
-		if path != "" {
-			parts := strings.FieldsFunc(path, func(r rune) bool { return r == '/' || r == '\\' })
-			name = path
-			if len(parts) > 0 {
-				name = parts[len(parts)-1]
-			}
-		}
-		key := path
-		project := object(s["project"])
-		if id := str(project, "id"); id != "" {
-			family := str(s, "providerId")
-			if strings.HasPrefix(family, "codex-") {
-				family = "codex"
-			}
-			key = "project:" + family + ":" + id
-			path = str(project, "root")
-		} else if title := str(project, "name"); title != "" {
-			key = "project-name:" + title + "|" + str(project, "root")
-			path = str(project, "root")
-		} else if root := str(project, "root"); root != "" {
-			key = root
-			path = root
-		}
-		if title := str(project, "name"); title != "" {
-			name = title
-		}
-		group := groups[key]
+	titled := map[string]bool{}
+	for _, s := range ordered {
+		directory := projectDirectory(s)
+		group := groups[directory.Key]
 		if group == nil {
-			group = &Directory{Key: key, Path: path, Title: name}
-			groups[key] = group
+			group = &directory
+			groups[directory.Key] = group
 		}
-		if group.Path == "" && path != "" {
-			group.Path = path
+		if group.Path == "" && directory.Path != "" {
+			group.Path = directory.Path
 		}
-		// Project titles are independent of worktree directory names.
-		if str(project, "name") != "" {
-			group.Title = name
+		if str(object(s["project"]), "name") != "" && !titled[directory.Key] {
+			group.Title = directory.Title
+			titled[directory.Key] = true
 		}
 		group.Sessions = append(group.Sessions, s)
 	}
@@ -97,7 +78,7 @@ func directories(sessions []Object) []Directory {
 			}
 			return str(items[i], "providerId")+str(items[i], "id") < str(items[j], "providerId")+str(items[j], "id")
 		})
-		// Without a canonical project root, use the most recent session's real cwd.
+		// Keep an executable directory independently of the normalized group key.
 		if group.Path == "" {
 			group.Path = str(items[0], "cwd")
 		}
