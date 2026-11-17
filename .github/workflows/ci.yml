@@ -42,7 +42,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-15]
+        os: [ubuntu-24.04, macos-15-intel]
         module: [core, nsgo]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 25
@@ -119,7 +119,7 @@ jobs:
             os: ubuntu-24.04
             targets: linux_x64,linux_arm64,windows_x64,windows_arm64
           - name: apple
-            os: macos-15
+            os: macos-15-intel
             targets: macos_arm64,macos_x64,ios,ios_simulator
     runs-on: ${{ matrix.os }}
     timeout-minutes: 35
