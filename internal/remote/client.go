@@ -282,6 +282,8 @@ func (c *Client) Call(ctx context.Context, r control.Request, out any) error {
 		return errors.New("request too large")
 	}
 	if err = c.wire.sendContext(transport.WithMethod(ctx, r.Method), r.ID, raw); err != nil {
+		// A completed frame can reach the host before its sender reports success.
+		c.cancelRead(r)
 		return err
 	}
 	idle.Touch()

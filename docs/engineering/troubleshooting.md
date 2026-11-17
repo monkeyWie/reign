@@ -32,6 +32,12 @@ Check progressive history, frame scheduling and budgets against [the protocol](.
 
 **Evidence:** [Provider stream tests](../../internal/provider/stream_test.go), [RPC](../../internal/rpc/client.go), [controller stream tests](../../clients/nsgo/hubui/session_stream_test.go), [read retry](../../internal/readretry). Measure first visible content, cancellation and small-request latency; fixtures do not establish real weak-network performance.
 
+## Cancelled history continues on the host
+
+A request can reach the host before its local frame writer reports completion. If caller cancellation wins that completion race, an early send-error return must still cancel the scoped remote read. Both native and browser clients send a bounded cancellation independently of the cancelled caller, without disconnecting the connection or cancelling Agent writes.
+
+**Evidence:** [Deterministic write/cancellation regression](../../clients/nsgo/browserclient/cancellation_native_test.go), [native read scheduling](../../internal/remote/read_scheduling_test.go). The regression holds write completion after receipt; increasing a test timeout would hide the defect.
+
 ## Stale connecting timers or unresponsive retry
 
 Check active-attempt state, start/end time, generation and latest events together. Historical running events must not keep a timer alive. A retry creates a fresh attempt and cancels obsolete setup; resumed foreground state rejects stale callbacks. Display diagnostic timestamps with timezone context.

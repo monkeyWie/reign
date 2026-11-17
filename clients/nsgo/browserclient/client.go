@@ -707,20 +707,25 @@ func (c *Client) Call(ctx context.Context, request Object) (any, error) {
 	if len(raw) > 1<<20 {
 		return nil, errors.New("指令过长")
 	}
-	if e := c.send(ctx, requestID, method, raw); e != nil {
-		return nil, e
-	}
-	idle.Touch()
 	cancelRead := func() {
 		if !control.CancellableRead(method) {
 			return
 		}
 		go func() {
+			cancelCtx, stop := context.WithTimeout(c.ctx, 3*time.Second)
+			defer stop()
 			cancelID := id()
 			raw, _ := json.Marshal(Object{"id": cancelID, "method": control.CancelRead, "cancel": requestID, "provider": r["provider"], "session": r["session"]})
-			_ = c.send(c.ctx, cancelID, control.CancelRead, raw)
+			_ = c.send(cancelCtx, cancelID, control.CancelRead, raw)
 		}()
 	}
+	if e := c.send(ctx, requestID, method, raw); e != nil {
+		// The host may already be reading when cancellation wins the sender's
+		// completion race. Retire that read even if send returned an error.
+		cancelRead()
+		return nil, e
+	}
+	idle.Touch()
 	var response Object
 	var history provider.TranscriptBuffer
 	historyBytes := 0
