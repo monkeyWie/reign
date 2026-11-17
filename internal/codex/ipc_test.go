@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -271,7 +272,8 @@ func TestIPCOwnerQueueDeduplicatesAndPreservesInput(t *testing.T) {
 	f := attachIPCFixture(t, p, nil)
 	b := f.b
 	b.register("owned", rawJSON(map[string]any{"thread": map[string]any{"id": "owned", "cwd": "/p"}}), true)
-	message := map[string]any{"id": "msg1", "text": "from App", "context": map[string]any{"attachments": []any{map[string]any{"type": "image", "path": "/tmp/photo.png"}}}}
+	imagePath := filepath.Join(t.TempDir(), "photo.png")
+	message := map[string]any{"id": "msg1", "text": "from App", "context": map[string]any{"attachments": []any{map[string]any{"type": "image", "path": imagePath}}}}
 	request := codexipc.Message{Type: "request", Method: "thread-follower-set-queued-follow-ups-state", Version: 3, Source: "app", Params: rawJSON(map[string]any{"conversationId": "owned", "state": map[string]any{"owned": []any{message}}})}
 	ctx, stop := context.WithTimeout(context.Background(), 3*time.Second)
 	defer stop()
@@ -282,6 +284,9 @@ func TestIPCOwnerQueueDeduplicatesAndPreservesInput(t *testing.T) {
 	case input := <-started:
 		if len(array(input["input"])) != 2 || input["clientUserMessageId"] != "msg1" {
 			t.Fatal(input)
+		}
+		if image := object(array(input["input"])[1]); image["type"] != "localImage" || image["path"] != imagePath {
+			t.Fatalf("queued image input changed: %+v", image)
 		}
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
