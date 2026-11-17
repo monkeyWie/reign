@@ -13,6 +13,7 @@ import (
 	"github.com/monkeyWie/reignhub/internal/remote"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -41,17 +42,31 @@ func main() {
 	if e != nil {
 		panic(e)
 	}
-	url := "http://" + ln.Addr().String()
-	p := remote.Pairing{Relay: "ws" + strings.TrimPrefix(url, "http"), Host: relay.ID(), Key: strings.Repeat("ab", 32), RelayToken: strings.Repeat("r", 32)}
+	baseURL := "http://" + ln.Addr().String()
+	p := remote.Pairing{Relay: "ws" + strings.TrimPrefix(baseURL, "http"), Host: relay.ID(), Key: strings.Repeat("ab", 32), RelayToken: strings.Repeat("r", 32)}
 	direct := p
 	direct.Host = relay.ID()
 	slow := p
 	slow.Host = relay.ID()
 	r := relay.New(p.RelayToken)
 	r.RelayAllowed = func(host, _, _ string) bool { return host != direct.Host }
-	r.Origins = []string{"127.0.0.1:*", "localhost:*"}
+	// NSGo serves browser tests on a separate random loopback port. The real
+	// relay accepts exact origins only; permit loopback origins in this isolated
+	// fake-Agent fixture without adding wildcard policy to production.
+	serveRelay := func(w http.ResponseWriter, req *http.Request) {
+		if origin := req.Header.Get("Origin"); origin != "" {
+			u, err := url.Parse(origin)
+			if err != nil || u.Scheme != "http" || (u.Hostname() != "127.0.0.1" && u.Hostname() != "localhost") || u.Port() == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" || req.URL.Query().Get("role") != "client" {
+				http.Error(w, "fixture origin denied", http.StatusForbidden)
+				return
+			}
+			req = req.Clone(req.Context())
+			req.Header.Del("Origin")
+		}
+		r.ServeHTTP(w, req)
+	}
 	mux := http.NewServeMux()
-	mux.Handle("/p2p/signal", r)
+	mux.HandleFunc("/p2p/signal", serveRelay)
 	mux.HandleFunc("/p2p/relay", func(w http.ResponseWriter, req *http.Request) {
 		if req.URL.Query().Get("id") == slow.Host {
 			select {
@@ -60,7 +75,7 @@ func main() {
 				return
 			}
 		}
-		r.ServeHTTP(w, req)
+		serveRelay(w, req)
 	})
 	mux.HandleFunc("/fixture", func(w http.ResponseWriter, req *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -85,8 +100,8 @@ func main() {
 		time.Sleep(time.Millisecond)
 	}
 	if len(os.Args) > 1 {
-		os.WriteFile(os.Args[1], []byte(url), 0600)
+		os.WriteFile(os.Args[1], []byte(baseURL), 0600)
 	}
-	fmt.Println(url)
+	fmt.Println(baseURL)
 	select {}
 }
