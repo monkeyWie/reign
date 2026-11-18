@@ -16,6 +16,10 @@ import (
 )
 
 func attachmentCardsFixture(t *testing.T, dark bool) (*nsgotest.App, *State, *downloadFixture) {
+	return attachmentCardsRoleFixture(t, dark, "assistant")
+}
+
+func attachmentCardsRoleFixture(t *testing.T, dark bool, role string) (*nsgotest.App, *State, *downloadFixture) {
 	t.Helper()
 	var buffer bytes.Buffer
 	img := image.NewRGBA(image.Rect(0, 0, 80, 60))
@@ -48,7 +52,7 @@ func attachmentCardsFixture(t *testing.T, dark bool) (*nsgotest.App, *State, *do
 			}
 			attachments = append(attachments, a)
 		}
-		m := Message{ID: "cards", Role: "assistant", Text: "Attachments", Attachments: attachments}
+		m := Message{ID: "cards", Role: role, Text: "Attachments", Attachments: attachments}
 		// The fixture parent accepts clicks so browser tests can exercise a
 		// real pointer activation on otherwise noninteractive file content.
 		return core.View{Style: fill, OnPress: func(core.PressEvent) {}, StyleFunc: func() core.Style { return core.Style{Background: palette(cx).background} }, Children: []core.Node{
@@ -132,5 +136,38 @@ func testAttachmentCardsGrid(t *testing.T, dark bool) {
 		if width == 320 || step == 0 {
 			app.Screenshot(fmt.Sprintf("attachment-cards-%g-dark-%t", width, dark))
 		}
+	}
+}
+
+func TestUserMessageAttachmentPlacement(t *testing.T) { testMessageAttachmentPlacement(t, "user") }
+func TestAgentMessageAttachmentPlacement(t *testing.T) {
+	testMessageAttachmentPlacement(t, "assistant")
+}
+func testMessageAttachmentPlacement(t *testing.T, role string) {
+	app, _, _ := attachmentCardsRoleFixture(t, false, role)
+	for _, width := range []core.Points{820, 320} {
+		if nsgotest.Target() == "" || nsgotest.Target() == "web" {
+			app.Resize(width, 900)
+		}
+		app.Settle()
+		body := globalBounds(app.Find("id:message-body-cards"))
+		image := globalBounds(app.Find("id:attachment-0"))
+		file := globalBounds(app.Find("id:attachment-2"))
+		if file.Origin.Y < body.Origin.Y+body.Size.Height {
+			t.Fatal("file attachments must follow the text")
+		}
+		if role == "user" {
+			if image.Origin.Y+image.Size.Height > body.Origin.Y+.5 || image.Size.Width > 89 || image.Size.Height > 89 {
+				t.Fatalf("user image is not a compact preview above the bubble: %v %v", image, body)
+			}
+			images := globalBounds(app.Find("id:user-images-cards"))
+			last := globalBounds(app.Find("id:attachment-1"))
+			if math.Abs(float64(last.Origin.X+last.Size.Width-images.Origin.X-images.Size.Width)) > 1 {
+				t.Fatal("user previews are not right aligned")
+			}
+		} else if image.Origin.Y < body.Origin.Y+body.Size.Height {
+			t.Fatal("Agent image appears above its text")
+		}
+		app.Screenshot(fmt.Sprintf("message-attachments-%s-%g", role, width))
 	}
 }

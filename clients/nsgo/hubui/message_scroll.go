@@ -8,15 +8,19 @@ import "github.com/nsgo-dev/nsgo/core"
 // real drag takes over. The same resize while reading history leaves it alone.
 type messageScrollAnchor struct {
 	size      core.Size
+	content   core.Size
 	following bool
 	restoring bool
 	dragging  bool
 }
 
 func (a *messageScrollAnchor) layout(size core.Size) bool {
+	if size.Height <= 0 {
+		return false
+	}
 	previous := a.size
 	a.size = size
-	if size == previous || previous.Height <= 0 || size.Height <= 0 || !a.following || a.dragging {
+	if size == previous || !a.following || a.dragging {
 		return false
 	}
 	a.restoring = true
@@ -24,8 +28,23 @@ func (a *messageScrollAnchor) layout(size core.Size) bool {
 }
 
 func (a *messageScrollAnchor) scroll(e core.ScrollEvent) bool {
+	// Native page transitions can publish offsets before a usable viewport.
+	// They cannot establish whether the user is reading history.
+	if e.Size.Height <= 0 {
+		return false
+	}
 	// Some platforms deliver the resized scroll event before OnLayout.
 	restore := a.layout(e.Size)
+	// Initial history, streaming prefixes and image/Markdown measurements can
+	// report an old offset against new content before native anchoring lands.
+	// Preserve intent and explicitly pin row zero instead of showing the jump
+	// control for those intermediate layout events.
+	if a.content != e.ContentSize {
+		a.content = e.ContentSize
+		if a.following && !a.dragging && e.Size.Height > 0 {
+			a.restoring, restore = true, true
+		}
+	}
 	distance := e.ContentSize.Height - e.Size.Height - e.Offset.Y
 	if a.restoring {
 		if distance <= 1 {

@@ -99,7 +99,9 @@ func (w *sessionStream) startSnapshot() {
 			}
 			w.s.setTranscript(preview)
 		})
-		readCtx, stopRead := context.WithTimeout(w.ctx, 30*time.Second)
+		// Transport idle budgets reset on every received frame. A total deadline
+		// would discard a healthy history transfer on a slow connection.
+		readCtx, stopRead := context.WithCancel(w.ctx)
 		defer stopRead()
 		ctx := provider.WithTranscriptObserver(readCtx, observe)
 		v, err := rpc(ctx, w.s.api, w.target, w.provider, w.session, "transcript", Object{"fresh": true, "progress": true})

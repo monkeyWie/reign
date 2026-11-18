@@ -50,16 +50,22 @@ func (a *API) cached(target string, command Object) (any, error) {
 			sessions = append(sessions, obj(session))
 		}
 	}
-	for _, p := range arr(providers) {
-		if directories["directory:"+target+":"+str(p, "id")] {
+	for _, key := range keys {
+		prefix := "rpc:" + target + ":"
+		if !strings.HasPrefix(key, prefix) {
 			continue
 		}
-		page, err := a.cached(target, Object{"method": "sessions", "provider": str(p, "id"), "session": ""})
+		var request Object
+		if json.Unmarshal([]byte(strings.TrimPrefix(key, prefix)), &request) != nil || str(request, "method") != "sessions" || str(request, "provider") == "" || str(request, "session") != "" || str(request, "cursor") != "" || directories["directory:"+target+":"+str(request, "provider")] {
+			continue
+		}
+		page, err := a.store.Get(key)
 		if err != nil {
 			return nil, err
 		}
 		sessions = append(sessions, arr(obj(page)["sessions"])...)
 	}
+
 	return Object{"providers": providers, "sessions": sessions}, nil
 }
 

@@ -14,7 +14,7 @@ Diagnose discovery, network setup, authorization, RPC, Provider and UI/cache sep
 
 ## Connected device with missing history
 
-A live subscription failure must not gate initial history or erase cached content. Check history, watch and cache independently; distinguish an unavailable Provider from an empty conversation. Missing baselines must not be skipped using only a saved cursor. Vendor schema and backend investigations belong with the adapter implementation notes.
+A live subscription failure must not gate initial history or erase cached content. Check history, watch and cache independently; distinguish an unavailable Provider from an empty conversation. Missing baselines must not be skipped using only a saved cursor. A missing Provider discovery response must not hide a persisted first metadata page. Only a successful full directory reconciliation can remove stale entries; offline `sync` returns an error and preserves the directory. Long history transfers use per-request progress idle budgets, not an additional fixed total UI timeout. Vendor schema and backend investigations belong with the adapter implementation notes.
 
 **Evidence:** [History failure tests](../../clients/nsgo/hubui/session_failure_test.go), [controller stream tests](../../clients/nsgo/hubui/session_stream_test.go).
 
@@ -50,6 +50,35 @@ A handler starting network work does not itself acknowledge activation. Check sh
 
 Spinner resets often indicate component replacement, not incorrect animation duration. Check node identity and avoid rebuilding whole histories on text deltas. Catch-up dots must not consume list height and must disappear once caught up even while generation continues. Preserve bottom anchors across keyboard/viewport changes and selection/focus across background updates. See [frontend design](frontend-design.md).
 
+## Upload stalls or later images fail immediately
+
+Inspect acknowledged offsets, active/queued file counts and completion separately.
+The controller limits active uploads to two and queues the rest. Small initial
+chunks expose real progress earlier on slow paths. Lost begin/write/finish
+acknowledgements reconcile through the same scoped upload ID; they must not
+create a second file or replay an Agent message. Keep progress below 100% until
+the host confirms integrity. Four-file, lost-ACK and cancellation fixtures live
+in [upload tests](../../clients/nsgo/hubui/attachments_native_test.go); these do
+not establish cellular-network throughput.
+
 ## Add a lesson
 
 Record trigger, evidence, cause, recovery, regression entry and unverified conditions. Mark hypotheses explicitly. Link implementation/tests rather than copy them. Dated investigations belong in `docs/research`; reusable lessons belong here. Do not grow global instructions with individual bug rules.
+
+## Accepted messages followed by an App error page
+
+A failed RPC acknowledgement is not proof that a message was rejected. For the
+Codex adapter, inspect the App error-boundary exception and stack separately
+from the steering rejection. Missing `text_elements` in optimistic text input
+causes a renderer `length` dereference; messages can remain persisted and become
+visible after the App reloads canonical history. Normalize at the vendor input
+boundary, verify using installed-package code and synthetic state, and preserve
+unknown delivery outcomes through RPC/bridge errors. Never reproduce by sending
+into a real conversation or restarting Codex App as a fixture. Vendor details and
+verification commands belong in `internal/codex/README.md`.
+
+For controller entry/keyboard issues, test initial delayed history and content
+remeasurement as well as manual virtual-list jumps: a bottom-anchor fix must not
+undo explicit history navigation. Failed local overlays need stable predecessor
+positions across streaming, cache restore and remote echo replacement. A partial
+history page cannot authorize deletion of an absent message.

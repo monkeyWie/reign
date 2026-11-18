@@ -85,7 +85,7 @@ func navigationSnippet(text string, limit int) string {
 	return out.String()
 }
 
-func (s *State) messageNavigation(cx *core.Scope, rows *core.Memo[[]Message], ref *core.Ref, viewport *core.Signal[core.Size], tailCount func() int) core.Node {
+func (s *State) messageNavigation(cx *core.Scope, rows *core.Memo[[]Message], viewport *core.Signal[core.Size], navigate func(int)) core.Node {
 	targets := core.NewMemoFunc(cx, func() []messageNavigationTarget {
 		return messageNavigationTargets(rows.Get(), viewport.Get().Height)
 	}, slices.Equal[[]messageNavigationTarget])
@@ -120,7 +120,7 @@ func (s *State) messageNavigation(cx *core.Scope, rows *core.Memo[[]Message], re
 							}},
 						}}
 					})},
-				}, OnMouseEnter: move, OnMouseMove: move, OnPress: func(core.PressEvent) { ref.ScrollToIndexAt(target().row+tailCount(), .5, 0, false) },
+				}, OnMouseEnter: move, OnMouseMove: move, OnPress: func(core.PressEvent) { navigate(target().row) },
 					Style: core.Style{Height: core.Pt(12), Width: core.Pt(44), JustifyContent: core.JustifyCenter, Padding: core.Edges{Left: 8}},
 					StyleFunc: func() core.Style {
 						return core.Style{FocusVisible: pressStyle(cx).FocusVisible, Active: &core.Style{Opacity: core.Alpha(.6)}}

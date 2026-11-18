@@ -178,9 +178,12 @@ func TestDevicePairingControlAndRevocation(t *testing.T) {
 		t.Fatalf("incremental sync: %v %v", directory, e)
 	}
 	hub.Disconnect(saved.ID)
-	directory, e = hub.Sync(ctx, saved.ID, "demo")
-	if e != nil || len(directory.([]map[string]any)) != 2 {
-		t.Fatalf("offline cache: %v %v", directory, e)
+	if _, e = hub.Sync(ctx, saved.ID, "demo"); e == nil {
+		t.Fatal("offline sync must not report a successful reconciliation")
+	}
+	cached, e := hub.Cached(saved.ID, control.Request{})
+	if e != nil || len(cached.(map[string]any)["sessions"].([]map[string]any)) != 2 {
+		t.Fatalf("offline cache: %v %v", cached, e)
 	}
 	if _, e = hub.Call(ctx, saved.ID, command); e == nil {
 		t.Fatal("offline write should fail")

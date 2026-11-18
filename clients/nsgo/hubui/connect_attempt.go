@@ -264,7 +264,7 @@ func (s *State) connectionPanel(cx *core.Scope, id string, a *connectAttempt, in
 		if s.connectionProblem(id) {
 			return s.connectionTitle(id)
 		}
-		return "连接正常，消息会持续同步。"
+		return "传输通道已连接；同步状态以实际响应为准。"
 	}, 13, false), spacer())
 	if a != nil {
 		elapsed := dynamicText(cx, func() string { s.read(); return fmt.Sprintf("已用 %d 秒", int(a.elapsed().Seconds())) }, 11, true)
@@ -272,6 +272,9 @@ func (s *State) connectionPanel(cx *core.Scope, id string, a *connectAttempt, in
 		header = append(header, elapsed)
 	}
 	d.Children = append(d.Children, row(header...))
+	if id != "" {
+		d.Children = append(d.Children, s.networkCard(cx, id))
+	}
 	if a != nil {
 		ref := &core.Ref{}
 		follow := core.NewSignal(cx, true)
@@ -338,6 +341,9 @@ func (s *State) connectionPanel(cx *core.Scope, id string, a *connectAttempt, in
 		}
 	}
 	d.Children = append(d.Children, core.View{Style: core.Style{Direction: core.Row, JustifyContent: core.JustifyEnd}, Children: []core.Node{s.copyButton(cx, "copy-connection-log", "复制日志", "ghost", func() string { return s.connectionLog(id, a) })}})
+	// Keep the close control and footer outside the scrolling diagnostics.
+	body := d.Children
+	d.Children = []core.Node{core.Scroll{TestID: "connection-body", Style: core.Style{FlexShrink: 1, MinHeight: core.Pt(0)}, StyleFunc: func() core.Style { return core.Style{MaxHeight: core.Pt(max(120, cx.Env().Window().Height-220))} }, Children: []core.Node{core.View{Style: core.Style{Gap: 12}, Children: body}}}}
 	return modalDialog(cx, d, close)
 }
 

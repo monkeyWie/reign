@@ -36,3 +36,34 @@ func TestKeyboardResizeIntermediateOffsetsDoNotLeaveLatest(t *testing.T) {
 		}
 	}
 }
+
+func TestInitialMeasurementsAndProgressiveContentKeepLatestIntent(t *testing.T) {
+	a := messageScrollAnchor{following: true}
+	a.scroll(core.ScrollEvent{ContentSize: core.Size{Height: 2400}})
+	if !a.following {
+		t.Fatal("unlaid page lost latest intent")
+	}
+	size := core.Size{Width: 390, Height: 600}
+	if !a.layout(size) {
+		t.Fatal("first viewport must explicitly anchor latest")
+	}
+	// Android can report the unadjusted offset while first history and measured
+	// Markdown replace the empty/estimated list. Neither event is user input.
+	for _, height := range []core.Points{900, 2400, 3600} {
+		if !a.scroll(core.ScrollEvent{Size: size, ContentSize: core.Size{Height: height}, Offset: core.Point{Y: 0}}) {
+			t.Fatal("content measurement did not restore latest")
+		}
+		if !a.following {
+			t.Fatal("initial content was mistaken for a history scroll")
+		}
+		a.scroll(core.ScrollEvent{Size: size, ContentSize: core.Size{Height: height}, Offset: core.Point{Y: height - size.Height}})
+	}
+	// An actual user drag must win, including when another row measures.
+	a.dragging = true
+	a.restoring = false
+	a.scroll(core.ScrollEvent{Size: size, ContentSize: core.Size{Height: 3800}, Offset: core.Point{Y: 900}})
+	a.dragging = false
+	if a.following || a.scroll(core.ScrollEvent{Size: size, ContentSize: core.Size{Height: 4000}, Offset: core.Point{Y: 900}}) {
+		t.Fatal("measurement pulled a reader out of history")
+	}
+}

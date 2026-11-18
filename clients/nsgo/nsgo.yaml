@@ -18,3 +18,7 @@ linux:
 apple:
   info:
     NSCameraUsageDescription: 扫描 ReignHub 设备二维码以连接电脑。
+
+i18n:
+  dir: hubui/locales
+  source: en

@@ -83,7 +83,7 @@ func TestAutomaticConnectionErrorsUseStatusInsteadOfOverlay(t *testing.T) {
 	app.Screenshot("phone-connection-status")
 	f.broken.Store(false)
 	app.Press("id:connection-retry")
-	app.WaitFor("text:连接正常，消息会持续同步。", 4*time.Second)
+	app.WaitFor("text:传输通道已连接；同步状态以实际响应为准。", 4*time.Second)
 	if app.Exists("id:connection-error-raw") || app.Exists("id:error-banner") {
 		t.Fatal("recovered connection retained an error")
 	}

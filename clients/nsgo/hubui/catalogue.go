@@ -20,17 +20,8 @@ func (s *State) loadCatalogue(ctx context.Context, cancel context.CancelFunc, ge
 				return
 			}
 			s.providers = providers
-			visible := map[string]bool{}
-			for _, p := range providers {
-				visible[str(p, "id")] = true
-			}
-			kept := []Object{}
-			for _, session := range s.sessions {
-				if visible[str(session, "providerId")] && visibleSession(session) {
-					kept = append(kept, session)
-				}
-			}
-			s.sessions = kept
+			// Discovery reports current availability, not authoritative deletions.
+			// Only a successful directory reconciliation may remove cached sessions.
 			s.rememberWorkspace()
 			s.changed()
 		})

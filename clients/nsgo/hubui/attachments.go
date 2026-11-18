@@ -2,6 +2,7 @@ package hubui
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -13,11 +14,15 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/monkeyWie/reignhub/clients/nsgo/hubui/locales"
 	"github.com/nsgo-dev/nsgo/core"
+	"github.com/nsgo-dev/nsgo/i18n"
 	"github.com/nsgo-dev/nsgo/icons/lucide"
+	"github.com/nsgo-dev/nsgo/ui"
 	"github.com/nsgo-dev/nsgo/ui/chat"
 )
 
@@ -28,6 +33,8 @@ type Upload struct {
 	Sent                          int64
 	Target, Provider, Session     string
 	cancelled                     atomic.Bool
+	cancel                        context.CancelFunc
+	active                        bool
 }
 
 func hashBytes(b []byte) string { v := sha256.Sum256(b); return hex.EncodeToString(v[:]) }
@@ -118,84 +125,162 @@ func (s *State) addUpload(name, mime string, data []byte) {
 		s.changed()
 		return
 	}
-	u := &Upload{Name: name, MIME: mime, Data: data, Status: "uploading", Target: s.target, Provider: str(s.selected, "providerId"), Session: str(s.selected, "id")}
+	u := &Upload{Name: name, MIME: mime, Data: data, Status: "queued", Target: s.target, Provider: str(s.selected, "providerId"), Session: str(s.selected, "id")}
 	s.uploads = append(s.uploads, u)
 	s.changed()
 	s.upload(u)
 }
+
+// All drafts share one FIFO, so navigation cannot bypass the concurrency bound.
 func (s *State) upload(u *Upload) {
-	u.Status = "uploading"
-	u.Error = ""
-	id := u.ID
-	s.changed()
-	go func() {
-		call := func(method string, p Object) (Object, error) {
-			v, e := rpc(s.ctx, s.api, u.Target, u.Provider, u.Session, method, Object{"params": p})
-			return object(v), e
-		}
-		sum := hashBytes(u.Data)
-		offset := int64(0)
-		var err error
-		if id == "" {
-			var r Object
-			r, err = call("attachment.begin", Object{"name": u.Name, "size": len(u.Data), "sha256": sum})
-			id = str(r, "id")
-		} else {
-			var r Object
-			r, err = call("attachment.status", Object{"id": id})
-			offset = number(r, "offset")
-		}
-		for err == nil && offset < int64(len(u.Data)) && !u.cancelled.Load() {
-			end := min(offset+(48<<10), int64(len(u.Data)))
-			var r Object
-			r, err = call("attachment.write", Object{"id": id, "offset": offset, "data": base64.StdEncoding.EncodeToString(u.Data[offset:end])})
-			if err != nil {
-				break
-			}
-			next := number(r, "offset")
-			if next < end || next > int64(len(u.Data)) {
-				err = fmt.Errorf("上传偏移无效")
-				break
-			}
-			offset = next
-			progress := offset
-			progressID := id
-			s.cx.Post(func() { u.ID = progressID; u.Sent = progress; s.changed() })
-		}
-		if u.cancelled.Load() {
-			_, _ = call("attachment.abort", Object{"id": id})
+	if u.active || u.cancelled.Load() || u.Status == "ready" {
+		return
+	}
+	for _, queued := range s.uploadQueue {
+		if queued == u {
 			return
 		}
-		if err == nil {
-			var r Object
-			r, err = call("attachment.finish", Object{"id": id})
-			a := object(r["attachment"])
-			if err == nil && (str(a, "sha256") != sum || number(a, "size") != int64(len(u.Data))) {
-				err = fmt.Errorf("上传结果校验失败")
+	}
+	u.Status, u.Error = "queued", ""
+	s.uploadQueue = append(s.uploadQueue, u)
+	s.pumpUploads()
+	s.changed()
+}
+func (s *State) pumpUploads() {
+	for s.uploadActive < 2 && len(s.uploadQueue) > 0 {
+		u := s.uploadQueue[0]
+		s.uploadQueue = s.uploadQueue[1:]
+		if u.cancelled.Load() {
+			continue
+		}
+		if u.ID == "" {
+			var id [32]byte
+			if _, err := rand.Read(id[:]); err != nil {
+				u.Status, u.Error = "failed", err.Error()
+				continue
 			}
-			if err == nil {
-				id = str(a, "id")
+			u.ID = hex.EncodeToString(id[:])
+		}
+		ctx, cancel := context.WithCancel(s.ctx)
+		u.cancel, u.active, u.Status = cancel, true, "preparing"
+		s.uploadActive++
+		go s.runUpload(ctx, u)
+	}
+}
+func (s *State) runUpload(ctx context.Context, u *Upload) {
+	id := u.ID
+	sum := hashBytes(u.Data)
+	// Only these scoped, idempotent file operations may replay after a lost ACK.
+	// Never apply this retry policy to Agent send/steer or other mutations.
+	call := func(method string, p Object) (Object, error) {
+		var err error
+		for attempt := 0; attempt < 3; attempt++ {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			request, stop := context.WithTimeout(ctx, 15*time.Second)
+			v, e := rpc(request, s.api, u.Target, u.Provider, u.Session, method, Object{"params": p})
+			stop()
+			if e == nil {
+				return object(v), nil
+			}
+			err = e
+			if attempt < 2 {
+				timer := time.NewTimer(time.Duration(attempt+1) * 300 * time.Millisecond)
+				select {
+				case <-ctx.Done():
+					timer.Stop()
+					return nil, ctx.Err()
+				case <-timer.C:
+				}
 			}
 		}
+		return nil, err
+	}
+	r, err := call("attachment.begin", Object{"id": id, "name": u.Name, "size": len(u.Data), "sha256": sum})
+	offset := number(r, "offset")
+	if err == nil && (str(r, "id") != id || offset < 0 || offset > int64(len(u.Data))) {
+		err = fmt.Errorf("上传偏移无效")
+	}
+	chunkSize := int64(4 << 10)
+	for err == nil && offset < int64(len(u.Data)) && ctx.Err() == nil {
 		s.cx.Post(func() {
-			u.ID = id
+			if !u.cancelled.Load() {
+				u.Status = "uploading"
+				s.changed()
+			}
+		})
+		end := min(offset+chunkSize, int64(len(u.Data)))
+		started := time.Now()
+		r, err = call("attachment.write", Object{"id": id, "offset": offset, "data": base64.StdEncoding.EncodeToString(u.Data[offset:end])})
+		if err != nil {
+			break
+		}
+		next := number(r, "offset")
+		if next != end {
+			err = fmt.Errorf("上传偏移无效")
+			break
+		}
+		offset = next
+		progress := offset
+		s.cx.Post(func() {
+			if !u.cancelled.Load() {
+				u.Sent = progress
+				s.changed()
+			}
+		})
+		elapsed := time.Since(started)
+		if elapsed < 500*time.Millisecond {
+			chunkSize = min(chunkSize*2, 48<<10)
+		} else if elapsed > 2*time.Second {
+			chunkSize = max(chunkSize/2, 4<<10)
+		}
+	}
+	if ctx.Err() != nil {
+		err = ctx.Err()
+	}
+	if err == nil {
+		s.cx.Post(func() {
+			if !u.cancelled.Load() {
+				u.Status = "verifying"
+				s.changed()
+			}
+		})
+		r, err = call("attachment.finish", Object{"id": id})
+		a := object(r["attachment"])
+		if err == nil && (str(a, "id") != id || str(a, "sha256") != sum || number(a, "size") != int64(len(u.Data))) {
+			err = fmt.Errorf("上传结果校验失败")
+		}
+	}
+	if u.cancelled.Load() {
+		cleanup, stop := context.WithTimeout(s.ctx, 3*time.Second)
+		_, _ = rpc(cleanup, s.api, u.Target, u.Provider, u.Session, "attachment.abort", Object{"params": Object{"id": id}})
+		stop()
+	}
+	s.cx.Post(func() {
+		u.cancel()
+		u.cancel, u.active = nil, false
+		s.uploadActive--
+		if !u.cancelled.Load() {
 			u.Sent = offset
 			if err != nil {
-				u.Status = "failed"
-				u.Error = err.Error()
+				u.Status, u.Error = "failed", err.Error()
 			} else {
-				u.Status = "ready"
-				u.SHA256 = sum
+				u.Status, u.SHA256 = "ready", sum
 			}
-			s.changed()
-		})
-	}()
+		}
+		s.pumpUploads()
+		s.changed()
+	})
 }
 func (s *State) uploadPreviews(cx *core.Scope) core.Node {
 	rows := core.Each(func() []*Upload { s.read(); return s.uploads }, func(u *Upload) *Upload { return u }, func(cx *core.Scope, get func() *Upload, _ func() int) core.Node {
 		u := get()
 		remove := func() {
 			u.cancelled.Store(true)
+			if u.cancel != nil {
+				u.cancel()
+			}
 			for i, v := range s.uploads {
 				if v == u {
 					s.uploads = append(s.uploads[:i], s.uploads[i+1:]...)
@@ -206,23 +291,28 @@ func (s *State) uploadPreviews(cx *core.Scope) core.Node {
 		}
 		// Bytes and metadata are immutable for this keyed upload. Only progress
 		// changes; remounting the image on every poll restarts native decoding.
-		var tile core.Node = chat.Attachment{Label: u.Name, Detail: fmt.Sprintf("%.1f KB", float64(len(u.Data))/1024), RemoveLabel: "移除附件", OnRemove: remove}
+		var tile core.Node = chat.Attachment{Label: u.Name, Detail: fmt.Sprintf("%.1f KB", float64(len(u.Data))/1024), RemoveLabel: locales.For(cx).RemoveAttachment(), OnRemove: remove}
 		if strings.HasPrefix(u.MIME, "image/") || strings.HasSuffix(strings.ToLower(u.Name), ".png") || strings.HasSuffix(strings.ToLower(u.Name), ".jpg") {
-			tile = chat.AttachmentPreview{Label: u.Name, Image: core.ImageSource{Data: u.Data}, RemoveLabel: "移除附件", OnRemove: remove}
+			tile = chat.AttachmentPreview{Label: u.Name, Image: core.ImageSource{Data: u.Data}, RemoveLabel: locales.For(cx).RemoveAttachment(), OnRemove: remove}
 		}
 		status := core.Show{When: func() bool { s.read(); return u.Status != "ready" }, Then: func(cx *core.Scope) core.Node {
-			progress := dynamicText(cx, func() string {
-				s.read()
-				if u.Status == "failed" {
-					return "上传中断"
-				}
-				return fmt.Sprintf("上传 %d%%", u.Sent*100/max(1, int64(len(u.Data))))
-			}, 10, true)
-			progress.TestID = "upload-progress-" + u.Name
-			retry := core.Show{When: func() bool { s.read(); return u.Status == "failed" }, Then: func(cx *core.Scope) core.Node {
-				return button(cx, "retry-upload", "重试", nil, "ghost", func() { s.upload(u) })
-			}}
-			return core.View{Children: []core.Node{progress, retry}}
+			return core.Dynamic(func(cx *core.Scope) core.Node {
+				messages := locales.For(cx)
+				value := func() float32 { s.read(); return u.progressPercent() }
+				progress := dynamicText(cx, func() string { return i18n.FormatNumberSkeleton(i18n.Language(cx), float64(value())/100, "percent .#") }, 10, true)
+				progress.TestID = "upload-progress-" + u.Name
+				bar := ui.Progress{TestID: "upload-bar-" + u.Name, Label: messages.Upload(), Value: value, Style: core.Style{FlexGrow: 1, MinWidth: core.Pt(24)}}
+				queued := core.Show{When: func() bool { s.read(); return u.Status == "queued" }, Then: func(cx *core.Scope) core.Node {
+					return core.View{Label: messages.UploadQueued(), Tooltip: label(cx, messages.UploadQueued(), 12, false), Children: []core.Node{glyph(cx, lucide.Clock, 12)}}
+				}}
+				retry := core.Show{When: func() bool { s.read(); return u.Status == "failed" }, Then: func(cx *core.Scope) core.Node {
+					v := button(cx, "retry-upload-"+u.Name, "", lucide.RotateCcw, "ghost", func() { s.upload(u) }).(core.View)
+					v.Label = messages.RetryUpload()
+					v.Tooltip = dynamicText(cx, func() string { s.read(); return messages.UploadFailed(u.Error) }, 12, false)
+					return v
+				}}
+				return core.View{Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 4}, Children: []core.Node{bar, progress, queued, retry}}
+			})
 		}}
 		return core.View{TestID: "upload-" + u.Name, Style: core.Style{Gap: 4}, Children: []core.Node{tile, status}}
 	})
@@ -426,7 +516,7 @@ func (s *State) attachmentGallery(cx *core.Scope, get func() Message) core.Node 
 		for _, a := range get().Attachments {
 			// Inline images render at their Markdown location. Inline file
 			// links still need an explicit download action in this collection.
-			if !flag(a, "inline") || str(a, "kind") != "image" {
+			if (get().Role != "user" || str(a, "kind") != "image") && (!flag(a, "inline") || str(a, "kind") != "image") {
 				out = append(out, a)
 			}
 		}
@@ -440,12 +530,51 @@ func (s *State) attachmentGallery(cx *core.Scope, get func() Message) core.Node 
 				}
 				return s.fileTile(cx, a())
 			}))
-		return core.View{Style: core.Style{Width: core.Pct(100), MinWidth: core.Pt(0), Padding: core.Edges{Bottom: 12}}, StyleFunc: func() core.Style {
+		return core.View{Style: core.Style{Width: core.Pct(100), MinWidth: core.Pt(0), Padding: core.Edges{Top: 12}}, StyleFunc: func() core.Style {
 			// Keep sparse galleries compact while dense collections fill the
-			// same message column. User attachments retain right alignment.
+			// same message column.
 			count := len(attachments.Get())
 			limit := choose(get().Role == "user", core.Points(680), core.Points(820))
 			return core.Style{MaxWidth: core.Pt(min(limit, core.Points(count)*attachmentCardMinimum+core.Points(max(0, count-1))*attachmentCardGap))}
 		}, Children: []core.Node{grid}}
+	}}
+}
+
+func (u *Upload) progressPercent() float32 {
+	if u.Status == "ready" {
+		return 100
+	}
+	return min(99, max(0, float32(u.Sent)*100/float32(max(1, len(u.Data)))))
+}
+
+// User images are compact composer-style previews above the right-aligned
+// bubble; Agent files and generated images use the full gallery below text.
+func (s *State) userImageGallery(cx *core.Scope, get func() Message) core.Node {
+	images := core.NewMemoFunc(cx, func() []Object {
+		out := []Object{}
+		for _, a := range get().Attachments {
+			if str(a, "kind") == "image" && !flag(a, "inline") {
+				out = append(out, a)
+			}
+		}
+		return out
+	}, nil)
+	return core.Show{When: func() bool { return len(images.Get()) > 0 }, Then: func(cx *core.Scope) core.Node {
+		return core.View{TestID: "user-images-" + get().ID, Style: core.Style{Width: core.Pct(100), MinWidth: core.Pt(0), Direction: core.Row, Wrap: core.Wrap, JustifyContent: core.JustifyEnd, Gap: 8, Padding: core.Edges{Bottom: 8}}, Children: []core.Node{
+			core.Each(images.Get, func(a Object) string { return str(a, "id") }, func(cx *core.Scope, a func() Object, _ func() int) core.Node {
+				meta := core.Untracked(cx, a)
+				thumb := flag(meta, "thumbnail")
+				s.loadImage(meta, thumb)
+				key := s.key() + "|" + str(meta, "id") + fmt.Sprint("|", thumb)
+				name := str(meta, "name")
+				preview := core.View{TestID: "image-" + str(meta, "id"), Role: core.RoleButton, Label: "预览图片 " + name, Tooltip: label(cx, name, 12, false), Style: core.Style{Width: core.Pct(100), Height: core.Pct(100)}, StyleFunc: func() core.Style { return pressStyle(cx) }, OnPress: func(core.PressEvent) { s.previewAttachment(get(), a()) }, Children: []core.Node{
+					core.Image{Label: name, SourceFunc: func() core.ImageSource { s.read(); return core.ImageSource{Data: s.images[key]} }, ResizeMode: core.Cover, Style: core.Style{Width: core.Pct(100), Height: core.Pct(100)}},
+				}}
+				download := labelledIconButton(cx, "download-"+str(meta, "id"), "下载 "+name, lucide.Download, func() { s.download(cx, a()) }).(core.View)
+				download.Style.Position, download.Style.Right, download.Style.Bottom = core.Absolute, core.Pt(2), core.Pt(2)
+				download.StyleFunc = func() core.Style { return core.Style{Background: palette(cx).background, Opacity: core.Alpha(.9)} }
+				return core.View{TestID: "attachment-" + str(meta, "id"), Style: core.Style{Width: core.Pt(88), MaxWidth: core.Pct(100), Height: core.Pt(88), CornerRadius: 10, Overflow: core.Hidden, BorderWidth: 1}, StyleFunc: func() core.Style { return core.Style{BorderColor: palette(cx).border, Background: palette(cx).muted} }, Children: []core.Node{preview, download}}
+			}),
+		}}
 	}}
 }

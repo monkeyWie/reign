@@ -122,7 +122,7 @@ func TestLiveTextDoesNotWaitForSnapshotsOrApprovals(t *testing.T) {
 	var checked atomic.Bool
 	app.Post(func() {
 		s.cx.Post(func() {
-			s.refreshAfterSend(s.key(), s.target, s.stream.provider, s.stream.session)
+			s.refreshAfterSend(s.key(), s.target, s.stream.provider, s.stream.session, false)
 			if s.stream.snapshotInFlight || s.stream.snapshotAgain {
 				t.Error("successful send restarted a joined history snapshot")
 			}

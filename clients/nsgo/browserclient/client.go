@@ -57,6 +57,7 @@ type cached struct {
 	bytes    int
 }
 type Client struct {
+	meter        transport.Meter
 	mu           sync.Mutex
 	sender       transport.Sender
 	ctx          context.Context
@@ -81,6 +82,7 @@ type Client struct {
 }
 
 type pendingCall struct {
+	method    string
 	idle      *transport.ReadIdle
 	ctx       context.Context
 	responses *transport.Inbox[Object]
@@ -230,6 +232,7 @@ func connectOnce(ctx context.Context, p Pairing) (*Client, error) {
 		return nil, fmt.Errorf("设备响应验证失败: %w", e)
 	}
 	c.note("connected", "connected", "设备连接成功", c.Path(), "success")
+	c.meter.Connected()
 	return c, nil
 }
 
@@ -587,6 +590,7 @@ func (c *Client) receiveChunk(packet []byte) error {
 	if json.Unmarshal(plain, &part) != nil || !part.Valid() {
 		return errors.New("无效分片")
 	}
+	c.meter.Received(len(plain))
 	c.mu.Lock()
 	if c.pending[part.Request] == nil {
 		for id, a := range c.chunks {
@@ -598,6 +602,9 @@ func (c *Client) receiveChunk(packet []byte) error {
 		return nil
 	}
 	c.pending[part.Request].idle.Touch()
+	if c.pending[part.Request].method != "network" {
+		c.meter.Progress()
+	}
 	for k, a := range c.chunks {
 		if time.Since(a.updated) > 2*time.Minute {
 			delete(c.chunks, k)
@@ -660,7 +667,7 @@ func (c *Client) response(b []byte) {
 	}
 
 }
-func (c *Client) Call(ctx context.Context, request Object) (any, error) {
+func (c *Client) Call(ctx context.Context, request Object) (value any, callErr error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	r := Object{}
@@ -670,6 +677,8 @@ func (c *Client) Call(ctx context.Context, request Object) (any, error) {
 	raw, _ := json.Marshal(r)
 	cacheKey := string(raw)
 	method, _ := r["method"].(string)
+	done := c.meter.Begin(method)
+	defer func() { done(callErr) }()
 	read := control.ReadOnly(method)
 	c.mu.Lock()
 	previous := c.cache[cacheKey]
@@ -691,7 +700,7 @@ func (c *Client) Call(ctx context.Context, request Object) (any, error) {
 		c.mu.Unlock()
 		return nil, errors.New("重复的指令 ID")
 	}
-	c.pending[requestID] = &pendingCall{ctx: ctx, responses: pending, idle: idle}
+	c.pending[requestID] = &pendingCall{ctx: ctx, responses: pending, idle: idle, method: method}
 	c.mu.Unlock()
 	defer func() {
 		c.mu.Lock()
@@ -794,7 +803,7 @@ func (c *Client) Call(ctx context.Context, request Object) (any, error) {
 			c.Close()
 			return nil, errors.New("连接授权需要续期，请在连接恢复后重试")
 		}
-		return nil, errors.New(e)
+		return nil, &control.ResponseError{Code: code, Message: e}
 	}
 	if response["notModified"] == true {
 		if response["revision"] != previous.revision || previous.revision == "" {
@@ -871,7 +880,12 @@ func (c *Client) send(ctx context.Context, requestID, method string, raw []byte)
 	return nil
 }
 
-func (c *Client) sendPart(part []byte, pc peer, crypto *cryptor, direct bool) error {
+func (c *Client) sendPart(part []byte, pc peer, crypto *cryptor, direct bool) (sendErr error) {
+	defer func() {
+		if sendErr == nil {
+			c.meter.Sent(len(part))
+		}
+	}()
 	if direct {
 		packet, e := crypto.seal(c.aad("chunk", true), part)
 		if e != nil {
@@ -958,3 +972,5 @@ func STUN(policy Object) []string {
 	}
 	return values
 }
+
+func (c *Client) Metrics() map[string]any { return c.meter.Snapshot() }

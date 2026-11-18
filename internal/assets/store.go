@@ -160,7 +160,7 @@ func (s *Store) usage() int64 {
 	}
 	return size
 }
-func (s *Store) preserve(ctx context.Context, scope, id, name string, in io.Reader) (record, error) {
+func (s *Store) preserve(ctx context.Context, scope, id, name string, in io.Reader, expected ...string) (record, error) {
 	r := record{Scope: scope, Meta: provider.Attachment{ID: id, Name: safeName(name), Kind: "file", State: "ready"}}
 	if e := ctx.Err(); e != nil {
 		return r, e
@@ -186,6 +186,9 @@ func (s *Store) preserve(ctx context.Context, scope, id, name string, in io.Read
 		return r, e
 	}
 	hash := hex.EncodeToString(h.Sum(nil))
+	if len(expected) > 0 && hash != expected[0] {
+		return r, fmt.Errorf("附件校验失败，请重新上传")
+	}
 	dest := s.object(hash)
 	if _, e = os.Stat(dest); os.IsNotExist(e) {
 		if s.usage()+n > MaxStoreSize {
@@ -320,6 +323,35 @@ func (s *Store) Handle(ctx context.Context, scope, method string, p Params) (any
 		if p.Size < 0 || p.Size > MaxFileSize || !validID(p.SHA256) {
 			return nil, fmt.Errorf("文件大小或校验值无效，最大 50 MB")
 		}
+		if p.ID != "" {
+			if !validID(p.ID) {
+				return nil, fmt.Errorf("无效附件 ID")
+			}
+			if r, e := s.load(scope, p.ID); e == nil {
+				if r.Meta.Name != safeName(p.Name) || r.Meta.Size != p.Size || r.Meta.SHA256 != p.SHA256 {
+					return nil, fmt.Errorf("上传元数据不一致")
+				}
+				return UploadState{ID: p.ID, Offset: r.Meta.Size, Attachment: &r.Meta}, nil
+			}
+			// Never overwrite another scope's record, even if its ID was guessed.
+			if _, e := os.Stat(filepath.Join(s.Root, "records", p.ID+".json")); !os.IsNotExist(e) {
+				return nil, fmt.Errorf("附件 ID 已被占用")
+			}
+			meta := filepath.Join(s.Root, "uploads", p.ID+".json")
+			if b, e := os.ReadFile(meta); e == nil {
+				var u upload
+				if json.Unmarshal(b, &u) != nil || u.Scope != scope || u.Name != safeName(p.Name) || u.Size != p.Size || u.SHA256 != p.SHA256 {
+					return nil, fmt.Errorf("上传元数据不一致")
+				}
+				info, e := os.Stat(filepath.Join(s.Root, "uploads", p.ID+".part"))
+				if e != nil {
+					return nil, e
+				}
+				return UploadState{ID: p.ID, Offset: info.Size()}, nil
+			} else if !os.IsNotExist(e) {
+				return nil, e
+			}
+		}
 		entries, _ := os.ReadDir(filepath.Join(s.Root, "uploads"))
 		count := 0
 		for _, ent := range entries {
@@ -336,11 +368,14 @@ func (s *Store) Handle(ctx context.Context, scope, method string, p Params) (any
 		if count >= 8 || s.usage()+p.Size > MaxStoreSize {
 			return nil, fmt.Errorf("上传空间不足或同时上传数量过多")
 		}
-		var random [32]byte
-		if _, e := rand.Read(random[:]); e != nil {
-			return nil, e
+		id := p.ID
+		if id == "" {
+			var random [32]byte
+			if _, e := rand.Read(random[:]); e != nil {
+				return nil, e
+			}
+			id = hex.EncodeToString(random[:])
 		}
-		id := hex.EncodeToString(random[:])
 		u := upload{Scope: scope, Name: safeName(p.Name), Size: p.Size, SHA256: p.SHA256, Created: time.Now().Unix()}
 		if e := writeJSON(filepath.Join(s.Root, "uploads", id+".json"), u); e != nil {
 			return nil, e
@@ -435,21 +470,8 @@ func (s *Store) Handle(ctx context.Context, scope, method string, p Params) (any
 		if e != nil {
 			return nil, e
 		}
-		h := sha256.New()
-		_, e = io.Copy(h, f)
-		f.Close()
-		if e != nil {
-			return nil, e
-		}
-		if hex.EncodeToString(h.Sum(nil)) != u.SHA256 {
-			return nil, fmt.Errorf("附件校验失败，请重新上传")
-		}
-		f, e = os.Open(partPath)
-		if e != nil {
-			return nil, e
-		}
 		defer f.Close()
-		r, e := s.preserve(ctx, scope, p.ID, u.Name, f)
+		r, e := s.preserve(ctx, scope, p.ID, u.Name, f, u.SHA256)
 		if e != nil {
 			return nil, e
 		}

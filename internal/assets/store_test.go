@@ -9,6 +9,7 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -180,5 +181,49 @@ func TestControllerCacheIsolationAndEviction(t *testing.T) {
 	b, _ = c.Get("two", "same")
 	if b != nil {
 		t.Fatal("LRU budget not enforced")
+	}
+}
+
+func TestClientUploadIdentitySurvivesLostAcknowledgements(t *testing.T) {
+	s := New(t.TempDir())
+	ctx := context.Background()
+	data := []byte("an attachment uploaded over an unreliable connection")
+	id := strings.Repeat("c", 64)
+	scope := Scope("agent", "chat")
+	p := Params{ID: id, Name: "photo.txt", Size: int64(len(data)), SHA256: Hash(data)}
+	begin := func() UploadState {
+		t.Helper()
+		v, err := s.Handle(ctx, scope, "attachment.begin", p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return v.(UploadState)
+	}
+	if begin().ID != id || begin().Offset != 0 {
+		t.Fatal("begin lost identity")
+	}
+	chunk := Params{ID: id, Data: base64.StdEncoding.EncodeToString(data)}
+	for range 2 {
+		if _, err := s.Handle(ctx, scope, "attachment.write", chunk); err != nil {
+			t.Fatal("lost ACK retry failed", err)
+		}
+	}
+	if begin().Offset != int64(len(data)) {
+		t.Fatal("begin retry reset uploaded bytes")
+	}
+	for range 2 {
+		if _, err := s.Handle(ctx, scope, "attachment.finish", Params{ID: id}); err != nil {
+			t.Fatal("finish retry failed", err)
+		}
+	}
+	if begin().Attachment == nil {
+		t.Fatal("lost finish ACK did not reconcile")
+	}
+	if _, err := s.Handle(ctx, Scope("agent", "other-chat"), "attachment.begin", p); err == nil {
+		t.Fatal("ID reuse crossed scopes")
+	}
+	p.Name = "different.txt"
+	if _, err := s.Handle(ctx, scope, "attachment.begin", p); err == nil {
+		t.Fatal("same ID accepted different metadata")
 	}
 }

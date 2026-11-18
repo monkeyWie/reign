@@ -9,6 +9,8 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -533,4 +535,53 @@ func TestIPCHistoryFailureResumesFromCommittedPage(t *testing.T) {
 	if newest.Load() != 1 || older.Load() != 2 || len(turns) != 2 || turns[0]["id"] != "older" || turns[1]["id"] != "latest" {
 		t.Fatal("history restarted or reordered", newest.Load(), older.Load(), turns)
 	}
+}
+
+func TestIPCSteerPreservesComposerRestoreContext(t *testing.T) {
+	p := New(config.Config{}, "", events.New())
+	backendFixture(t, p, func(m rpc.Message) (any, *rpc.Error) {
+		t.Errorf("steer reached private backend: %s", m.Method)
+		return nil, nil
+	})
+	var f *ipcFixture
+	received := make(chan map[string]any, 1)
+	f = attachIPCFixture(t, p, func(m codexipc.Message) (codexipc.Message, bool) {
+		if m.Method == "thread-stream-following-changed" {
+			go f.snapshot("external", 1, "hello")
+		}
+		if m.Method == "thread-follower-steer-turn" {
+			received <- decodeObject(m.Params)
+		}
+		return codexipc.Message{}, false
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := p.Steer(ctx, "external", "t", "continue while running"); err != nil {
+		t.Fatal(err)
+	}
+	params := <-received
+	restore := object(params["restoreMessage"])
+	c := object(restore["context"])
+	if stringValue(restore["cwd"]) != "/project" || stringValue(restore["text"]) != "continue while running" || restore["id"] != params["clientUserMessageId"] || len(array(c["workspaceRoots"])) != 1 || stringValue(c["prompt"]) != "continue while running" {
+		t.Fatalf("incomplete composer restore context: %+v", restore)
+	}
+	if _, ok := c["imageAttachments"]; !ok {
+		t.Fatal("missing composer attachment context")
+	}
+}
+
+// Opt-in offline package check. Never connects to the running App.
+func TestInstalledAppSteerContract(t *testing.T) {
+	asar := os.Getenv("REIGNHUB_CODEX_ASAR")
+	if asar == "" {
+		t.Skip("set REIGNHUB_CODEX_ASAR to inspect installed package bytes")
+	}
+	input := []any{map[string]string{"type": "text", "text": "isolated fixture"}}
+	params := map[string]any{"conversationId": "fixture", "clientUserMessageId": "fixture-message", "input": input, "restoreMessage": ipcRestoreMessage(map[string]any{"cwd": "/project"}, input, "fixture-message"), "attachments": []any{}}
+	cmd := exec.Command("node", "../../docs/research/verification/codex-steer-2026-11-18/validate.cjs", asar, string(rawJSON(params)))
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("offline App entry check: %v: %s", err, out)
+	}
+	t.Log(string(out))
 }

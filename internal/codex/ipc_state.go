@@ -617,6 +617,15 @@ func (b *appIPC) ownerState(id string, o *ownedThread) map[string]any {
 	active := false
 	for _, t := range o.turns {
 		t = decodeObject(rawJSON(t))
+		for _, value := range array(t["items"]) {
+			item := object(value)
+			switch item["type"] {
+			case "userMessage":
+				item["content"] = ipcInput(array(item["content"]))
+			case "steeringUserMessage":
+				item["input"] = ipcInput(array(item["input"]))
+			}
+		}
 		turnID := stringValue(t["id"])
 		key := "turn:" + turnID
 		done := t["status"] != "inProgress"

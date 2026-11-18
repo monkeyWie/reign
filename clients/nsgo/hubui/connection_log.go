@@ -81,6 +81,9 @@ func (s *State) connectionLog(id string, a *connectAttempt) string {
 			fmt.Fprintf(&b, "Name: %s\nService: %s\nTransport: connected=%t path=%s\n", safeDiagnostic(deviceName(d)), safeDiagnostic(str(d, "service")), flag(d, "connected"), str(d, "path"))
 		}
 	}
+	if summary := s.networkSummary(id); summary != "" {
+		fmt.Fprintf(&b, "Network:\n%s\n", summary)
+	}
 	events := append([]connectionStep(nil), s.connection(id).diagnostics...)
 	if id != "" {
 		events = append(events, s.connection("").diagnostics...)

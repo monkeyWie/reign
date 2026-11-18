@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/monkeyWie/reignhub/internal/control"
 )
 
 func TestUserMessageSelectionSurvivesBackgroundUpdates(t *testing.T) {
@@ -33,6 +35,33 @@ func TestUserMessageSelectionSurvivesBackgroundUpdates(t *testing.T) {
 	if app.Find("text:"+text).ID != before {
 		t.Fatal("updating another message replaced the selected user text")
 	}
+}
+
+func TestUncertainMessageCannotRetryAndMergesPersistedEcho(t *testing.T) {
+	f := &retryMessageAPI{demoAPI: newDemoAPI(), requests: make(chan retryRequest, 4)}
+	app, s := conversationFixture(t, f, 390, Object{}, true)
+	app.Type("id:chat-input", "possibly persisted before renderer failed")
+	app.Press("id:send-message")
+	app.WaitUntil(time.Second, func() bool { return len(f.requests) == 1 })
+	request := <-f.requests
+	id := s.outgoing[s.key()][0].ID
+	request.result <- &control.ResponseError{Code: control.WriteOutcomeUnknown, Message: "App renderer failed after submission"}
+	app.WaitFor("text:发送结果待确认", time.Second)
+	if app.Exists("id:retry-message-" + id) {
+		t.Fatal("uncertain execution offered an unsafe replay")
+	}
+	app.Post(func() {
+		s.cx.Post(func() {
+			s.retryOutgoing(id)
+			s.setTranscript(outgoingTranscript(Object{"id": "remote", "role": "user", "text": "possibly persisted before renderer failed"}))
+			s.changed()
+		})
+	})
+	app.WaitFor("id:message-turn|remote", time.Second)
+	if len(f.requests) != 0 || len(s.outgoing[s.key()]) != 0 || app.Exists("id:delivery-"+id) {
+		t.Fatal("uncertain message duplicated or retained after echo")
+	}
+	app.Screenshot("uncertain-message-confirmed-by-echo")
 }
 
 type retryRequest struct {
@@ -115,7 +144,7 @@ func TestFailedMessageRetryKeepsOriginalPayloadAndNewDraft(t *testing.T) {
 		s.cx.Post(func() {
 			s.model = "next-draft-model"
 			s.uploads = []*Upload{{ID: "new-attachment", Name: "next.txt", Status: "uploading"}}
-			s.reconcileOutgoing(time.Now())
+			s.reconcileOutgoing(time.Time{})
 			s.rebuildMessages()
 			s.changed()
 		})

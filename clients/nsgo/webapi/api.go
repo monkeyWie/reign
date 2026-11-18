@@ -77,6 +77,7 @@ func (a *API) list() (any, error) {
 		if c != nil {
 			r["path"] = c.Path()
 			r["connected"] = c.Connected()
+			r["network"] = c.Metrics()
 		}
 		r["autoReconnect"] = d["reconnectDisabled"] != true && str(d, "key") != "" && (num(d, "expires") == 0 || num(d, "expires") > time.Now().Unix())
 		out = append(out, r)
@@ -477,28 +478,29 @@ func (a *API) Call(ctx context.Context, method string, p Object, target string, 
 		old := obj(v)
 		items := clone(obj(old["items"]))
 		c := a.client(target)
-		if c != nil && c.Connected() {
-			v, e := c.Call(ctx, Object{"method": "sync", "provider": p["provider"], "epoch": old["epoch"], "after": num(old, "cursor")})
-			if e != nil {
-				return nil, e
+		if c == nil || !c.Connected() {
+			return nil, errors.New("设备离线：保留本地会话，连接后重试同步")
+		}
+		v, e = c.Call(ctx, Object{"method": "sync", "provider": p["provider"], "epoch": old["epoch"], "after": num(old, "cursor")})
+		if e != nil {
+			return nil, e
+		}
+		d := obj(v)
+		if d["reset"] == true {
+			items = Object{}
+		}
+		for _, x := range arr(d["items"]) {
+			items[str(x, "id")] = x
+		}
+		for _, x := range arr(d["changes"]) {
+			if x["deleted"] == true {
+				delete(items, str(x, "id"))
+			} else {
+				items[str(x, "id")] = x["value"]
 			}
-			d := obj(v)
-			if d["reset"] == true {
-				items = Object{}
-			}
-			for _, x := range arr(d["items"]) {
-				items[str(x, "id")] = x
-			}
-			for _, x := range arr(d["changes"]) {
-				if x["deleted"] == true {
-					delete(items, str(x, "id"))
-				} else {
-					items[str(x, "id")] = x["value"]
-				}
-			}
-			if e = a.store.Put(key, Object{"items": items, "cursor": d["cursor"], "epoch": d["epoch"]}); e != nil {
-				return nil, e
-			}
+		}
+		if e = a.store.Put(key, Object{"items": items, "cursor": d["cursor"], "epoch": d["epoch"]}); e != nil {
+			return nil, e
 		}
 		out := []Object{}
 		for _, x := range items {

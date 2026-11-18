@@ -107,3 +107,29 @@ func TestFreshReadCannotMistakeOfflineCacheForRemoteConfirmation(t *testing.T) {
 		t.Fatal("fresh read silently returned an offline snapshot")
 	}
 }
+
+func TestOfflineSyncCannotErasePersistedPreview(t *testing.T) {
+	root := t.TempDir()
+	h, err := New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := control.Request{Method: "sessions", Provider: "codex-app"}
+	key, _ := json.Marshal(r)
+	if err = h.DB.Put("rpc:one:"+string(key), map[string]any{"sessions": []map[string]any{{"id": "preview", "providerId": "codex-app"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = h.Sync(context.Background(), "one", "codex-app"); err == nil {
+		t.Fatal("offline sync claimed authoritative empty directory")
+	}
+	h.Close()
+	reopened, err := New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	v, err := reopened.Cached("one", control.Request{})
+	if err != nil || len(v.(map[string]any)["sessions"].([]map[string]any)) != 1 {
+		t.Fatal("offline sync erased persisted sessions", v, err)
+	}
+}

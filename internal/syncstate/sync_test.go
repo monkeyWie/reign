@@ -3,8 +3,10 @@ package syncstate
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/monkeyWie/reignhub/internal/control"
 	"github.com/monkeyWie/reignhub/internal/provider"
@@ -60,5 +62,50 @@ func TestProjectDirectoryMatchesFirstPageAndIncrementalCatalogue(t *testing.T) {
 	}
 	if json.Unmarshal(changed.Changes[0].Value, &synced) != nil || synced.ProjectDir != workspace.CanonicalPath(cwd) || synced.CWD != cwd {
 		t.Fatal("lost worktree project reassignment", synced)
+	}
+}
+
+type blockedDirectory struct {
+	provider.Provider
+	started chan struct{}
+}
+
+func (p *blockedDirectory) Sessions(ctx context.Context, _ string) (provider.SessionPage, error) {
+	close(p.started)
+	<-ctx.Done()
+	return provider.SessionPage{}, ctx.Err()
+}
+func TestStalledProviderCannotBlockAnotherDirectory(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	index := &Index{DB: db, Epoch: "test"}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	slow := &blockedDirectory{started: make(chan struct{})}
+	stopped := make(chan error, 1)
+	go func() { _, err := index.Sync(ctx, slow, "slow", "", 0); stopped <- err }()
+	<-slow.started
+	fastCtx, stop := context.WithTimeout(context.Background(), time.Second)
+	defer stop()
+	p := &projectProvider{session: provider.Session{ID: "session"}}
+	if _, err := index.Sync(fastCtx, p, "fast", "", 0); err != nil {
+		t.Fatal("stalled Provider blocked independent sync", err)
+	}
+	cancelled, stopCancelled := context.WithCancel(context.Background())
+	stopCancelled()
+	if _, err := index.Sync(cancelled, p, "slow", "", 0); !errors.Is(err, context.Canceled) {
+		t.Fatal("waiting scan did not cancel", err)
+	}
+	cancel()
+	if err := <-stopped; !errors.Is(err, context.Canceled) {
+		t.Fatal(err)
+	}
+	index.mu.Lock()
+	defer index.mu.Unlock()
+	if len(index.gates) != 0 {
+		t.Fatal("scope gates leaked", len(index.gates))
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/monkeyWie/reignhub/internal/control"
 	"github.com/monkeyWie/reignhub/internal/device"
 	"github.com/nsgo-dev/nsgo/base"
 	"github.com/nsgo-dev/nsgo/core"
@@ -51,6 +52,8 @@ type State struct {
 	models                                                  []Object
 	messageRows                                             []Message
 	uploads                                                 []*Upload
+	uploadQueue                                             []*Upload
+	uploadActive                                            int
 	downloadTask                                            *attachmentDownload
 	images                                                  map[string][]byte
 	loadingImages                                           map[string]bool
@@ -580,6 +583,9 @@ func (s *State) submitMessage(method string, extra Object, outgoing *outgoingMes
 				}
 				if err != nil && !confirmed {
 					outgoing.Status, outgoing.Error = "failed", err.Error()
+					if control.OutcomeUnknown(err) {
+						outgoing.Status = "uncertain"
+					}
 				}
 				if s.key() == key {
 					s.rebuildMessages()
@@ -588,8 +594,8 @@ func (s *State) submitMessage(method string, extra Object, outgoing *outgoingMes
 					cached["localMessages"] = s.outgoing[key]
 					s.writeSnapshot(target, p, id, cached)
 				}
-				if err == nil && s.key() == key && s.connected() {
-					s.refreshAfterSend(key, target, p, id)
+				if (err == nil || control.OutcomeUnknown(err)) && s.key() == key && s.connected() {
+					s.refreshAfterSend(key, target, p, id, control.OutcomeUnknown(err))
 				}
 			}
 			s.changed()

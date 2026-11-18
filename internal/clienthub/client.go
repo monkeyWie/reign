@@ -115,7 +115,12 @@ func (h *Hub) List() ([]map[string]any, error) {
 			path = c.Path()
 		}
 		connected := c != nil && path != "Disconnected"
-		r = append(r, map[string]any{"id": s.ID, "service": s.Service, "connectionId": s.ConnectionID, "name": s.Name, "host": s.Host, "public": s.Public, "path": path, "connected": connected, "autoReconnect": s.HasConnected && !s.ReconnectDisabled && s.Key != "" && (s.Expires == 0 || s.Expires > time.Now().Unix())})
+		r = append(r, map[string]any{"id": s.ID, "service": s.Service, "connectionId": s.ConnectionID, "name": s.Name, "host": s.Host, "public": s.Public, "path": path, "connected": connected, "network": func() any {
+			if c != nil {
+				return c.Metrics()
+			}
+			return nil
+		}(), "autoReconnect": s.HasConnected && !s.ReconnectDisabled && s.Key != "" && (s.Expires == 0 || s.Expires > time.Now().Unix())})
 	}
 	return r, nil
 }
@@ -460,11 +465,7 @@ func (h *Hub) Sync(ctx context.Context, id, p string) (any, error) {
 	c := h.connections[id]
 	h.mu.Unlock()
 	if c == nil || c.Path() == "Disconnected" {
-		out := []map[string]any{}
-		for _, v := range state.Items {
-			out = append(out, v)
-		}
-		return out, nil
+		return nil, fmt.Errorf("设备离线：保留本地会话，连接后重试同步")
 	}
 	var delta store.Delta
 	if e := c.Call(ctx, control.Request{Method: "sync", Provider: p, Epoch: state.Epoch, After: state.Cursor}, &delta); e != nil {

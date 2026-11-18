@@ -51,7 +51,8 @@ type UnknownOutcome struct {
 func (e *UnknownOutcome) Error() string {
 	return fmt.Sprintf("%s 结果待确认，可能已执行；不会自动重发: %v", e.Method, e.Err)
 }
-func (e *UnknownOutcome) Unwrap() error { return e.Err }
+func (e *UnknownOutcome) Unwrap() error        { return e.Err }
+func (e *UnknownOutcome) OutcomeUnknown() bool { return true }
 
 type Handler interface {
 	CanHandle(Message) bool

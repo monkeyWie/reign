@@ -102,7 +102,7 @@ func testMessageNavigationPreviewAndWave(t *testing.T, dark bool) {
 		source = core.NewSignalFunc(cx, messages, nil)
 		rows := core.NewMemoFunc(cx, source.Get, nil)
 		viewport := core.NewSignal(cx, core.Size{Width: 800, Height: 600})
-		return core.View{Style: fill, StyleFunc: func() core.Style { return core.Style{Background: palette(cx).background} }, Children: []core.Node{s.messageNavigation(cx, rows, &core.Ref{}, viewport, func() int { return 0 })}}
+		return core.View{Style: fill, StyleFunc: func() core.Style { return core.Style{Background: palette(cx).background} }, Children: []core.Node{s.messageNavigation(cx, rows, viewport, func(int) {})}}
 	}, nsgotest.Size(800, 600), nsgotest.Environment(core.Environment{Dark: dark, OS: core.OSMacOS, Idiom: core.IdiomDesktop}))
 	id := "id:message-tick-u3"
 	tickID := app.Find(id).ID

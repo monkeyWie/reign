@@ -80,6 +80,7 @@ func (d *Dispatcher) Handle(ctx context.Context, r Request) Response {
 	out := Response{ID: r.ID}
 	if err != nil {
 		out.Error = err.Error()
+		out.Code = ErrorCode(err)
 		return out
 	}
 	out.Result, err = json.Marshal(workspace.Result(result))

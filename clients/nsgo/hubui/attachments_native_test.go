@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"github.com/monkeyWie/reignhub/internal/assets"
 	"github.com/nsgo-dev/nsgo/core"
 	"github.com/nsgo-dev/nsgo/nsgotest"
@@ -136,5 +137,131 @@ func TestClipboardUploadAndImageGallery(t *testing.T) {
 	data, e := s.attachmentBytes(context.Background(), "fixture", "codex-app", "session", a, false)
 	if e != nil || string(data) != "file" {
 		t.Fatal("attachment readback", string(data), e)
+	}
+}
+
+// Drop successful responses rather than requests: retry must reconcile the
+// receiver's already-written bytes and finished object without a second upload.
+type unreliableUploadAPI struct {
+	*attachmentFixture
+	writes                           chan struct{}
+	finish                           chan struct{}
+	lostBegin, lostWrite, lostFinish atomic.Bool
+	starts, completed                atomic.Int32
+}
+
+func (f *unreliableUploadAPI) Call(ctx context.Context, method string, p Object, target string, r Object) (any, error) {
+	m := str(r, "method")
+	if method == "client.call" && (m == "attachment.write" || m == "attachment.finish") {
+		gate := f.writes
+		if m == "attachment.finish" {
+			gate = f.finish
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-gate:
+		}
+	}
+	v, err := f.attachmentFixture.Call(ctx, method, p, target, r)
+	if method != "client.call" || err != nil {
+		return v, err
+	}
+	lost := false
+	switch m {
+	case "attachment.begin":
+		f.starts.Add(1)
+		lost = f.lostBegin.CompareAndSwap(false, true)
+	case "attachment.write":
+		lost = f.lostWrite.CompareAndSwap(false, true)
+	case "attachment.finish":
+		f.completed.Add(1)
+		lost = f.lostFinish.CompareAndSwap(false, true)
+	}
+	if lost {
+		return nil, fmt.Errorf("fixture: acknowledgement lost")
+	}
+	return v, nil
+}
+func TestFourUploadsQueueRetryLostACKsAndAwaitConfirmationBelow100(t *testing.T) {
+	f := &unreliableUploadAPI{attachmentFixture: &attachmentFixture{demoAPI: newDemoAPI(), store: assets.New(t.TempDir())}, writes: make(chan struct{}), finish: make(chan struct{})}
+	var s *State
+	app := nsgotest.Start(t, func(cx *core.Scope) core.Node {
+		cx.SetTheme(core.DefaultTheme())
+		s = newState(cx, f)
+		s.target = "fixture"
+		s.selected = Object{"id": "session", "providerId": "codex-app"}
+		s.devices = []Object{{"id": "fixture", "connected": true}}
+		return core.View{Style: fill, Children: []core.Node{button(cx, "four-files", "Choose files", nil, "outline", func() {
+			for _, name := range []string{"one.txt", "two.txt", "three.txt", "four.txt"} {
+				s.addUpload(name, "text/plain", bytes.Repeat([]byte("sample"), 15000))
+			}
+		}), s.uploadPreviews(cx)}}
+	}, nsgotest.Size(390, 844), nsgotest.Environment(core.Environment{Locale: "en-US"}))
+	app.Press("id:four-files")
+	app.WaitUntil(2*time.Second, func() bool { return f.starts.Load() >= 3 })
+	app.Find("id:upload-four.txt")
+	app.Post(func() {
+		s.cx.Post(func() {
+			if s.uploadActive != 2 || s.uploads[2].Status != "queued" || s.uploads[3].Status != "queued" {
+				t.Error("fourth upload did not wait safely")
+			}
+		})
+	})
+	app.Settle()
+	close(f.writes)
+	app.WaitUntil(3*time.Second, func() bool {
+		return app.Find("id:upload-progress-one.txt").Text == "99%" && app.Find("id:upload-progress-two.txt").Text == "99%"
+	})
+	if app.Exists("text:已上传，等待设备校验确认") || app.Exists("text:上传 100%") {
+		t.Fatal("compact upload shows prose or premature completion")
+	}
+	app.Screenshot("four-uploads-awaiting-confirmation")
+	close(f.finish)
+	app.WaitUntil(4*time.Second, func() bool {
+		return !app.Exists("id:upload-progress-one.txt") && !app.Exists("id:upload-progress-four.txt")
+	})
+	app.Post(func() {
+		s.cx.Post(func() {
+			for _, u := range s.uploads {
+				if u.Status != "ready" {
+					t.Error("queued file did not finish", u.Name, u.Error)
+				}
+			}
+		})
+	})
+	app.Settle()
+}
+
+func TestUploadRemovalCancelsActiveAndSkipsQueuedFile(t *testing.T) {
+	f := &unreliableUploadAPI{attachmentFixture: &attachmentFixture{demoAPI: newDemoAPI(), store: assets.New(t.TempDir())}, writes: make(chan struct{}), finish: make(chan struct{})}
+	var s *State
+	app := nsgotest.Start(t, func(cx *core.Scope) core.Node {
+		cx.SetTheme(core.DefaultTheme())
+		s = newState(cx, f)
+		s.target = "fixture"
+		s.selected = Object{"id": "session", "providerId": "codex-app"}
+		s.devices = []Object{{"id": "fixture", "connected": true}}
+		return core.View{Style: fill, Children: []core.Node{button(cx, "choose-files", "Choose files", nil, "outline", func() {
+			for _, name := range []string{"one.txt", "two.txt", "three.txt", "four.txt"} {
+				s.addUpload(name, "text/plain", []byte("fixture"))
+			}
+		}), s.uploadPreviews(cx)}}
+	}, nsgotest.Size(390, 844))
+	app.Press("id:choose-files")
+	app.WaitUntil(2*time.Second, func() bool { return f.starts.Load() >= 3 })
+	app.Press("id:upload-four.txt >> role:button")
+	app.Press("id:upload-one.txt >> role:button")
+	app.WaitUntil(time.Second, func() bool { return f.starts.Load() >= 4 })
+	if app.Exists("id:upload-one.txt") || app.Exists("id:upload-four.txt") {
+		t.Fatal("removed upload remains visible")
+	}
+	close(f.writes)
+	close(f.finish)
+	app.WaitUntil(4*time.Second, func() bool {
+		return !app.Exists("id:upload-progress-two.txt") && !app.Exists("id:upload-progress-three.txt")
+	})
+	if f.starts.Load() != 4 {
+		t.Fatal("cancelled queued upload reached host", f.starts.Load())
 	}
 }

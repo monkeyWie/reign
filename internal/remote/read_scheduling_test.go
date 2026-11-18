@@ -56,9 +56,12 @@ func TestRelayBusyReadRespondsAndCancellationReleasesHost(t *testing.T) {
 	}
 	short, stop := context.WithTimeout(ctx, time.Second)
 	defer stop()
-	err = c.Call(short, control.Request{Method: "network"}, nil)
+	err = c.Call(short, control.Request{Method: "providers"}, nil)
 	if err == nil || !strings.Contains(err.Error(), "繁忙") {
 		t.Fatalf("full host must respond immediately with busy, got %v", err)
+	}
+	if err := c.Call(short, control.Request{Method: "network"}, nil); err != nil {
+		t.Fatalf("liveness probe blocked behind Agent reads: %v", err)
 	}
 	for _, stop := range stops {
 		stop()

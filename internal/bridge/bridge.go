@@ -222,7 +222,7 @@ func CallContext(parent context.Context, raw string) string {
 func answer(v any, e error) string {
 	out := map[string]any{"result": v}
 	if e != nil {
-		out = map[string]any{"error": e.Error()}
+		out = map[string]any{"error": e.Error(), "code": control.ErrorCode(e)}
 	}
 	b, _ := json.Marshal(out)
 	return string(b)

@@ -64,6 +64,10 @@ func TestInitialHistoryDoesNotWaitForFailedOrBlockedSubscription(t *testing.T) {
 				t.Fatalf("resumed cursor without content: %s", epoch)
 			}
 			request := <-f.snapshots
+			app.WaitFor("id:transcript-loading", time.Second)
+			if app.Exists("id:transcript-syncing") {
+				t.Fatal("initial loading duplicated catch-up dots")
+			}
 			request.fragments <- provider.Transcript{StreamEpoch: "history", Session: provider.Session{ID: "demo-chat"}, Turns: []provider.Turn{{ID: "t", Status: "completed", Items: []provider.Item{{ID: "a", Role: "assistant", Text: "独立历史第一条"}}}}}
 			app.WaitFor("text:独立历史第一条", time.Second)
 			app.WaitFor("id:transcript-syncing", time.Second)

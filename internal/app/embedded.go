@@ -124,7 +124,7 @@ func (r *Embedded) Call(ctx context.Context, req control.Request, out any) error
 	defer cancel()
 	response := r.Dispatcher.Handle(callCtx, req)
 	if response.Error != "" {
-		return errors.New(response.Error)
+		return &control.ResponseError{Code: response.Code, Message: response.Error}
 	}
 	if out != nil {
 		return json.Unmarshal(response.Result, out)

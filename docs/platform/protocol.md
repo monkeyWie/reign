@@ -53,7 +53,12 @@ transfers have no fixed total timeout. Explicit setup deadlines are absolute.
 `request.cancel` names the original read in `cancel`; it never cancels a write.
 Cancelled responses' assemblies are discarded immediately. Saturated host
 request slots return `HOST_BUSY`; they never silently drop requests. Commands
-are never automatically replayed after an uncertain result.
+are never automatically replayed after an uncertain result. A host response with
+`code: "WRITE_OUTCOME_UNKNOWN"` means execution may already have completed, even
+when its `error` describes an Agent/UI exception. Controllers preserve this code
+through local JSON bridges, reconcile the resulting history and do not expose a
+write retry while the outcome is unknown. Go and Worker services forward this
+encrypted response unchanged and require no service API changes.
 
 Directory reconciliation transfers session metadata deltas. Opening a Codex
 conversation loads its latest 30 turns; steady state uses watch events. Plain
@@ -76,3 +81,25 @@ complete, so small later user messages cannot overtake missing assistant
 replies. Once a baseline exists, live watch events remain independent of
 background snapshot refreshes. Assistant commentary is retained in completed
 history, in its source order; completion does not hide prior visible replies.
+
+## Resumable attachment uploads
+
+The controller generates a random 64-character hexadecimal upload ID before
+`attachment.begin` and reuses that ID with the immutable filename, size and
+SHA-256. Begin returns the existing acknowledged offset, or the completed
+attachment. Reusing an ID with a different scope or metadata is rejected.
+Writes at an already stored offset verify matching bytes rather than append
+duplicates; finish returns the same confirmed attachment when repeated.
+Only these idempotent operations may retry a lost acknowledgement. This does
+not authorize replaying Agent messages or other writes.
+
+Controllers queue uploads across drafts with at most two active transfers.
+Each chunk starts at 4 KiB and adapts up to 48 KiB to observed acknowledgements.
+Each attempt is bounded to 15 seconds, with at most three attempts per operation;
+removal cancels work and makes a bounded best-effort abort. Progress measures
+acknowledged bytes, stays below 100% until confirmation and does not bypass
+content integrity validation. Host finish hashes/copies once before publication.
+
+Services continue forwarding opaque encrypted frames: these RPC/cache changes
+require no Go device-service or Worker public API changes. Native and browser
+controllers implement the same upload and observation semantics in shared UI.

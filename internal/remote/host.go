@@ -130,6 +130,7 @@ func serveHostObserved(ctx context.Context, p Pairing, opts Options, d *control.
 			}
 			var peer *wire
 			limiter := make(chan struct{}, 8)
+			probes := make(chan struct{}, 2)
 			var reads hostReads
 			peer, err = newWire(ctx, ws, f.Peer, key, true, opts, func(data []byte) {
 				if opts.ResolveKey != nil {
@@ -155,6 +156,10 @@ func serveHostObserved(ctx context.Context, p Pairing, opts Options, d *control.
 				callCtx, stop := context.WithCancel(peer.ctx)
 				callCtx = transport.WithMethod(callCtx, req.Method)
 				watch := req.Method == "watch"
+				slots := limiter
+				if req.Method == "network" {
+					slots = probes // Liveness must remain measurable while Agent reads stall.
+				}
 				busy := func() {
 					stop()
 					encoded, _ := json.Marshal(control.Response{ID: req.ID, Code: "HOST_BUSY", Error: "设备读取繁忙，请稍后重试"})
@@ -162,7 +167,7 @@ func serveHostObserved(ctx context.Context, p Pairing, opts Options, d *control.
 				}
 				if !watch {
 					select {
-					case limiter <- struct{}{}:
+					case slots <- struct{}{}:
 					default:
 						busy()
 						return
@@ -171,7 +176,7 @@ func serveHostObserved(ctx context.Context, p Pairing, opts Options, d *control.
 				read, ok := reads.add(req, stop)
 				if !ok {
 					if !watch {
-						<-limiter
+						<-slots
 					}
 					busy()
 					return
@@ -179,7 +184,7 @@ func serveHostObserved(ctx context.Context, p Pairing, opts Options, d *control.
 				go func() {
 					defer reads.remove(req.ID, read)
 					if !watch {
-						defer func() { <-limiter }()
+						defer func() { <-slots }()
 					}
 					defer stop()
 					originalID := req.ID

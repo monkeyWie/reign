@@ -169,7 +169,7 @@ func TestRetryKeepsStatusPanelAndShowsActualTransportSteps(t *testing.T) {
 	f.steps <- connectivity.Progress{ID: "path", Stage: "direct", Message: "已切换为 TCP 直连", Detail: "192.168.1.2:5000 → 192.168.1.3:5000", State: "success"}
 	app.WaitFor("text:已切换为 TCP 直连", time.Second)
 	f.finish <- nil
-	app.WaitFor("text:连接正常，消息会持续同步。", time.Second)
+	app.WaitFor("text:传输通道已连接；同步状态以实际响应为准。", time.Second)
 	if app.Exists("id:connection-error-raw") || app.Exists("id:error-banner") {
 		t.Fatal("successful retry retained stale failure")
 	}
@@ -220,7 +220,7 @@ func TestCanceledRetryStopsTimerAndAllowsAnotherRetry(t *testing.T) {
 	app.WaitUntil(time.Second, func() bool { return f.calls.Load() == 2 })
 	app.WaitFor("id:connection-loading", time.Second)
 	f.finish <- nil
-	app.WaitFor("text:连接正常，消息会持续同步。", time.Second)
+	app.WaitFor("text:传输通道已连接；同步状态以实际响应为准。", time.Second)
 }
 
 func TestInactiveAttemptElapsedDoesNotAccumulateWallTime(t *testing.T) {

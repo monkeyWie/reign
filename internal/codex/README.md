@@ -10,6 +10,51 @@ These notes describe this adapter, not repository-wide standards. The common con
 
 See [IPC routing](ipc.go), [owner publishing](ipc_owner.go) and [runtime composition](runtime.go). Dated verification and its limitations are recorded in [the implementation report](../../docs/research/codex-ipc-implementation-2026-11-17.md) and [sync follow-up](../../docs/research/codex-ipc-and-sync-followup-2026-11-17.md).
 
+## App follower writes
+
+The App follower steer entry requires a composer `restoreMessage` even when a
+`clientUserMessageId` is supplied. Read the current owner's state and send the
+same message ID with the prompt, cwd and composer context (workspace roots,
+collaboration mode and attachment collections). Missing restore state causes
+its JavaScript executor to read `cwd` from undefined before issuing `turn/steer`.
+Do not fall back to a private writer or replay the failed write automatically.
+
+`TestIPCSteerPreservesComposerRestoreContext` verifies the transmitted payload.
+The opt-in `TestInstalledAppSteerContract` reads the installed ASAR only and
+executes its steer entry with synthetic state and an intercepted follower route:
+
+```sh
+REIGNHUB_CODEX_ASAR=/Applications/ChatGPT.app/Contents/Resources/app.asar GOWORK=off go test ./internal/codex -run TestInstalledAppSteerContract -v
+```
+
+This reproduces the missing-context error and validates the supplied composer
+shape without connecting to a real App conversation or running a model. It is
+not evidence of a completed real App send. Reinspect upstream code when this
+check reports a changed entry or boundary.
+
+## Optimistic input and delivery outcomes
+
+App IPC input is stricter than app-server input. Every text input requires a
+`text_elements` array before the App renders its optimistic user message. The
+adapter normalizes text at both send/steer boundaries and in owner publications,
+including text references accompanying files; existing rich elements survive.
+Missing arrays can crash the App conversation page even after a message has
+persisted. Server acceptance does not imply successful App rendering.
+
+Steer routing checks the current owner's latest turn before dispatch: an ended
+turn uses a new-turn request. A race rejection is returned without automatically
+replaying the write. Only verified pre-submission rejections count as definite
+failure; arbitrary IPC JavaScript errors are uncertain. Preserve that distinction
+through the encrypted RPC and native JSON bridge for controller reconciliation.
+
+`TestIPCTextInputsSafeForOptimisticAppRendering` covers transmitted send/steer
+payloads. `TestInstalledAppTextInputContract` reads the installed ASAR and executes
+the actual failing renderer parser with synthetic input, reproducing the missing
+array failure before validating the normalized input. Run with the same
+`REIGNHUB_CODEX_ASAR` environment variable as the steer contract check. No live
+App writes, model execution or restart is involved. See the [verification
+notes](../../docs/research/verification/codex-input-2026-11-18/README.md).
+
 ## State and history diagnosis
 
 Unknown state or patch structures can break watch independently of history. Schema version alone does not identify App versus IDE creation. Read verified v11/v13 state and apply Immer array-path patches transactionally against revisions; reject unknown structures. Initial history and watch run independently, with read-only history fallback and canonical/live merging. The adapter currently publishes v11 owner state; reading v13 is not complete v13 owner support.

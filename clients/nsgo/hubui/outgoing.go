@@ -7,12 +7,12 @@ import (
 	"time"
 )
 
-func (s *State) refreshAfterSend(key, target, provider, session string) {
+func (s *State) refreshAfterSend(key, target, provider, session string, reconcile bool) {
 	if w := s.stream; w != nil && w.current() && w.key == key {
 		// A joined event stream already delivers the user item, turn state and
 		// assistant deltas. Resending the last 30 turns after every successful
 		// send needlessly competes with those small live updates on relays.
-		if !w.baseline {
+		if !w.baseline || reconcile {
 			w.refreshSnapshot()
 		}
 		return
@@ -45,6 +45,7 @@ type outgoingMessage struct {
 	FinishedAt  time.Time       `json:"finishedAt"`
 	Attachments []Object        `json:"attachments,omitempty"`
 	Known       map[string]bool `json:"known"`
+	Anchors     []string        `json:"anchors"`
 }
 
 func (s *State) restoreOutgoing(t Object) {
@@ -62,7 +63,7 @@ func (s *State) restoreOutgoing(t Object) {
 	_ = json.Unmarshal(b, &pending)
 	for _, m := range pending {
 		if m.Status == "sending" {
-			m.Status, m.Error, m.FinishedAt = "failed", "发送结果尚未确认，连接恢复后将同步", time.Now()
+			m.Status, m.Error, m.FinishedAt = "uncertain", "发送结果尚未确认，连接恢复后将同步", time.Now()
 		}
 	}
 	s.outgoing[s.key()] = pending
@@ -84,6 +85,9 @@ func snapshotOutgoing(messages []*outgoingMessage) []*outgoingMessage {
 	pending := make([]*outgoingMessage, 0, len(messages))
 	for _, message := range messages {
 		value := *message
+		if message.Anchors != nil {
+			value.Anchors = append([]string{}, message.Anchors...)
+		}
 		value.Known = make(map[string]bool, len(message.Known))
 		for id, known := range message.Known {
 			value.Known[id] = known
@@ -97,6 +101,10 @@ func (s *State) queueOutgoing(body string, uploads []*Upload) *outgoingMessage {
 	s.restoreOutgoing(s.transcript)
 	now := time.Now()
 	m := &outgoingMessage{ID: fmt.Sprintf("local-%d", now.UnixNano()), Text: body, Model: s.model, Status: "sending", Timestamp: now.UnixMilli(), Known: map[string]bool{}}
+	m.Anchors = []string{}
+	for i := len(s.messageRows) - 1; i >= max(0, len(s.messageRows)-32); i-- {
+		m.Anchors = append(m.Anchors, s.messageRows[i].ID)
+	}
 	for _, row := range s.messageRows {
 		if row.Role == "user" {
 			m.Known[row.ID] = true
@@ -196,6 +204,7 @@ func (s *State) reconcileOutgoing(freshSince time.Time) {
 		for _, row := range rows {
 			if !used[row.ID] && matchesOutgoing(m, row) {
 				used[row.ID], found = true, true
+				s.replaceOutgoingAnchor(m.ID, []string{row.ID})
 				for _, other := range s.outgoing[s.key()] {
 					if other != m {
 						if other.Known == nil {
@@ -211,14 +220,41 @@ func (s *State) reconcileOutgoing(freshSince time.Time) {
 			m.Status = "confirmed"
 			continue
 		}
-		// A failed message remains available for explicit retry, including after
-		// reconnect and a fresh snapshot that proves it never reached the Agent.
-		if m.Status != "failed" && !freshSince.IsZero() && !m.FinishedAt.IsZero() && !m.FinishedAt.After(freshSince) {
+		// Completed fresh history reconciles the local overlay for both accepted
+		// and failed submissions. Cache reads and progressive fragments cannot
+		// prove absence; neither can a snapshot begun before this RPC settled.
+		if !freshSince.IsZero() && str(s.transcript, "nextCursor") == "" && m.Status != "sending" && m.Status != "uncertain" && !m.FinishedAt.IsZero() && !m.FinishedAt.After(freshSince) {
+			s.replaceOutgoingAnchor(m.ID, m.Anchors)
 			continue
 		}
 		kept = append(kept, m)
 	}
 	s.outgoing[s.key()] = kept
+}
+
+func (s *State) replaceOutgoingAnchor(id string, replacements []string) {
+	for _, m := range s.outgoing[s.key()] {
+		anchors := make([]string, 0, 32)
+		seen := map[string]bool{}
+		add := func(anchor string) {
+			if anchor != id && !seen[anchor] && len(anchors) < 32 {
+				anchors = append(anchors, anchor)
+				seen[anchor] = true
+			}
+		}
+		for _, anchor := range m.Anchors {
+			if anchor == id {
+				for _, replacement := range replacements {
+					add(replacement)
+				}
+			} else {
+				add(anchor)
+			}
+		}
+		if m.Anchors != nil {
+			m.Anchors = anchors
+		}
+	}
 }
 
 func (s *State) rebuildMessages() {
@@ -232,7 +268,36 @@ func (s *State) rebuildMessages() {
 		}
 		s.animateText = live
 	}
-	for _, m := range s.outgoing[s.key()] {
-		s.messageRows = append(s.messageRows, Message{ID: m.ID, Role: "user", Text: m.Text, Timestamp: m.Timestamp, Attachments: m.Attachments, Delivery: m.Status, DeliveryError: m.Error})
+	if len(s.outgoing[s.key()]) == 0 {
+		return
 	}
+	// Place each overlay after its nearest surviving predecessor. Do not sort
+	// remote history by timestamps (many Providers have no item timestamps), or
+	// append a failed send after replies which arrived later.
+	positions := map[string]int{}
+	for i, row := range s.messageRows {
+		positions[row.ID] = i
+	}
+	buckets := make([][]Message, len(s.messageRows)+1)
+	for _, m := range s.outgoing[s.key()] {
+		position := -1
+		if m.Anchors == nil {
+			position = len(s.messageRows) - 1
+		}
+		for _, anchor := range m.Anchors {
+			if i, ok := positions[anchor]; ok {
+				position = i
+				break
+			}
+		}
+		positions[m.ID] = position
+		buckets[position+1] = append(buckets[position+1], Message{ID: m.ID, Role: "user", Text: m.Text, Timestamp: m.Timestamp, Attachments: m.Attachments, Delivery: m.Status, DeliveryError: m.Error})
+	}
+	rows := make([]Message, 0, len(s.messageRows)+len(s.outgoing[s.key()]))
+	rows = append(rows, buckets[0]...)
+	for i, row := range s.messageRows {
+		rows = append(rows, row)
+		rows = append(rows, buckets[i+1]...)
+	}
+	s.messageRows = rows
 }

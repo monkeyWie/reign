@@ -39,6 +39,7 @@ type Options struct {
 	RelayOnly      bool
 }
 type wire struct {
+	meter             transport.Meter
 	progressMu        sync.Mutex
 	progressLast      map[string]connectivity.Progress
 	ws                *websocket.Conn
@@ -340,7 +341,12 @@ func (w *wire) sendContext(ctx context.Context, request string, data []byte) err
 	return nil
 }
 
-func (w *wire) sendPart(ctx context.Context, part []byte) error {
+func (w *wire) sendPart(ctx context.Context, part []byte) (sendErr error) {
+	defer func() {
+		if sendErr == nil {
+			w.meter.Sent(len(part))
+		}
+	}()
 	if err := w.waitPath(ctx); err != nil {
 		return err
 	}
@@ -420,6 +426,7 @@ func (w *wire) onChunk(data []byte) {
 	if json.Unmarshal(plain, &c) != nil || !c.Valid() {
 		return
 	}
+	w.meter.Received(len(plain))
 	if w.wantsResponse != nil && !w.wantsResponse(c.Request) {
 		w.discardResponse(c.Request)
 		return

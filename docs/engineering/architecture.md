@@ -40,7 +40,9 @@ Separate page, connection-attempt, established-connection, read-request and Agen
 
 Bound connection setup and individual requests; established connections and subscriptions need independent cancellation, liveness and cleanup. Bound queues, event logs, reassembly and concurrency. Cancel obsolete reads, and check context, device/session identity and generation before publishing results. UI state belongs to the UI loop; I/O and parsing run outside it.
 
-Initial history, live watch and approvals progress independently. Publish history progressively in order. Persist received content with its applied cursor; a cursor must never acknowledge missing content. Rebuild only the affected baseline after replay-window loss. Isolate session failures with their own backoff.
+Initial history, live watch and approvals progress independently. Publish history progressively in order. Provider discovery is availability metadata, not directory deletion authority. Persist first directory pages immediately and load them independently of current Provider discovery; replace a Provider directory only after successful complete reconciliation. Offline or failed reconciliation never commits an empty directory.
+
+Persist received content with its applied cursor; a cursor must never acknowledge missing content. Rebuild only the affected baseline after replay-window loss. Isolate session failures with their own backoff.
 
 ## Provider boundary and session metadata
 

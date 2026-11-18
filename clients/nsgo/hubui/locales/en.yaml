@@ -1,0 +1,24 @@
+upload: "Upload"
+uploadQueued: "Queued for upload"
+retryUpload: "Retry upload"
+removeAttachment: "Remove attachment"
+uploadFailed:
+  message: "Upload failed: {error}"
+  description: "Accessible upload error and retry tooltip; the card itself shows only an icon and progress."
+  placeholders:
+    error: {type: String}
+requestLatency: "Request response"
+requestLatencyHint: "Last successful RPC, including host processing and queueing; not network RTT. No extra probes are sent."
+uploadRate: "Upload"
+downloadRate: "Download"
+requestFailures: "Request failures"
+requestFailuresHint: "Failure rate of the latest 24 completed requests. Watches and cancelled requests are excluded; this is not packet loss."
+connectionTime: "Connected for"
+currentChannel: "Active channel"
+lastData: "Last received data"
+pendingRequests: "Awaiting response"
+rateHint: "RPC frame bytes averaged over five seconds; excludes encryption, socket headers and retransmissions."
+secondsAgo:
+  message: "{seconds, number, integer} s ago"
+  placeholders:
+    seconds: {type: int}

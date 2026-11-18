@@ -28,6 +28,7 @@ type Client struct {
 }
 
 type pendingCall struct {
+	method    string
 	idle      *transport.ReadIdle
 	ctx       context.Context
 	responses *transport.Inbox[control.Response]
@@ -88,6 +89,9 @@ func connectOnce(ctx context.Context, p Pairing, opts Options) (*Client, error) 
 			return false
 		}
 		pending.idle.Touch()
+		if pending.method != "network" {
+			w.meter.Progress()
+		}
 		return true
 	}
 	w.relayLink = &relayLink{}
@@ -165,6 +169,7 @@ func connectOnce(ctx context.Context, p Pairing, opts Options) (*Client, error) 
 		c.Close()
 		return nil, fmt.Errorf("配对验证失败: %w", err)
 	}
+	w.meter.Connected()
 	return c, nil
 }
 
@@ -246,7 +251,9 @@ func (c *Client) Close() error {
 	c.wire.relayLink.close()
 	return c.wire.ws.CloseNow()
 }
-func (c *Client) Call(ctx context.Context, r control.Request, out any) error {
+func (c *Client) Call(ctx context.Context, r control.Request, out any) (callErr error) {
+	done := c.wire.meter.Begin(r.Method)
+	defer func() { done(callErr) }()
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	cacheKey := ""
@@ -271,7 +278,7 @@ func (c *Client) Call(ctx context.Context, r control.Request, out any) error {
 	ch := transport.NewInbox[control.Response]()
 	defer ch.Close()
 	c.mu.Lock()
-	c.pending[r.ID] = &pendingCall{ctx: ctx, responses: ch, idle: idle}
+	c.pending[r.ID] = &pendingCall{ctx: ctx, responses: ch, idle: idle, method: r.Method}
 	c.mu.Unlock()
 	defer func() { c.mu.Lock(); delete(c.pending, r.ID); c.mu.Unlock(); c.wire.discardResponse(r.ID) }()
 	raw, err := json.Marshal(r)
@@ -329,7 +336,7 @@ func (c *Client) Call(ctx context.Context, r control.Request, out any) error {
 					c.wire.close()
 					return errors.New("连接授权需要续期，请在连接恢复后重试")
 				}
-				return errors.New(result.Error)
+				return &control.ResponseError{Code: result.Code, Message: result.Error}
 			}
 			if history.Seen {
 				var metadata provider.Transcript
@@ -403,3 +410,5 @@ func (c *Client) remember(key string, entry snapshot) {
 	c.cache[key] = entry
 	c.cacheBytes += len(entry.data)
 }
+
+func (c *Client) Metrics() map[string]any { return c.wire.meter.Snapshot() }

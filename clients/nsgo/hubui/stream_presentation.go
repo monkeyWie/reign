@@ -64,7 +64,10 @@ func smoothReply(cx *core.Scope, text func() string, animate func() bool) func()
 }
 
 func (s *State) syncIndicator(cx *core.Scope) core.Node {
-	return core.Show{When: func() bool { s.read(); return s.syncVisible && s.transcriptSyncing && s.connected() }, Then: func(cx *core.Scope) core.Node {
+	return core.Show{When: func() bool {
+		s.read()
+		return s.transcript != nil && s.syncVisible && s.transcriptSyncing && s.connected()
+	}, Then: func(cx *core.Scope) core.Node {
 		dots := []core.Node{}
 		for i := 0; i < 3; i++ {
 			opacity := core.NewAnimatedValue(cx, 1)

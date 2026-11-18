@@ -5,7 +5,7 @@ package hubui
 import (
 	"context"
 	"encoding/json"
-	"errors"
+	"github.com/monkeyWie/reignhub/internal/control"
 	"github.com/monkeyWie/reignhub/internal/device"
 	"os"
 	"os/exec"
@@ -44,12 +44,13 @@ func (n *nativeAPI) Call(ctx context.Context, method string, params Object, targ
 	var answer struct {
 		Result any    `json:"result"`
 		Error  string `json:"error"`
+		Code   string `json:"code"`
 	}
 	if err = json.Unmarshal([]byte(bridge.CallContext(ctx, string(b))), &answer); err != nil {
 		return nil, err
 	}
 	if answer.Error != "" {
-		return nil, errors.New(answer.Error)
+		return nil, &control.ResponseError{Code: answer.Code, Message: answer.Error}
 	}
 	return answer.Result, ctx.Err()
 }

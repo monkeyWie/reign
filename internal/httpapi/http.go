@@ -77,7 +77,7 @@ func (c *Client) Call(ctx context.Context, r control.Request, out any) error {
 		return err
 	}
 	if result.Error != "" {
-		return fmt.Errorf("%s", result.Error)
+		return &control.ResponseError{Code: result.Code, Message: result.Error}
 	}
 	if out != nil {
 		return json.Unmarshal(result.Result, out)

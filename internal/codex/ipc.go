@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -474,6 +475,7 @@ func safeThreadID(id string) bool {
 	return true
 }
 func (p *Provider) sendInput(ctx context.Context, id string, input []any, model string) error {
+	input = ipcInput(input)
 	c, owner, err := p.writeRoute(ctx, id)
 	if err != nil {
 		return err
@@ -509,7 +511,7 @@ func (p *Provider) sendInput(ctx context.Context, id string, input []any, model 
 			}
 		}
 		_, err = b.request(ctx, "thread-follower-start-turn", map[string]any{"conversationId": id, "turnStart": map[string]any{"request": request, "context": map[string]any{"useAppServerPermissionDefault": true}}}, owner)
-		return err
+		return ipcWriteError("thread-follower-start-turn", err)
 	}
 	params := map[string]any{"threadId": id, "input": input}
 	if model != "" {
@@ -518,6 +520,7 @@ func (p *Provider) sendInput(ctx context.Context, id string, input []any, model 
 	return c.Call(ctx, "turn/start", params, nil)
 }
 func (p *Provider) steerInput(ctx context.Context, id, turn string, input []any) error {
+	input = ipcInput(input)
 	c, owner, err := p.writeRoute(ctx, id)
 	if err != nil {
 		return err
@@ -527,8 +530,76 @@ func (p *Provider) steerInput(ctx context.Context, id, turn string, input []any)
 		if b == nil {
 			return provider.ErrUnavailable
 		}
-		_, err = b.request(ctx, "thread-follower-steer-turn", map[string]any{"conversationId": id, "input": input, "clientUserMessageId": uuid.NewString()}, owner)
-		return err
+		raw, err := b.waitState(ctx, id, owner)
+		if err != nil {
+			return err
+		}
+		var state map[string]any
+		if err := json.Unmarshal(raw, &state); err != nil {
+			return err
+		}
+		// The controller may still show the previous active turn while its final
+		// event is in flight. Route from the owner's current state before writing.
+		turns, _, err := stateTurns(state)
+		if err != nil {
+			return err
+		}
+		if len(turns) == 0 || turns[len(turns)-1]["status"] != "inProgress" {
+			return p.sendInput(ctx, id, input, "")
+		}
+		messageID := uuid.NewString()
+		// The App uses this composer snapshot for workspace lookup and for
+		// restoring a rejected steer. It is required even with a client ID.
+		restore := ipcRestoreMessage(state, input, messageID)
+		_, err = b.request(ctx, "thread-follower-steer-turn", map[string]any{"conversationId": id, "input": input, "clientUserMessageId": messageID, "restoreMessage": restore, "attachments": []any{}}, owner)
+		return ipcWriteError("thread-follower-steer-turn", err)
 	}
 	return c.Call(ctx, "turn/steer", map[string]any{"threadId": id, "expectedTurnId": turn, "input": input}, nil)
+}
+
+func ipcWriteError(method string, err error) error {
+	var remote codexipc.RemoteError
+	if !errors.As(err, &remote) {
+		return err
+	}
+	// These owner rejections happen before submission. Arbitrary JavaScript
+	// errors can occur after dispatch or persistence and do not prove failure.
+	message := string(remote)
+	if message == "no-client-found" || message == "no-handler-for-request" ||
+		strings.HasPrefix(message, "Cannot steer conversation ") && strings.HasSuffix(message, " because its active turn already ended") {
+		return err
+	}
+	return &codexipc.UnknownOutcome{Method: method, Err: err}
+}
+
+// App inputs are stricter than app-server inputs: its optimistic user-message
+// renderer dereferences text_elements before the server canonicalizes the input.
+// Normalize at this boundary for plain text, attachment references and steers.
+// Preserve existing rich text elements and leave caller-owned values untouched.
+func ipcInput(input []any) []any {
+	var normalized []any
+	_ = json.Unmarshal(rawJSON(input), &normalized)
+	for _, value := range normalized {
+		item := object(value)
+		if item["type"] == "text" && item["text_elements"] == nil {
+			item["text_elements"] = []any{}
+		}
+	}
+	return normalized
+}
+
+// ipcRestoreMessage follows the App composer shape, not the app-server schema.
+func ipcRestoreMessage(state map[string]any, input []any, id string) map[string]any {
+	text := []string{}
+	for _, item := range input {
+		if v := decodeObject(rawJSON(item)); stringValue(v["type"]) == "text" {
+			text = append(text, stringValue(v["text"]))
+		}
+	}
+	prompt := strings.Join(text, "\n")
+	roots := []any{}
+	if cwd := stringValue(state["cwd"]); cwd != "" {
+		roots = append(roots, cwd)
+	}
+	return map[string]any{"id": id, "text": prompt, "cwd": state["cwd"], "createdAt": time.Now().UnixMilli(), "context": map[string]any{"prompt": prompt, "addedFiles": []any{}, "fileAttachments": []any{}, "imageAttachments": []any{}, "ideContext": nil, "workspaceRoots": roots, "collaborationMode": state["latestCollaborationMode"], "turnTrigger": "composer"}}
 }

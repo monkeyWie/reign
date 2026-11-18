@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/monkeyWie/reignhub/internal/control"
 )
@@ -59,26 +60,18 @@ func (h *Hub) Cached(id string, r control.Request) (any, error) {
 	}
 	// A first metadata page is already persisted by Call. Use it while the
 	// authoritative directory scan is still in flight, including after restart.
-	var statuses []struct {
-		ID string `json:"id"`
-	}
-	raw, err := json.Marshal(providers)
+	keys, err = h.DB.Keys("rpc:" + id + ":")
 	if err != nil {
 		return nil, err
 	}
-	if err = json.Unmarshal(raw, &statuses); err != nil {
-		return nil, err
-	}
-	for _, p := range statuses {
-		if directories["directory:"+id+":"+p.ID] {
+	for _, key := range keys {
+		var request control.Request
+		if json.Unmarshal([]byte(strings.TrimPrefix(key, "rpc:"+id+":")), &request) != nil || request.Method != "sessions" || request.Provider == "" || request.Session != "" || request.Cursor != "" || directories["directory:"+id+":"+request.Provider] {
 			continue
 		}
-		page, err := h.Cached(id, control.Request{Method: "sessions", Provider: p.ID})
-		if err != nil {
+		var page any
+		if err = h.DB.Get(key, &page); err != nil {
 			return nil, err
-		}
-		if page == nil {
-			continue
 		}
 		raw, err := json.Marshal(page)
 		if err != nil {

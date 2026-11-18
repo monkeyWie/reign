@@ -161,3 +161,22 @@ func TestFreshReadCannotConfirmOfflineCache(t *testing.T) {
 		t.Fatal("offline cache accepted as fresh confirmation")
 	}
 }
+
+func TestOfflineSyncRetainsMetadataBeforeCompleteDirectory(t *testing.T) {
+	ctx := context.Background()
+	disk := &memoryStore{v: map[string][]byte{}}
+	a := New(disk)
+	r := Object{"method": "sessions", "provider": "codex-app", "session": ""}
+	key, _ := json.Marshal(r)
+	_ = disk.Put("rpc:one:"+string(key), Object{"sessions": []Object{{"id": "preview", "providerId": "codex-app"}}})
+	if _, err := a.Call(ctx, "client.sync", Object{"provider": "codex-app"}, "one", nil); err == nil {
+		t.Fatal("offline sync claimed successful deletion")
+	}
+	a.Close()
+	a = New(disk)
+	defer a.Close()
+	v, err := a.Call(ctx, "client.cached", nil, "one", nil)
+	if err != nil || len(arr(obj(v)["sessions"])) != 1 {
+		t.Fatal("lost sessions after reopening", v, err)
+	}
+}

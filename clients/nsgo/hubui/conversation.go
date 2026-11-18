@@ -83,6 +83,13 @@ func (s *State) conversation(cx *core.Scope, narrow bool) core.Node {
 		}
 		return "thinking"
 	}
+	navigate := func(index int) {
+		// Declare reading intent before a virtualized jump measures new rows.
+		// Those measurements must not restore the previous bottom anchor.
+		anchor.following, anchor.restoring = false, false
+		atBottom.Set(false)
+		listRef.ScrollToIndexAt(index+tailCount(), .5, 0, false)
+	}
 	list := core.List{TestID: "chat-message-list", Ref: listRef, Inverted: true, EstimatedSize: 120, Style: fill, Count: func() int { return len(rows.Get()) + tailCount() }, Key: func(i int) any {
 		offset := tailCount()
 		if i < offset {
@@ -139,8 +146,12 @@ func (s *State) conversation(cx *core.Scope, narrow bool) core.Node {
 			return busyButton(cx, "load-older", "加载更早消息", nil, "ghost", func() bool { return s.actionPending("history:" + s.key()) }, s.older)
 		}}}},
 	}
-	timelineChildren := []core.Node{list, s.emptyTranscript(cx), s.syncIndicator(cx), core.Show{When: func() bool { return !s.narrowLayout() }, Then: func(cx *core.Scope) core.Node { return s.messageNavigation(cx, rows, listRef, viewport, tailCount) }}, core.Show{When: func() bool { return !atBottom.Get() }, Then: func(cx *core.Scope) core.Node {
-		return core.View{Style: core.Style{Position: core.Absolute, Bottom: core.Pt(12), Right: core.Pt(40)}, Children: []core.Node{button(cx, "jump-to-latest", "回到最新", lucide.ArrowDown, "outline", func() { listRef.ScrollToIndexAt(0, 0, 0, false) })}}
+	timelineChildren := []core.Node{list, s.emptyTranscript(cx), s.syncIndicator(cx), core.Show{When: func() bool { return !s.narrowLayout() }, Then: func(cx *core.Scope) core.Node { return s.messageNavigation(cx, rows, viewport, navigate) }}, core.Show{When: func() bool { return !atBottom.Get() }, Then: func(cx *core.Scope) core.Node {
+		return core.View{Style: core.Style{Position: core.Absolute, Bottom: core.Pt(12), Right: core.Pt(40)}, Children: []core.Node{button(cx, "jump-to-latest", "回到最新", lucide.ArrowDown, "outline", func() {
+			anchor.following, anchor.restoring = true, true
+			atBottom.Set(true)
+			keepLatest()
+		})}}
 	}}}
 	if floatingHeader {
 		timelineChildren = append(timelineChildren, s.compactConversationHeader(cx, narrow))
@@ -210,7 +221,10 @@ func (s *State) message(cx *core.Scope, get func() Message) core.Node {
 	if user {
 		bodyWidth = core.Length{}
 	}
-	content := []core.Node{s.attachmentGallery(cx, get)}
+	content := []core.Node{}
+	if user {
+		content = append(content, s.userImageGallery(cx, get))
+	}
 	bodyText := smoothReply(cx, func() string {
 		if user {
 			return strings.TrimRight(displayText(get()), " \t\r\n")
@@ -272,11 +286,21 @@ func (s *State) message(cx *core.Scope, get func() Message) core.Node {
 		bubbleContent = core.View{Style: core.Style{Direction: core.Row, Width: core.Pct(100), MinWidth: core.Pt(0), JustifyContent: core.JustifyEnd}, Children: []core.Node{bubble}}
 	}
 	content = append(content, core.Show{When: func() bool { return strings.TrimSpace(displayText(get())) != "" }, Then: func(*core.Scope) core.Node { return bubbleContent }})
+	content = append(content, s.attachmentGallery(cx, get))
 	content = append(content, core.Show{When: func() bool { return get().Delivery != "" }, Then: func(cx *core.Scope) core.Node {
 		return core.View{TestID: "delivery-" + m.ID, Tooltip: dynamicText(cx, func() string { return get().DeliveryError }, 12, false), Style: core.Style{Padding: core.Edges{Top: 6}}, Children: []core.Node{core.Show{When: func() bool { return get().Delivery == "sending" }, Then: func(*core.Scope) core.Node {
 			return chat.Shimmer{Text: func() string { return "发送中…" }, Size: 11}
 		}, Else: func(cx *core.Scope) core.Node {
-			return dynamicText(cx, func() string { return choose(get().Delivery == "failed", "发送失败", "已发送") }, 11, true)
+			return dynamicText(cx, func() string {
+				switch get().Delivery {
+				case "failed":
+					return "发送失败"
+				case "uncertain":
+					return "发送结果待确认"
+				default:
+					return "已发送"
+				}
+			}, 11, true)
 		}}}}
 	}})
 	content = append(content, core.Show{When: func() bool { return !get().Live && get().Delivery != "sending" }, Then: func(cx *core.Scope) core.Node {

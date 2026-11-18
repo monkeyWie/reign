@@ -211,3 +211,39 @@ func TestColdCatalogueIsUsableBeforeFullScanAndMessagesLoadOnOpen(t *testing.T) 
 		t.Fatal("directory completion loaded unrelated transcripts")
 	}
 }
+
+type disappearingProviderAPI struct {
+	*independentStreamAPI
+	missing, failSync atomic.Bool
+}
+
+func (f *disappearingProviderAPI) Call(ctx context.Context, method string, p Object, target string, r Object) (any, error) {
+	if method == "client.call" && str(r, "method") == "providers" && f.missing.Load() {
+		return []Object{}, nil
+	}
+	if method == "client.sync" && f.failSync.Load() {
+		return nil, errors.New("directory temporarily unavailable")
+	}
+	return f.independentStreamAPI.Call(ctx, method, p, target, r)
+}
+func TestBackFromStalledHistoryPreservesCatalogueAcrossDiscoveryFailure(t *testing.T) {
+	f := &disappearingProviderAPI{independentStreamAPI: &independentStreamAPI{demoAPI: newDemoAPI(), snapshots: make(chan snapshotRequest, 4), events: make(chan Object, 8), approvalsStarted: make(chan struct{})}}
+	app := nsgotest.Start(t, func(cx *core.Scope) core.Node { return RootWithAPI(cx, f, true) }, nsgotest.Size(390, 844))
+	app.WaitFor("id:device-demo-device", time.Second)
+	app.Press("id:device-demo-device")
+	app.WaitFor("id:session-demo-chat", time.Second)
+	app.Press("id:session-demo-chat")
+	app.WaitUntil(time.Second, func() bool { return len(f.snapshots) > 0 })
+	app.WaitFor("id:message-demo-turn|demo-assistant", time.Second)
+	f.missing.Store(true)
+	app.Press("id:back-sessions")
+	app.WaitFor("id:session-demo-chat", time.Second)
+	app.Press("id:refresh-sessions")
+	app.WaitUntil(time.Second, func() bool { return !app.Exists("id:refresh-sessions-loading") })
+	app.Find("id:session-demo-chat")
+	f.missing.Store(false)
+	f.failSync.Store(true)
+	app.Press("id:refresh-sessions")
+	app.WaitUntil(time.Second, func() bool { return !app.Exists("id:refresh-sessions-loading") })
+	app.Find("id:session-demo-chat")
+}
