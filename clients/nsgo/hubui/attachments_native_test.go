@@ -183,6 +183,25 @@ func (f *unreliableUploadAPI) Call(ctx context.Context, method string, p Object,
 	}
 	return v, nil
 }
+
+func waitForReadyUploads(app *nsgotest.App, s *State, count int) {
+	var ready atomic.Bool
+	app.WaitUntil(4*time.Second, func() bool {
+		// Query only reports visible views. A queued card below the viewport
+		// has no visible progress either, so absence cannot prove completion.
+		app.Post(func() {
+			s.cx.Post(func() {
+				complete := len(s.uploads) == count && s.uploadActive == 0
+				for _, u := range s.uploads {
+					complete = complete && u.Status == "ready"
+				}
+				ready.Store(complete)
+			})
+		})
+		return ready.Load()
+	})
+}
+
 func TestFourUploadsQueueRetryLostACKsAndAwaitConfirmationBelow100(t *testing.T) {
 	f := &unreliableUploadAPI{attachmentFixture: &attachmentFixture{demoAPI: newDemoAPI(), store: assets.New(t.TempDir())}, writes: make(chan struct{}), finish: make(chan struct{})}
 	var s *State
@@ -218,19 +237,7 @@ func TestFourUploadsQueueRetryLostACKsAndAwaitConfirmationBelow100(t *testing.T)
 	}
 	app.Screenshot("four-uploads-awaiting-confirmation")
 	close(f.finish)
-	app.WaitUntil(4*time.Second, func() bool {
-		return !app.Exists("id:upload-progress-one.txt") && !app.Exists("id:upload-progress-four.txt")
-	})
-	app.Post(func() {
-		s.cx.Post(func() {
-			for _, u := range s.uploads {
-				if u.Status != "ready" {
-					t.Error("queued file did not finish", u.Name, u.Error)
-				}
-			}
-		})
-	})
-	app.Settle()
+	waitForReadyUploads(app, s, 4)
 }
 
 func TestUploadRemovalCancelsActiveAndSkipsQueuedFile(t *testing.T) {
@@ -258,9 +265,7 @@ func TestUploadRemovalCancelsActiveAndSkipsQueuedFile(t *testing.T) {
 	}
 	close(f.writes)
 	close(f.finish)
-	app.WaitUntil(4*time.Second, func() bool {
-		return !app.Exists("id:upload-progress-two.txt") && !app.Exists("id:upload-progress-three.txt")
-	})
+	waitForReadyUploads(app, s, 2)
 	if f.starts.Load() != 4 {
 		t.Fatal("cancelled queued upload reached host", f.starts.Load())
 	}
