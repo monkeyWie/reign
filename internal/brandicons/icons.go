@@ -1,4 +1,4 @@
-// Package brandicons shares platform and browser artwork with the website.
+// Package brandicons shares platform, Agent and browser artwork with the website.
 package brandicons
 
 import (

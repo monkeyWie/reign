@@ -60,6 +60,14 @@ through local JSON bridges, reconcile the resulting history and do not expose a
 write retry while the outcome is unknown. Go and Worker services forward this
 encrypted response unchanged and require no service API changes.
 
+`session.remove` is a non-cancellable mutation with `provider` and `session`;
+success returns a null result. `providers[].capabilities.sessionRemoval` is
+`archive`, `detach` or `delete`, or omitted when unsupported. The host dispatches
+to the Provider's removal implementation and existing receipt/authorization
+boundary. Busy and unsupported sessions are rejected; an ambiguous completion
+returns `WRITE_OUTCOME_UNKNOWN`. Controllers reconcile the directory instead of
+replaying this write. These endpoint fields remain opaque to both service runtimes.
+
 Directory reconciliation transfers session metadata deltas. Opening a Codex
 conversation loads its latest 30 turns; steady state uses watch events. Plain
 user messages do not trigger a history snapshot. Android monitors only the state
@@ -76,11 +84,43 @@ also applied to these smaller responses when useful. Codex tool activities
 retain their typed metadata without forwarding raw stdout/native tool JSON
 that the controller does not render.
 
+Session summaries, transcript turns/fragments and `kind: "turn"` watch events
+may carry `recencyAt`, a Unix-millisecond integer for the latest recorded user
+submission or successful Agent reply completion. Omitted/zero means unknown.
+User items also retain their recorded `timestampMs`. Controllers take the newest
+known boundary per device/Provider/session and never advance it for text deltas,
+tool updates, metadata edits, reads or reconnection. `updatedAt` retains its
+existing content/metadata meaning and is not the Recent ordering key. Failure
+or interruption does not fabricate successful completion. These fields remain
+encrypted endpoint metadata; both service runtimes forward them opaquely.
+
+Turns in transcript snapshots/fragments and `kind: "turn"` watch events may carry
+`durationMs`: a nonnegative integer of Provider-recorded elapsed milliseconds,
+including zero for a recorded subsecond turn. Omitted or null means unknown;
+clients must not substitute message receipt time. Fragment assembly and caching
+preserve it. A later turn event may correct duration without changing status.
+This optional endpoint metadata remains encrypted and opaque to both Go relay
+and Worker room; service routes, grants and storage need no changes.
+
 Initial/reset catch-up journals watch events until the ordered history is
 complete, so small later user messages cannot overtake missing assistant
 replies. Once a baseline exists, live watch events remain independent of
 background snapshot refreshes. Assistant commentary is retained in completed
 history, in its source order; completion does not hide prior visible replies.
+
+## Session directory metadata
+
+Session metadata includes `projectDir`, optional opaque `projectKey`, `cwd`,
+`createdAt` and `updatedAt` (Unix milliseconds; zero creation means unknown).
+Project identity is resolved on the owning host and shared by first pages,
+complete delta reconciliation, creation and transcript snapshots. The controller
+adds its environment ID locally for routing and grouping; it is not a Provider ID
+or a caller-selected replacement for the authenticated remote host.
+
+Local controllers use the same request and receipt semantics through an in-process
+Caller. Remote callers add authentication and encrypted transport and cannot use
+local `host.*`/`client.*` administration. Go relay and Worker room still forward
+opaque frames; no service route, grant, pairing or storage changes are required.
 
 ## Resumable attachment uploads
 

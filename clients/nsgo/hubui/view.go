@@ -1,17 +1,14 @@
 package hubui
 
 import (
-	"fmt"
-	"strings"
-
 	"github.com/nsgo-dev/nsgo/core"
 	"github.com/nsgo-dev/nsgo/icons/lucide"
 	"github.com/nsgo-dev/nsgo/ui"
 )
 
 type tones struct {
-	background, foreground, muted, mutedText, border  core.Color
-	canvas, sidebar, elevated, selected, accent, code core.Color
+	background, foreground, muted, mutedText, border                core.Color
+	canvas, sidebar, elevated, selected, accent, brand, focus, code core.Color
 }
 
 func palette(cx *core.Scope) tones {
@@ -28,7 +25,7 @@ func palette(cx *core.Scope) tones {
 	return tones{background: p.Background, foreground: p.Text, muted: p.Surface,
 		mutedText: p.TextMuted, border: p.Border, canvas: role("canvas", p.Surface),
 		sidebar: role("sidebar", p.Surface), elevated: role("elevated", p.Background),
-		selected: role("selected", p.SurfacePressed), accent: p.Accent, code: role("codeSurface", p.Surface)}
+		selected: role("selected", p.SurfacePressed), accent: p.Accent, brand: role("brand", p.Accent), focus: p.Focus, code: role("codeSurface", p.Surface)}
 }
 
 var fill = core.Style{FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0), MinHeight: core.Pt(0)}
@@ -67,6 +64,8 @@ func glyph(cx *core.Scope, icon func() *core.SVG, size core.Points) core.Node {
 	return core.Icon{SVG: icon(), Style: core.Style{Width: core.Pt(size), Height: core.Pt(size), FontSize: size, FlexShrink: 0}, StyleFunc: func() core.Style { return core.Style{Color: palette(cx).foreground} }}
 }
 
+const buttonHorizontalPadding core.Points = 12
+
 func button(cx *core.Scope, id, title string, icon func() *core.SVG, variant string, onPress func()) core.Node {
 	nodes := []core.Node{}
 	if icon != nil {
@@ -80,7 +79,7 @@ func button(cx *core.Scope, id, title string, icon func() *core.SVG, variant str
 		if onPress != nil {
 			onPress()
 		}
-	}, Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter, Gap: 8, Padding: core.Symmetric(8, 12), MinHeight: core.Pt(36), CornerRadius: 10, FlexShrink: 0}, StyleFunc: func() core.Style {
+	}, Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter, Gap: 8, Padding: core.Symmetric(8, buttonHorizontalPadding), MinHeight: core.Pt(36), CornerRadius: 10, FlexShrink: 0}, StyleFunc: func() core.Style {
 		c := palette(cx)
 		st := pressStyle(cx).Merge(core.Style{Color: c.foreground, Disabled: &core.Style{Opacity: core.Alpha(.5)}})
 		if variant == "outline" {
@@ -106,17 +105,17 @@ func (s *State) refreshSessionsButton(cx *core.Scope) core.Node {
 	v := button(cx, "refresh-sessions", "", nil, "ghost", s.refreshSessions).(core.View)
 	v.Label = "刷新会话"
 	v.Busy = busy.Get
-	v.Disabled = func() bool { s.read(); return busy.Get() || s.suspended || !s.connected() }
-	v.Tooltip = dynamicText(cx, func() string {
+	v.Disabled = func() bool { s.read(); return busy.Get() || s.suspended || !s.anyConnected() }
+	v.Tooltip = tooltipCard(cx, dynamicText(cx, func() string {
 		s.read()
-		if !s.connected() {
+		if !s.anyConnected() {
 			return "设备离线，重新连接后可刷新会话"
 		}
 		if busy.Get() {
 			return "正在刷新会话"
 		}
 		return "刷新会话"
-	}, 12, false)
+	}, 12, false))
 	v.Children = []core.Node{core.Dynamic(func(cx *core.Scope) core.Node {
 		if busy.Get() {
 			return ui.Spinner{TestID: "refresh-sessions-loading", Label: "正在刷新会话", Variant: ui.SpinnerSpokes, Size: 16}
@@ -129,7 +128,7 @@ func divider(cx *core.Scope) core.Node {
 	return core.View{Style: core.Style{Width: core.Pt(1), Height: core.Pct(100), FlexShrink: 0}, StyleFunc: func() core.Style { return core.Style{Background: palette(cx).border} }}
 }
 
-func (s *State) copyButton(cx *core.Scope, id, title, variant string, value func() string) core.Node {
+func (s *State) copyButton(cx *core.Scope, id, title, variant string, value func() string, disabled ...func() bool) core.Node {
 	copied := core.NewMemo(cx, func() bool {
 		s.read()
 		return s.copiedValue != "" && s.copiedValue == value()
@@ -143,9 +142,12 @@ func (s *State) copyButton(cx *core.Scope, id, title, variant string, value func
 			}
 		}
 		v := button(cx, id, text, icon, variant, func() { s.copy(value()) }).(core.View)
+		if len(disabled) > 0 {
+			v.Disabled = disabled[0]
+		}
 		if title == "" {
 			v.Label = choose(copied.Get(), "已复制", "复制")
-			v.Tooltip = label(cx, v.Label, 12, false)
+			v.Tooltip = tooltipCard(cx, label(cx, v.Label, 12, false))
 		}
 		return v
 	})
@@ -159,6 +161,25 @@ func card(cx *core.Scope, nodes ...core.Node) core.Node {
 	return core.View{Style: core.Style{Padding: core.All(24), Gap: 14, CornerRadius: 16, BorderWidth: 1}, StyleFunc: func() core.Style {
 		return core.Style{Background: palette(cx).elevated, BorderColor: palette(cx).border}
 	}, Children: nodes}
+}
+
+// Sections inside an already bounded surface use spacing and typography;
+// another card border would repeat the container's visual boundary.
+func contentSection(cx *core.Scope, title, description string, nodes ...core.Node) core.Node {
+	children := []core.Node{}
+	if title != "" {
+		t := label(cx, title, 15, false)
+		t.Style.FontWeight = core.FontWeightSemibold
+		children = append(children, t)
+	}
+	if description != "" {
+		children = append(children, label(cx, description, 13, true))
+	}
+	return core.View{Style: core.Style{Gap: 12, MinWidth: core.Pt(0)}, Children: append(children, nodes...)}
+}
+
+func sectionDivider(cx *core.Scope) core.Node {
+	return core.View{Style: core.Style{Height: core.Pt(1), Width: core.Pct(100), FlexShrink: 0}, StyleFunc: func() core.Style { return core.Style{Background: palette(cx).border} }}
 }
 
 func Root(cx *core.Scope) core.Node {
@@ -181,51 +202,41 @@ func RootWithAPI(cx *core.Scope, api API, start bool) core.Node {
 	} else {
 		s.ready = true
 	}
-	page := core.NewMemo(cx, func() string {
-		s.read()
-		width := s.width.Get()
-		mode := "wide"
-		if width < compactBreakpoint {
-			mode = "phone"
-		} else if width < wideBreakpoint {
-			mode = "tablet"
-		}
-		if mode == "phone" {
-			return mode
-		}
-		return fmt.Sprintf("%s|%s|%s|%t", mode, s.target, str(s.selected, "id"), s.narrowChat)
-	})
+	return s.workspaceView(cx)
+}
+
+func (s *State) workspaceView(cx *core.Scope) core.Node {
+	page := core.NewMemo(cx, func() bool { return s.width.Get() < compactBreakpoint })
 	return s.windowFrame(cx, core.View{TestID: "agenthub", Style: fill.Merge(core.Style{PaddingEnv: core.EnvEdges{Top: core.EnvSafeArea, Bottom: core.EnvSafeArea}}), StyleFunc: func() core.Style {
 		return core.Style{Background: palette(cx).canvas, Color: palette(cx).foreground, FontSize: 13}
 	}, OnLayout: func(b core.Bounds) { s.width.Set(b.Size.Width) }, Children: []core.Node{
 		core.Dynamic(func(cx *core.Scope) core.Node {
-			_ = page.Get()
-			width := s.width.GetUntracked()
-			if width < compactBreakpoint {
-				return s.phonePages(cx)
-			}
-			nodes := []core.Node{s.navigation(cx, false)}
-			if width >= compactBreakpoint {
-				nodes = append(nodes, s.resize(cx, true))
-			}
-			var body core.Node
-			if s.target == "" {
-				if api.CanHost() {
-					body = s.local(cx)
-				} else {
-					body = s.welcome(cx)
+			compact := page.Get()
+			// Only crossing the layout breakpoint replaces the workspace. Child
+			// construction also reads environment/theme data; keep those updates
+			// in its reactive properties instead of resetting every pane.
+			return core.Untracked(cx, func() core.Node {
+				if compact {
+					return s.phonePages(cx)
 				}
-			} else if width >= wideBreakpoint {
-				body = core.View{Style: fill.Merge(core.Style{Direction: core.Row}), Children: []core.Node{core.View{StyleFunc: func() core.Style {
-					return core.Style{Width: core.Pt(s.sessionWidth.Get()), MinHeight: core.Pt(0), MinWidth: core.Pt(0)}
-				}, Children: []core.Node{s.directory(cx)}}, s.resize(cx, false), s.conversation(cx, false)}}
-			} else if s.narrowChat {
-				body = s.conversation(cx, true)
-			} else {
-				body = s.directory(cx)
-			}
-			nodes = append(nodes, core.View{Style: fill, Children: []core.Node{body}})
-			return core.View{Style: fill.Merge(core.Style{Direction: core.Row}), Children: nodes}
+				selection := core.NewMemo(cx, func() string {
+					s.read()
+					if s.selected == nil {
+						return ""
+					}
+					return s.key()
+				})
+				return core.View{Style: fill, Children: []core.Node{s.workspaceToolbar(cx), core.View{Style: fill.Merge(core.Style{Direction: core.Row}), Children: []core.Node{
+					core.View{TestID: "sidebar-container", StyleFunc: func() core.Style {
+						return core.Style{Display: choose(s.sidebarHidden.Get(), core.DisplayNone, core.DisplayFlex), Width: core.Pt(s.sidebarWidth()), MinHeight: core.Pt(0), FlexShrink: 0}
+					}, Children: []core.Node{s.directory(cx)}},
+					s.resize(cx),
+					core.Dynamic(func(cx *core.Scope) core.Node {
+						selection.Get()
+						return core.Untracked(cx, func() core.Node { return s.conversation(cx, false) })
+					}),
+				}}}}
+			})
 		}),
 		core.Show{When: func() bool { s.read(); return s.error != "" && !s.errorAtComposer() }, Then: func(cx *core.Scope) core.Node {
 			return s.errorOverlay(cx, false)
@@ -240,87 +251,18 @@ func RootWithAPI(cx *core.Scope, api API, start bool) core.Node {
 	}})
 }
 
-func (s *State) resize(cx *core.Scope, devices bool) core.Node {
+func (s *State) resize(cx *core.Scope) core.Node {
 	w := s.sessionWidth
-	if devices {
-		w = s.deviceWidth
-	}
 	var initial core.Points
-	return core.View{TestID: fmt.Sprint("resize-", devices), Style: core.Style{Width: core.Pt(5), FlexShrink: 0, AlignItems: core.AlignCenter}, Class: "cursor-col-resize", OnPan: func(e core.PanEvent) {
+	return core.View{TestID: "resize-sessions", Style: core.Style{Width: core.Pt(5), FlexShrink: 0, AlignItems: core.AlignCenter}, StyleFunc: func() core.Style {
+		return core.Style{Display: choose(s.sidebarHidden.Get(), core.DisplayNone, core.DisplayFlex), Background: palette(cx).background}
+	}, Class: "cursor-col-resize", OnPan: func(e core.PanEvent) {
 		if e.Phase == core.GestureBegan {
 			initial = w.Get()
 		}
-		lo, hi := core.Points(220), core.Points(400)
-		if devices {
-			lo, hi = 175, 300
-		}
+		lo, hi := core.Points(260), core.Points(400)
 		w.Set(min(hi, max(lo, initial+e.Translation.X)))
 	}, Children: []core.Node{core.View{Style: core.Style{Width: core.Pt(1), Height: core.Pct(100)}, StyleFunc: func() core.Style { return core.Style{Hover: &core.Style{Background: palette(cx).border}} }}}}
-}
-func (s *State) navigation(cx *core.Scope, compact bool) core.Node {
-	openConnect := func() { s.dialog.Set("connect") }
-	nodes := []core.Node{}
-	if compact {
-		nodes = append(nodes, labelledIconButton(cx, "home", "这台电脑", lucide.Command, func() { s.selectDevice("") }), labelledIconButton(cx, "connect-device", "连接设备", lucide.Plus, openConnect))
-	} else {
-		nodes = append(nodes, core.View{Style: core.Style{Padding: core.Symmetric(20, 8)}, Children: []core.Node{s.brand(cx, 19, true)}})
-		if s.api.CanHost() {
-			nodes = append(nodes, button(cx, "home", "本机", lucide.Monitor, "outline", func() { s.selectDevice("") }))
-		}
-		nodes = append(nodes, button(cx, "connect-device", "连接设备", lucide.Plus, "primary", openConnect))
-	}
-	if isMobile(cx) {
-		title := "扫描二维码"
-		if compact {
-			title = ""
-		}
-		nodes = append(nodes, func() core.Node {
-			v := button(cx, "scan-qr", title, lucide.ScanLine, "ghost", func() { s.scan(cx) }).(core.View)
-			v.Label = "扫描二维码"
-			v.Tooltip = label(cx, v.Label, 12, false)
-			return v
-		}())
-	}
-	if !compact {
-		nodes = append(nodes, core.View{Style: core.Style{Padding: core.Edges{Top: 16, Left: 8, Bottom: 4}}, Children: []core.Node{label(cx, "已保存设备", 12, true)}})
-	}
-	nodes = append(nodes, core.Scroll{Style: fill, Children: []core.Node{core.Each(func() []Object { s.read(); return s.devices }, func(d Object) string { return str(d, "id") }, func(cx *core.Scope, d func() Object, _ func() int) core.Node {
-		if compact {
-			return labelledIconButton(cx, "device-"+str(d(), "id"), deviceName(d()), lucide.Monitor, func() { s.openDevice(str(d(), "id")) })
-		}
-		return core.View{TestID: "device-" + str(d(), "id"), Role: core.RoleButton, LabelFunc: func() string { return deviceName(d()) }, OnPress: func(core.PressEvent) { s.openDevice(str(d(), "id")) }, Style: core.Style{Margin: core.Edges{Bottom: 6}, Padding: core.All(12), Gap: 5, CornerRadius: 12}, StyleFunc: func() core.Style {
-			c := palette(cx)
-			bg := c.sidebar
-			s.read()
-			if s.target == str(d(), "id") {
-				bg = c.selected
-			}
-			return pressStyle(cx).Merge(core.Style{Background: bg, BorderColor: c.border})
-		}, Children: []core.Node{row(core.View{Style: fill, Children: []core.Node{dynamicText(cx, func() string { return deviceName(d()) }, 13, false)}}, s.devicePresenceIndicator(cx, d)), dynamicText(cx, func() string { return s.deviceListStatus(d()) }, 10, true)}}
-	})}})
-	nodes = append(nodes, core.Show{When: func() bool { s.read(); return s.connectionProblem("") }, Then: func(cx *core.Scope) core.Node { return s.connectionIndicator(cx, func() string { return "" }) }}, func() core.Node {
-		v := button(cx, "account-menu", choose(compact, "", "账号与设备同步"), lucide.User, "ghost", func() { s.dialog.Set("account") }).(core.View)
-		v.Label = "账号与设备同步"
-		v.Tooltip = label(cx, v.Label, 12, false)
-		return v
-	}())
-	themeButton := button(cx, "theme-toggle", "", lucide.SunMoon, "ghost", s.toggleTheme).(core.View)
-	themeButton.Label = "切换主题"
-	themeButton.Tooltip = label(cx, "切换主题", 12, false)
-	nodes = append(nodes, row(leftButton(func() core.Node {
-		v := button(cx, "server-settings", choose(compact, "", "设置"), lucide.Settings, "ghost", func() { s.openSettings("general") }).(core.View)
-		v.Label = "设置"
-		v.Tooltip = label(cx, v.Label, 12, false)
-		return v
-	}()), spacer(), themeButton))
-	return core.View{TestID: "device-sidebar", Style: core.Style{Padding: core.All(14), Gap: 8, FlexShrink: 0}, StyleFunc: func() core.Style {
-		w := s.deviceWidth.Get()
-		if compact {
-			w = 60
-		}
-		c := palette(cx)
-		return core.Style{Width: core.Pt(w), Background: c.sidebar, Color: c.foreground}
-	}, Children: nodes}
 }
 func choose[T any](condition bool, a, b T) T {
 	if condition {
@@ -332,150 +274,6 @@ func isMobile(cx *core.Scope) bool {
 	return cx.Env().OS() == core.OS("ios") || cx.Env().OS() == core.OS("android")
 }
 
-func (s *State) local(cx *core.Scope) core.Node {
-	copyID := s.copyButton(cx, "copy-device-id", "复制 ID", "outline", func() string { return str(s.host, "connectionId") })
-	return core.Scroll{TestID: "local-dashboard", Style: fill, StyleFunc: func() core.Style { return s.workspaceSurface(cx) }, Children: []core.Node{core.View{Style: core.Style{Padding: core.All(32), Gap: 18}, Children: []core.Node{
-		heading(cx, "这台电脑", "允许已授权设备访问本机 Agent，官方应用仍可照常使用。"),
-		card(cx, row(identityGlyph(cx, Object{"platform": platformClientInfo().Platform, "kind": "native"}, 22), dynamicText(cx, func() string {
-			s.read()
-			name := str(s.host, "name")
-			if name == "" {
-				name = "本机"
-			}
-			return name
-		}, 14, false), spacer(), dynamicText(cx, func() string { s.read(); return str(s.host, "status") }, 12, true), s.connectionIndicator(cx, func() string { return "" })), label(cx, "你的设备 ID", 12, true), core.Text{TestID: "device-code", ContentFunc: func() string {
-			s.read()
-			v := str(s.host, "connectionId")
-			if len(v) == 6 {
-				return v[:3] + " " + v[3:]
-			}
-			return "尚未登记"
-		}, Selectable: core.SelectableOn, Style: core.Style{FontSize: 32, FontWeight: core.FontWeightSemibold, LetterSpacing: 2}}, row(copyID, button(cx, "show-qr", "设备二维码", nil, "outline", func() { s.dialog.Set("qr") }), button(cx, "configure-service", "配置服务", nil, "outline", func() { s.openSettings("connection") }))),
-		card(cx, label(cx, "访问授权", 14, false), label(cx, "首次连接需本机确认；配置密码后，输入正确密码可自动授权。", 13, true), row(button(cx, "set-password", "设置访问密码", nil, "outline", func() { s.dialog.Set("password") }), core.Show{When: func() bool { s.read(); return flag(s.host, "passwordEnabled") }, Then: func(cx *core.Scope) core.Node {
-			return s.actionButton(cx, "clear-password", "关闭密码访问", nil, "ghost", func() { s.call("clear-password", "host.password", Object{"clearPassword": true}, nil) })
-		}}), core.Each(func() []Object { s.read(); return objects(s.host["grants"]) }, func(g Object) string { return str(g, "client") }, func(cx *core.Scope, g func() Object, _ func() int) core.Node {
-			return row(controllerIdentity(cx, g), spacer(), s.actionButton(cx, "revoke-"+str(g(), "client"), "撤销授权", nil, "ghost", func() { s.call("revoke-"+str(g(), "client"), "host.revoke", Object{"client": g()["client"]}, nil) }))
-		})),
-		card(cx, row(glyph(cx, lucide.Bot, 22), core.View{Style: fill, Children: []core.Node{label(cx, "本机 Agent", 14, false), label(cx, "管理已安装的 Agent 与自定义接入。", 13, true)}}, button(cx, "manage-agents", "管理 Agent", lucide.ArrowRight, "outline", func() { s.openSettings("agents") }))),
-	}}}}
-}
 func (s *State) welcome(cx *core.Scope) core.Node {
 	return core.View{Style: fill.Merge(core.Style{AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter, Padding: core.All(32), Gap: 20}), StyleFunc: func() core.Style { return s.workspaceSurface(cx) }, Children: []core.Node{glyph(cx, lucide.Network, 52), label(cx, "你的 Agent，随处连接", 26, false), label(cx, "输入设备 ID，连接电脑上的 Codex 与其它 Agent。", 13, true), button(cx, "welcome-connect", "连接你的电脑", nil, "primary", func() { s.dialog.Set("connect") })}}
-}
-
-type directoryRow struct {
-	ID, Title, Path, Group string
-	Session                Object
-	Header, More           bool
-}
-
-func (s *State) directoryRows() []directoryRow {
-	s.read()
-	rows := []directoryRow{}
-	for _, g := range directories(s.sessions) {
-		rows = append(rows, directoryRow{ID: "dir:" + g.Key, Title: g.Title, Path: g.Path, Group: g.Key, Header: true})
-		if s.collapsed[s.target+"|"+g.Key] {
-			continue
-		}
-		visible := g.Sessions
-		if !s.expanded[s.target+"|"+g.Key] && len(visible) > 5 {
-			visible = visible[:5]
-		}
-		for _, ss := range visible {
-			rows = append(rows, directoryRow{ID: str(ss, "providerId") + "|" + str(ss, "id"), Title: str(ss, "title"), Path: str(ss, "cwd"), Group: g.Key, Session: ss})
-		}
-		if len(g.Sessions) > 5 {
-			rows = append(rows, directoryRow{ID: "more:" + g.Key, Path: g.Path, Group: g.Key, More: true})
-		}
-	}
-	return rows
-}
-func (s *State) directory(cx *core.Scope) core.Node {
-	// Connection timers and streaming text do not change the session catalogue.
-	// Avoid regrouping/sorting it on every unrelated revision while scrolling.
-	type catalogueStamp struct {
-		Target  string
-		Version uint64
-		Count   int
-	}
-	stamp := core.NewMemo(cx, func() catalogueStamp {
-		s.read()
-		return catalogueStamp{s.target, s.catalogueVersion, len(s.sessions)}
-	})
-	groups := core.NewSignal(cx, 0)
-	rows := core.NewMemoFunc(cx, func() []directoryRow {
-		stamp.Get()
-		groups.Get()
-		return core.Untracked(cx, s.directoryRows)
-	}, nil)
-	brake := &listTouchBrake{enabled: !isWeb() && cx.Env().OS() == core.OSAndroid}
-	return core.View{TestID: "session-sidebar", Style: fill, StyleFunc: func() core.Style {
-		c := palette(cx)
-		return core.Style{Background: c.sidebar, Color: c.foreground}
-	}, Children: []core.Node{
-		core.View{Style: core.Style{Padding: core.Edges{Top: 20, Left: 18, Right: 12, Bottom: 6}}, Children: []core.Node{row(core.Show{When: func() bool { return s.width.Get() < compactBreakpoint }, Then: func(cx *core.Scope) core.Node {
-			return button(cx, "back-devices", "设备", lucide.ArrowLeft, "ghost", s.backDevices)
-		}}, core.View{Style: fill, Children: []core.Node{singleLine(cx, func() string { s.read(); return deviceName(s.device()) }, 14, false), singleLine(cx, func() string { s.read(); return s.deviceListStatus(s.device()) }, 11, true)}}, s.connectionIndicator(cx, func() string { return s.target }), s.refreshSessionsButton(cx))}},
-		core.View{Style: core.Style{Padding: core.Symmetric(6, 12)}, Children: []core.Node{leftButton(button(cx, "new-session", "新聊天", lucide.SquarePen, "ghost", func() { s.createDirectory = ""; s.dialog.Set("create") }))}},
-		core.View{Style: core.Style{Padding: core.Edges{Left: 22, Top: 16, Right: 16}}, Children: []core.Node{label(cx, "项目", 12, true)}},
-		s.emptyCatalogue(cx),
-		brake.wrap(core.List{TestID: "session-list", Style: fill, Count: func() int { return len(rows.Get()) }, Key: func(i int) any { return rows.Get()[i].ID }, EstimatedSize: 38, Row: func(cx *core.Scope, r core.ListRow) core.Node {
-			item := func() directoryRow {
-				v := rows.Get()
-				i := r.Index()
-				if i >= 0 && i < len(v) {
-					return v[i]
-				}
-				return directoryRow{}
-			}
-			key := core.NewMemo(cx, func() string { return item().ID })
-			return core.Dynamic(func(cx *core.Scope) core.Node {
-				_ = key.Get()
-				data := core.Untracked(cx, item)
-				groupKey := s.target + "|" + data.Group
-				if data.More {
-					return core.View{Style: core.Style{Padding: core.Edges{Left: 43, Right: 12}}, Children: []core.Node{leftButton(button(cx, "more-"+data.Group, choose(s.expanded[groupKey], "收起", "展开显示"), nil, "ghost", brake.action(func() {
-						s.expanded[groupKey] = !s.expanded[groupKey]
-						groups.Update(func(v int) int { return v + 1 })
-						s.changed()
-					})))}}
-				}
-				if data.Header {
-					folder := core.Icon{SVGFunc: func() *core.SVG {
-						s.read()
-						if s.collapsed[groupKey] {
-							return lucide.Folder()
-						}
-						return lucide.FolderOpen()
-					}, Style: core.Style{Width: core.Pt(18), Height: core.Pt(18)}}
-					return core.View{TestID: data.ID, Style: core.Style{Padding: core.Edges{Top: 18, Bottom: 3, Left: 10, Right: 10}}, Children: []core.Node{row(core.View{Role: core.RoleButton, Label: data.Title, OnPress: func(core.PressEvent) {
-						brake.action(func() {
-							s.collapsed[groupKey] = !s.collapsed[groupKey]
-							groups.Update(func(v int) int { return v + 1 })
-							s.changed()
-						})()
-					}, Style: core.Style{FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0), Direction: core.Row, AlignItems: core.AlignCenter, Gap: 10, Padding: core.Symmetric(8, 12), CornerRadius: 8}, StyleFunc: func() core.Style { return pressStyle(cx) }, Children: []core.Node{folder, singleLine(cx, func() string { return item().Title }, 14, false)}}, labelledIconButton(cx, "directory-info-"+data.Group, "项目信息", lucide.Ellipsis, brake.action(func() { s.directoryInfo = data.Group; s.dialog.Set("directory") })), labelledIconButton(cx, "directory-create-"+data.Group, "在项目中新建会话", lucide.SquarePen, brake.action(func() { s.createDirectory = data.Path; s.dialog.Set("create") })))}}
-				}
-				return core.View{TestID: "session-" + str(data.Session, "id"), Role: core.RoleButton, LabelFunc: func() string { return item().Title }, OnPress: func(core.PressEvent) { brake.action(func() { s.selectSession(item().Session) })() }, Style: core.Style{MinHeight: core.Pt(36), Padding: core.Edges{Top: 8, Bottom: 8, Left: 34, Right: 12}, Margin: core.Symmetric(1, 10), CornerRadius: 12}, StyleFunc: func() core.Style {
-					s.read()
-					c := palette(cx)
-					st := pressStyle(cx)
-					if str(s.selected, "id") == str(item().Session, "id") && str(s.selected, "providerId") == str(item().Session, "providerId") {
-						st.Background = c.selected
-					}
-					return st
-				}, Children: []core.Node{row(core.Icon{SVG: sessionIcon(data.Session)(), Style: core.Style{Width: core.Pt(14), Height: core.Pt(14)}, StyleFunc: func() core.Style { return core.Style{Color: palette(cx).mutedText} }}, core.Text{ContentFunc: func() string { return item().Title }, MaxLines: 1, Style: core.Style{FontSize: 13, FlexShrink: 1, MinWidth: core.Pt(0)}})}}
-			})
-		}}),
-		core.View{Style: core.Style{Padding: core.All(8)}, Children: []core.Node{row(button(cx, "reconnect-device", "重连", nil, "ghost", func() { s.reconnectDevice(s.target) }), busyButton(cx, "disconnect-device", "断开", nil, "ghost", func() bool { return s.actionPending("disconnect:" + s.target) }, func() { s.call("disconnect:"+s.target, "client.disconnect", Object{"id": s.target}, nil) }), spacer(), labelledIconButton(cx, "forget-device", "移除设备", lucide.Trash, func() { s.dialog.Set("forget") }))}},
-	}}
-}
-func sessionIcon(s Object) func() *core.SVG {
-	if strings.Contains(str(s, "providerId"), "claude") {
-		return lucide.Sparkles
-	}
-	if str(s, "sourceKind") == "app" || str(s, "providerId") == "codex-app" {
-		return lucide.Monitor
-	}
-	return lucide.Terminal
 }

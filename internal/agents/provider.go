@@ -41,6 +41,7 @@ type session struct {
 	runtime   runtimeAgent
 	opening   bool
 	sending   bool
+	removing  bool
 	turn      string
 	assistant string
 }
@@ -72,6 +73,8 @@ type Provider struct {
 	mu              sync.Mutex
 	startMu         sync.Mutex
 	persistMu       sync.Mutex
+	removeMu        sync.Mutex
+	removed         map[string]bool
 	probe           runtimeAgent
 	caps            provider.Capabilities
 	discoverMu      sync.Mutex
@@ -92,12 +95,15 @@ func (p *Provider) Status(context.Context) provider.Status {
 	path, _ := resolveAgentExecutable(p.def)
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	s := provider.Status{ID: p.id, Name: p.def.Name, State: "unavailable", Installed: path != "", InstallPath: path, Capabilities: p.caps, LastError: p.lastError, Detail: "安装 Agent 后启用"}
+	s := provider.Status{ID: p.id, Name: p.def.Name, State: "unavailable", Installed: path != "", InstallPath: path, Capabilities: p.caps, LastError: p.lastError, Detail: "未安装"}
 	if s.Name == "" {
 		s.Name = p.id
 	}
 	if path != "" {
-		s.Detail = "点击启用"
+		s.Detail = "正在连接"
+		if p.lastError != "" {
+			s.Detail = "需要配置"
+		}
 	}
 	if p.enabled && !p.closed && p.probe != nil && p.probe.Alive() {
 		s.State = "ready"
@@ -106,6 +112,14 @@ func (p *Provider) Status(context.Context) provider.Status {
 		s.Controllable = true
 	}
 	return s
+}
+
+func (p *Provider) AutoConnect(ctx context.Context) error {
+	s := p.Status(ctx)
+	if s.Ready() || !s.Installed {
+		return nil
+	}
+	return p.Start(ctx)
 }
 func (p *Provider) Start(ctx context.Context) error {
 	p.startMu.Lock()
@@ -137,6 +151,12 @@ func (p *Provider) Start(ctx context.Context) error {
 		p.lastError = err.Error()
 		return err
 	}
+	var removed map[string]bool
+	if err := localstate.Get(p.path(), p.id+":removed", &removed); err != nil && !isMissing(err) {
+		_ = rt.Close()
+		return err
+	}
+	p.removed = removed
 	var index []sessionRef
 	if err := localstate.Get(p.path(), p.id+":sessions", &index); err != nil && !isMissing(err) {
 		_ = rt.Close()
@@ -149,6 +169,7 @@ func (p *Provider) Start(ctx context.Context) error {
 	}
 	p.probe = rt
 	p.caps = rt.Capabilities()
+	p.caps.SessionRemoval = "detach"
 	p.enabled = true
 	p.lastError = ""
 	return nil
@@ -220,7 +241,7 @@ func (p *Provider) Sessions(ctx context.Context, cursor string) (provider.Sessio
 	p.mu.Lock()
 	rows := []provider.Session{}
 	for _, s := range p.sessions {
-		if s.opening && !s.persisted {
+		if p.removed[s.Session.ID] || s.removing || s.opening && !s.persisted {
 			continue
 		}
 		rows = append(rows, s.Session)
@@ -251,8 +272,8 @@ func (p *Provider) load(id string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	s := p.sessions[id]
-	if s == nil {
-		return errors.New("会话不存在")
+	if s == nil || p.removed[id] || s.removing {
+		return errors.New("会话不存在或已移除")
 	}
 	if s.Turns != nil {
 		return nil
@@ -356,7 +377,8 @@ func (p *Provider) Create(ctx context.Context, o provider.CreateOptions) (provid
 		return provider.Session{}, errors.New("请选择工作目录")
 	}
 	id := device.Random()[:24]
-	s := &session{Transcript: provider.Transcript{Session: provider.Session{ID: id, ProviderID: p.id, Title: "新会话", CWD: cwd, Model: o.Model, SourceKind: "custom", UpdatedAt: time.Now().UnixMilli()}, Turns: []provider.Turn{}}, opening: true}
+	now := time.Now().UnixMilli()
+	s := &session{Transcript: provider.Transcript{Session: provider.Session{ID: id, ProviderID: p.id, Title: "新会话", CWD: cwd, Model: o.Model, SourceKind: "custom", CreatedAt: now, UpdatedAt: now}, Turns: []provider.Turn{}}, opening: true}
 	p.mu.Lock()
 	p.sessions[id] = s
 	p.mu.Unlock()
@@ -404,6 +426,10 @@ func (p *Provider) ensureRuntime(ctx context.Context, id string) (runtimeAgent, 
 	defer sessionLock.Unlock()
 	p.mu.Lock()
 	s := p.sessions[id]
+	if p.removed[id] || s.removing {
+		p.mu.Unlock()
+		return nil, errors.New("会话已移除")
+	}
 	if s.runtime != nil && s.runtime.Alive() {
 		rt := s.runtime
 		p.mu.Unlock()
@@ -465,6 +491,10 @@ func (p *Provider) SendAttachments(ctx context.Context, id, text, model string, 
 	}
 	p.mu.Lock()
 	s := p.sessions[id]
+	if p.removed[id] || s.removing {
+		p.mu.Unlock()
+		return errors.New("会话已移除")
+	}
 	if s.sending {
 		p.mu.Unlock()
 		return errors.New("Agent 正在回复，请等待完成或停止生成")
@@ -479,14 +509,15 @@ func (p *Provider) SendAttachments(ctx context.Context, id, text, model string, 
 	s.Session.ActiveTurnID = turnID
 	s.Session.Status = "inProgress"
 	s.Session.UpdatedAt = time.Now().UnixMilli()
+	s.Session.RecencyAt = s.Session.UpdatedAt
 	s.Session.Model = model
 	if s.Session.Title == "新会话" {
 		r := []rune(strings.TrimSpace(text))
 		s.Session.Title = string(r[:min(len(r), 60)])
 	}
-	user := provider.Item{ID: device.Random()[:16], Role: "user", Type: "userMessage", Text: text, Attachments: attachments, TimestampMS: ptr(time.Now().UnixMilli())}
-	s.Turns = append(s.Turns, provider.Turn{ID: turnID, Status: "inProgress", Items: []provider.Item{user}})
-	p.log.Publish(provider.StreamEvent{SessionID: id, TurnID: turnID, Kind: "turn", Status: "inProgress"})
+	user := provider.Item{ID: device.Random()[:16], Role: "user", Type: "userMessage", Text: text, Attachments: attachments, TimestampMS: ptr(s.Session.RecencyAt)}
+	s.Turns = append(s.Turns, provider.Turn{ID: turnID, Status: "inProgress", RecencyAt: s.Session.RecencyAt, Items: []provider.Item{user}})
+	p.log.Publish(provider.StreamEvent{SessionID: id, TurnID: turnID, Kind: "turn", Status: "inProgress", RecencyAt: s.Session.RecencyAt})
 	p.log.Publish(provider.StreamEvent{SessionID: id, TurnID: turnID, ItemID: user.ID, Kind: "item", Item: &user})
 	p.mu.Unlock()
 	if err = p.persist(id); err != nil {
@@ -517,15 +548,19 @@ func (p *Provider) finish(id, turn string, err error) {
 	s.Session.Status = status
 	s.Session.ActiveTurnID = ""
 	s.Session.UpdatedAt = time.Now().UnixMilli()
+	if status == "completed" {
+		s.Session.RecencyAt = max(s.Session.RecencyAt, s.Session.UpdatedAt)
+	}
 	if len(s.Turns) > 0 {
 		s.Turns[len(s.Turns)-1].Status = status
+		s.Turns[len(s.Turns)-1].RecencyAt = s.Session.RecencyAt
 		if err != nil && status == "failed" {
 			item := provider.Item{ID: device.Random()[:16], Role: "system", Type: "error", Text: err.Error()}
 			s.Turns[len(s.Turns)-1].Items = append(s.Turns[len(s.Turns)-1].Items, item)
 			p.log.Publish(provider.StreamEvent{SessionID: id, TurnID: turn, ItemID: item.ID, Kind: "item", Item: &item})
 		}
 	}
-	p.log.Publish(provider.StreamEvent{SessionID: id, TurnID: turn, Kind: "turn", Status: status})
+	p.log.Publish(provider.StreamEvent{SessionID: id, TurnID: turn, Kind: "turn", Status: status, RecencyAt: s.Session.RecencyAt})
 	p.mu.Unlock()
 	_ = p.persist(id)
 }
@@ -618,6 +653,8 @@ func (p *Provider) Steer(ctx context.Context, id, turn, text string) error {
 	if s != nil && s.sending {
 		item := provider.Item{ID: device.Random()[:16], Role: "user", Type: "userMessage", Text: text, TimestampMS: ptr(time.Now().UnixMilli())}
 		s.Turns[len(s.Turns)-1].Items = append(s.Turns[len(s.Turns)-1].Items, item)
+		s.Session.RecencyAt = max(s.Session.RecencyAt, *item.TimestampMS)
+		s.Session.UpdatedAt = max(s.Session.UpdatedAt, s.Session.RecencyAt)
 		s.assistant = ""
 		p.log.Publish(provider.StreamEvent{SessionID: id, TurnID: s.turn, ItemID: item.ID, Kind: "item", Item: &item})
 	}
@@ -662,12 +699,14 @@ var _ provider.Provider = (*Provider)(nil)
 type nativeSession struct {
 	ID, CWD, Title string
 	UpdatedAt      int64
+	CreatedAt      int64
 }
 
 func (p *Provider) replaceHistory(id string, turns []provider.Turn) {
 	p.mu.Lock()
 	if s := p.sessions[id]; s != nil && !s.sending {
 		s.Turns = turns
+		s.Session.RecencyAt = max(s.Session.RecencyAt, provider.ConversationRecency(turns))
 		s.Imported = false
 	}
 	p.mu.Unlock()
@@ -714,7 +753,7 @@ func (p *Provider) discover(ctx context.Context) error {
 			}
 		}
 		if !exists {
-			p.sessions[id] = &session{Transcript: provider.Transcript{Session: provider.Session{ID: id, ProviderID: p.id, Title: row.Title, CWD: row.CWD, UpdatedAt: row.UpdatedAt, SourceKind: "custom"}, Turns: []provider.Turn{}}, NativeID: row.ID, Imported: true}
+			p.sessions[id] = &session{Transcript: provider.Transcript{Session: provider.Session{ID: id, ProviderID: p.id, Title: row.Title, CWD: row.CWD, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt, SourceKind: "custom"}, Turns: []provider.Turn{}}, NativeID: row.ID, Imported: true}
 		}
 		p.mu.Unlock()
 		if !exists {

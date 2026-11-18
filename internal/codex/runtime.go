@@ -2,6 +2,7 @@ package codex
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -28,11 +29,14 @@ func (p *Provider) startAppServer(ctx context.Context) error {
 		stop()
 		go b.run()
 		if err != nil {
-			return fmt.Errorf("连接 Codex App IPC 失败，请先打开官方 App: %w", err)
+			return appIPCConnectionError(err)
 		}
 	}
 	ipc := b.client()
 	if ipc == nil || !ipc.Alive() {
+		if err := b.connectionError(); err != nil {
+			return appIPCConnectionError(err)
+		}
 		return fmt.Errorf("Codex App IPC 尚未就绪，请稍后重试")
 	}
 	if c != nil && c.Alive() {
@@ -51,6 +55,7 @@ func (p *Provider) startAppServer(ctx context.Context) error {
 		return err
 	}
 	cmd := exec.Command(cli, "-c", "features.code_mode_host=true", "app-server", "--listen", "stdio://")
+	system.HideConsole(cmd)
 	cmd.Stderr = logFile
 	setup, stop := context.WithTimeout(ctx, 10*time.Second)
 	defer stop()
@@ -79,4 +84,17 @@ func (p *Provider) startAppServer(ctx context.Context) error {
 		}
 	}()
 	return nil
+}
+
+func appIPCConnectionError(err error) error {
+	switch {
+	case errors.Is(err, os.ErrPermission):
+		return fmt.Errorf("Codex App IPC 访问被拒绝，请确认 ReignHub 与 Codex App 由同一用户以相同权限级别运行：%w", err)
+	case errors.Is(err, os.ErrNotExist):
+		return fmt.Errorf("未找到 Codex App IPC，请先打开官方 App：%w", err)
+	case errors.Is(err, context.DeadlineExceeded):
+		return fmt.Errorf("连接 Codex App IPC 超时，请稍后重试：%w", err)
+	default:
+		return fmt.Errorf("连接 Codex App IPC 失败：%w", err)
+	}
 }

@@ -7,7 +7,7 @@ description: 接入 Claude Code、Cursor、DeepSeek Harness 与更多 ACP Agent�
 
 ## 安装与登录
 
-在被控电脑上安装 Agent，并通过其 CLI 完成登录。在 ReignHub 的**设置 → Agent** 面板启用对应预设。ReignHub 不会自动安装 Agent，也不包含模型订阅。
+在被控电脑上安装 Agent，并通过其 CLI 完成登录。Agent 就绪后，ReignHub 会自动接入，开关默认打开；可以在**设置 → Agent** 中关闭或调整配置。ReignHub 不会自动安装 Agent，也不包含模型订阅。
 
 | Agent            | 可执行程序         | 参数                                      | 环境变量                             |
 | ---------------- | ------------------ | ----------------------------------------- | ------------------------------------ |
@@ -40,7 +40,7 @@ Claude Code 使用 [Claude Agent ACP 适配器](https://github.com/agentclientpr
 }
 ```
 
-保存并重启 ReignHub，然后启用该实例。现有预设可通过**配置**修改程序路径、参数与环境变量。不同 ID 可以使用同一种 Agent 和不同配置；账号隔离遵循 Agent 自身的配置能力。
+保存并重启 ReignHub，配置完成的实例会自动接入。现有预设可通过**配置**修改程序路径、参数与环境变量。不同 ID 可以使用同一种 Agent 和不同配置；账号隔离遵循 Agent 自身的配置能力。
 
 每个参数都是数组中的独立元素，按原样传递，不进行 shell 展开。请使用可执行程序路径、参数数组与 `env`，不要填写整条 shell 命令。Windows 上使用 `.exe`；npm Agent 也可配置 `node.exe`，在 `args` 中填写 JavaScript 入口。凭证优先保存在 Agent 的登录存储或被控电脑的环境变量中。启动配置仅保存在本机，远程控制端不能编辑。
 

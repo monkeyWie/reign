@@ -55,6 +55,11 @@ type Caller interface {
 	Path() string
 	Close() error
 }
+
+// LocalTarget identifies the in-process environment. It never enters pairing,
+// discovery or the encrypted transport; it implements the same Caller contract.
+const LocalTarget = "local"
+
 type PeerStatus struct {
 	ID   string `json:"id"`
 	Path string `json:"path"`
@@ -66,13 +71,14 @@ type NetworkStatus struct {
 	Peers  []PeerStatus `json:"peers"`
 }
 type Dispatcher struct {
-	Assets     *assets.Store
-	mutationMu [64]sync.Mutex
-	Execute    func(Request, func() Response) Response
-	Providers  map[string]provider.Provider
-	Network    func() NetworkStatus
-	Local      func(context.Context, Request) (any, error)
-	Sync       func(context.Context, provider.Provider, Request) (any, error)
+	Assets          *assets.Store
+	mutationMu      [64]sync.Mutex
+	Execute         func(Request, func() Response) Response
+	Providers       map[string]provider.Provider
+	ProviderEnabled func(string) bool
+	Network         func() NetworkStatus
+	Local           func(context.Context, Request) (any, error)
+	Sync            func(context.Context, provider.Provider, Request) (any, error)
 }
 
 func (d *Dispatcher) Handle(ctx context.Context, r Request) Response {
@@ -101,6 +107,15 @@ func (d *Dispatcher) HandleRemote(ctx context.Context, r Request) Response {
 	if strings.HasPrefix(r.Method, "host.") || strings.HasPrefix(r.Method, "client.") || r.Method == "connectDesktop" {
 		return Response{ID: r.ID, Error: "此操作仅允许在本机执行"}
 	}
+	return d.HandleRequest(ctx, r)
+}
+
+// HandleRequest applies the same command ordering and receipt semantics to
+// local and remote callers. Remote authorization is checked before this layer.
+func (d *Dispatcher) HandleRequest(ctx context.Context, r Request) Response {
+	if strings.HasPrefix(r.Method, "host.") || strings.HasPrefix(r.Method, "client.") {
+		return d.Handle(ctx, r)
+	}
 	if d.Execute != nil && !ReadOnly(r.Method) && r.Method != "watch" && r.Method != "network" && !strings.HasPrefix(r.Method, "attachment.") {
 		digest := sha256.Sum256([]byte(r.Provider + "/" + r.Session))
 		lock := &d.mutationMu[int(digest[0])%len(d.mutationMu)]
@@ -128,8 +143,12 @@ func (d *Dispatcher) dispatch(ctx context.Context, r Request) (any, error) {
 	}
 	if r.Method == "providers" {
 		statuses := []provider.Status{}
-		for _, p := range d.Providers {
+		for id, p := range d.Providers {
 			s := p.Status(ctx)
+			s.Enabled = d.ProviderEnabled == nil || d.ProviderEnabled(id)
+			if !s.Enabled && s.State != "unsupported" {
+				s.State, s.Detail = "disabled", "已关闭"
+			}
 			s.Controllable = s.Ready()
 			statuses = append(statuses, s)
 		}
@@ -139,6 +158,9 @@ func (d *Dispatcher) dispatch(ctx context.Context, r Request) (any, error) {
 	p := d.Providers[r.Provider]
 	if p == nil {
 		return nil, fmt.Errorf("unknown provider %q", r.Provider)
+	}
+	if d.ProviderEnabled != nil && !d.ProviderEnabled(r.Provider) {
+		return nil, fmt.Errorf("此 Agent 已在本机关闭")
 	}
 	if r.Method == "watch" {
 		if r.Probe {
@@ -171,6 +193,15 @@ func (d *Dispatcher) dispatch(ctx context.Context, r Request) (any, error) {
 		}
 	}
 	switch r.Method {
+	case "session.remove":
+		remover, ok := p.(provider.SessionRemover)
+		if !ok || p.Status(ctx).Capabilities.SessionRemoval == "" {
+			return nil, fmt.Errorf("此 Agent 暂不支持移除会话")
+		}
+		if strings.TrimSpace(r.Session) == "" {
+			return nil, fmt.Errorf("请选择要移除的会话")
+		}
+		return nil, remover.RemoveSession(ctx, r.Session)
 	case "sync":
 		if d.Sync == nil {
 			return nil, fmt.Errorf("同步不可用")

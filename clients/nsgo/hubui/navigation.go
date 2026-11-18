@@ -3,6 +3,8 @@ package hubui
 import (
 	"time"
 
+	"github.com/monkeyWie/reignhub/clients/nsgo/hubui/locales"
+
 	"github.com/nsgo-dev/nsgo/core"
 	"github.com/nsgo-dev/nsgo/icons/lucide"
 	"github.com/nsgo-dev/nsgo/mobile"
@@ -16,18 +18,32 @@ func (s *State) brand(cx *core.Scope, size core.Points, icon bool) core.Node {
 		children = append([]core.Node{glyph(cx, lucide.Command, 22)}, children...)
 	}
 	brand := core.View{TestID: "brand-home", Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 8}, Children: children}
-	if isWeb() {
+	if isWeb() && !s.api.CanHost() {
 		brand.Role = core.RoleButton
 		brand.Label = "ReignHub 官网"
 		brand.OnPress = func(core.PressEvent) { openWebsite() }
-		brand.Style.FocusVisible = &core.Style{OutlineWidth: 2, OutlineColor: palette(cx).mutedText}
+		brand.StyleFunc = func() core.Style {
+			return core.Style{FocusVisible: &core.Style{OutlineWidth: 2, OutlineColor: palette(cx).focus}}
+		}
+	} else if s.api.CanHost() {
+		brand.Role, brand.Label = core.RoleButton, "ReignHub · "+locales.For(cx).WorkspaceHome()
+		brand.Tooltip = tooltipCard(cx, label(cx, locales.For(cx).WorkspaceHome(), 12, false))
+		brand.OnPress = func(core.PressEvent) {
+			if s.phoneNav != nil {
+				s.dialog.Set("local")
+			} else {
+				s.backSessions()
+			}
+		}
+		brand.StyleFunc = func() core.Style {
+			return core.Style{Hover: &core.Style{Opacity: core.Alpha(.8)}, FocusVisible: &core.Style{OutlineWidth: 2, OutlineColor: palette(cx).focus}}
+		}
 	}
 	return brand
 }
 
 // Overlays receive Back before this handler. Compact layouts then let the
-// native page stack pop; wider layouts apply the same chat → sessions → devices
-// hierarchy. Android's workspace root requires a second Back to leave.
+// native page stack pop; wider layouts return to the unified directory. Android's workspace root requires a second Back to leave.
 func (s *State) workspaceBack() bool {
 	if s.phoneNav != nil {
 		if s.phoneNav.Depth() > 0 {
@@ -38,8 +54,7 @@ func (s *State) workspaceBack() bool {
 	}
 	if s.narrowChat {
 		s.backSessions()
-	} else if s.target != "" {
-		s.selectDevice("")
+
 	}
 	return true
 }

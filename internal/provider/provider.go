@@ -6,23 +6,27 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 )
 
 var ErrUnavailable = errors.New("provider unavailable")
 
 type Capabilities struct {
-	MaxAttachmentBytes int64 `json:"maxAttachmentBytes,omitempty"`
-	Streaming          bool  `json:"streaming,omitempty"`
-	History            bool  `json:"history"`
-	Create             bool  `json:"create"`
-	Send               bool  `json:"send"`
-	Steer              bool  `json:"steer"`
-	Interrupt          bool  `json:"interrupt"`
-	Approvals          bool  `json:"approvals"`
-	Desktop            bool  `json:"desktop"`
-	ImageInput         bool  `json:"imageInput"`
-	FileInput          bool  `json:"fileInput"`
+	// SessionRemoval describes the implemented outcome: archive, detach or delete.
+	// Empty means the Provider does not support removing a session.
+	SessionRemoval     string `json:"sessionRemoval,omitempty"`
+	MaxAttachmentBytes int64  `json:"maxAttachmentBytes,omitempty"`
+	Streaming          bool   `json:"streaming,omitempty"`
+	History            bool   `json:"history"`
+	Create             bool   `json:"create"`
+	Send               bool   `json:"send"`
+	Steer              bool   `json:"steer"`
+	Interrupt          bool   `json:"interrupt"`
+	Approvals          bool   `json:"approvals"`
+	Desktop            bool   `json:"desktop"`
+	ImageInput         bool   `json:"imageInput"`
+	FileInput          bool   `json:"fileInput"`
 }
 
 type Instance struct {
@@ -45,6 +49,7 @@ type Status struct {
 	Controllable   bool         `json:"controllable"`
 	BackendID      string       `json:"backendId,omitempty"`
 	Installed      bool         `json:"installed"`
+	Enabled        bool         `json:"enabled"`
 	Running        bool         `json:"running"`
 	InstallPath    string       `json:"installPath,omitempty"`
 }
@@ -52,8 +57,8 @@ type Status struct {
 // Ready requires a live protocol connection, not merely an installed binary or process.
 func (s Status) Ready() bool { return s.State == "ready" || s.State == "connected" }
 
-// AutoConnector may attach an existing Agent without launching or restarting it.
-// Providers that require setup continue to expose the explicit Start/ConnectDesktop flow.
+// AutoConnector prepares an installed, configured Agent without user prompts,
+// model execution, or restarting the user's application. The host owns enablement.
 type AutoConnector interface {
 	AutoConnect(context.Context) error
 }
@@ -76,13 +81,20 @@ type Session struct {
 	// ProjectDir is the host-resolved project directory across all Agents.
 	// CWD remains the session's actual execution directory, including worktrees.
 	ProjectDir string `json:"projectDir,omitempty"`
+	// ProjectKey correlates the same repository/project across environments.
+	// An absent key means the controller must keep device-local paths separate.
+	ProjectKey string `json:"projectKey,omitempty"`
 	Status     string `json:"status"`
 	Source     string `json:"source"`
 	// SourceKind describes the recorded creation client, independently of ProviderID
 	// (the connection used to read/control this session). Source retains the raw value.
-	SourceKind   string `json:"sourceKind,omitempty"`
-	Originator   string `json:"originator,omitempty"`
+	SourceKind string `json:"sourceKind,omitempty"`
+	Originator string `json:"originator,omitempty"`
+	// RecencyAt is the latest user submission or successful reply completion, in Unix milliseconds.
+	// Zero means unknown; content/metadata updates must never advance it.
+	RecencyAt    int64  `json:"recencyAt,omitempty"`
 	UpdatedAt    int64  `json:"updatedAt"`
+	CreatedAt    int64  `json:"createdAt"`
 	ActiveTurnID string `json:"activeTurnId,omitempty"`
 	Model        string `json:"model,omitempty"`
 }
@@ -141,9 +153,12 @@ type Activity struct {
 }
 
 type Turn struct {
-	ID     string `json:"id"`
-	Status string `json:"status"`
-	Items  []Item `json:"items"`
+	RecencyAt int64  `json:"recencyAt,omitempty"`
+	ID        string `json:"id"`
+	Status    string `json:"status"`
+	Items     []Item `json:"items"`
+	// DurationMS is the Provider's recorded elapsed time; nil means unknown.
+	DurationMS *int64 `json:"durationMs,omitempty"`
 }
 
 type Transcript struct {
@@ -212,4 +227,22 @@ type Provider interface {
 	Decide(context.Context, string, Decision) error
 	// Expected contains the exact instances the user saw when confirming.
 	ConnectDesktop(context.Context, []Instance, bool) error
+}
+
+// SessionRemover owns the Agent-specific removal semantics. It must reject busy
+// sessions and never silently interrupt work or remove another session's data.
+type SessionRemover interface {
+	RemoveSession(context.Context, string) error
+}
+
+// SessionBusy is conservative for removal: waiting work still belongs to a turn.
+func SessionBusy(s Session) bool {
+	if s.ActiveTurnID != "" {
+		return true
+	}
+	switch strings.ToLower(s.Status) {
+	case "active", "running", "inprogress", "waiting", "waitingforinput", "waitingforapproval", "needsinput":
+		return true
+	}
+	return false
 }

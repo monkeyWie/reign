@@ -105,7 +105,8 @@ func TestAttachmentDownloadShowsDialogBeforeReadingAndCancels(t *testing.T) {
 		s.target, s.selected = "fixture", Object{"id": "session", "providerId": "codex-app"}
 		return core.View{Style: fill, Children: []core.Node{s.fileTile(cx, f.attachment()), core.Dynamic(func(cx *core.Scope) core.Node { return s.dialogView(cx, s.dialog.Get()) })}}
 	})
-	app.Press("id:download-apk")
+	app.LongPress("id:attachment-apk")
+	app.Press("id:attachment-download-action")
 	app.WaitFor("id:attachment-download", time.Second)
 	if len(app.Saves) != 0 || s.notice != "" {
 		t.Fatal("save or toast appeared before download")
@@ -122,7 +123,8 @@ func TestAttachmentDownloadShowsDialogBeforeReadingAndCancels(t *testing.T) {
 	if app.Exists("id:attachment-download") || len(app.Saves) != 0 {
 		t.Fatal("cancelled download opened save picker")
 	}
-	app.Press("id:download-apk")
+	app.LongPress("id:attachment-apk")
+	app.Press("id:attachment-download-action")
 	app.WaitFor("id:attachment-download-save", time.Second) // Test picker returns cancellation.
 	if len(app.Saves) != 1 || app.Saves[0].Name != "ReignHub.apk" || app.Saves[0].MIME != "application/vnd.android.package-archive" || !bytes.Equal(app.Saves[0].Data, f.data) {
 		t.Fatal("incorrect Android save request", app.Saves)

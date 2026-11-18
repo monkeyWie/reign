@@ -24,8 +24,11 @@ flowchart LR
   Desktop[Desktop controller] --> UI[Shared NSGo UI]
   Mobile[Android controller] --> UI
   Web[WebAssembly controller] --> UI
-  UI --> RPC[Encrypted device RPC]
-  RPC --> Providers[Provider API on host]
+  UI --> Call[Common controller Caller]
+  Call --> Local[In-process dispatcher]
+  Call --> RPC[Authenticated encrypted device RPC]
+  Local --> Providers[Provider API on host]
+  RPC --> Providers
   Providers --> Codex[Codex app-server]
   Providers --> ACP[Go ACP SDK]
   Providers --> Pi[Pi native RPC]
@@ -44,6 +47,21 @@ T3 Code uses dedicated SDKs for Cursor and Muse. We use their currently publishe
 
 Local command configuration takes effect after restarting ReignHub. The dispatcher provider map stays immutable after startup, avoiding concurrent map mutation while paired clients issue requests. Multiple instance IDs do not imply isolated Agent credentials; use the Agent's own home/environment settings for that.
 
+Integrations default enabled. `Status.enabled` reports the host's persisted local
+choice independently of installation and readiness; disabled Providers report
+`state: "disabled"` and reject new calls. Each installed/configured adapter
+initializes independently without sending a prompt. The local-only
+`host.agent.enabled` request takes `provider` and `enabled`; disabling cancels
+pending setup without interrupting already accepted tasks or deleting history.
+Home and settings share a switch per Agent, disabled when unavailable, plus
+installation or setup guidance. Readiness does not require a manual Enable flow.
+See [lifecycle](../engineering/architecture.md).
+
+This adds endpoint metadata and a local host action, not a public service route.
+Both `internal/relay` and `packages/worker-core/src/room.ts` continue forwarding
+opaque encrypted frames and need no implementation edit. The Go status and
+TypeScript Provider declaration remain aligned.
+
 ## Project identity across Agents
 
 All session metadata carries `projectDir` (the project used for grouping) and
@@ -53,8 +71,8 @@ directory wins, followed by its native project root, then the Git repository's
 main directory for linked worktrees, and finally the working directory. Git and
 symlink resolution use the host filesystem without launching a Git subprocess.
 
-Controllers group by `projectDir || cwd`, independently of Agent or native
-project ID. Codex, Claude Code, Pi and future ACP sessions in the same project
+Controllers group by optional `projectKey`, otherwise device plus
+`projectDir || cwd`, independently of Agent or native project ID. Codex, Claude Code, Pi and future ACP sessions in the same project
 therefore share a group while keeping their own provider/session routes and
 execution directories. Titles are display metadata, never identity; unrelated
 directories called `gopeed` remain separate. An explicitly assigned standalone
@@ -66,11 +84,66 @@ new-session response and transcript snapshot, and remains available offline in
 the controller's existing cache. No Agent-specific grouping or filesystem
 inspection runs on the controller.
 
+The host also computes an optional opaque `projectKey` from a network Git origin
+and repository-relative project directory. Equivalent SSH/HTTPS origins merge
+across machines; origin credentials, query strings and fragments never leave the
+host. Nonstandard ports remain distinct. No network access or Git process is used.
+Unversioned/local-only origins fall back to device-scoped paths. Explicit separate
+worktree roots outside the main repository retain device-local identity.
+
+`createdAt` and `updatedAt` are Unix milliseconds. Codex app-server seconds are
+normalized; IPC dates are decoded before normalization. ReignHub-owned ACP/Pi
+sessions record creation when created. Imported Agents that do not supply creation
+time use zero (unknown); controllers sort them last with stable identity order,
+never by last update. Metadata flows through the same local and remote boundaries.
+
+`recencyAt` is a separate fixed conversation boundary: the later of a user
+submission and successful reply completion. ReignHub-owned ACP/Pi sessions
+record these events and persist the same value in summaries and turns. Imported
+history without recorded boundaries remains unknown; neither native metadata
+`updatedAt` nor synchronization time is a substitute. Controllers fall back to
+creation time and a stable identity tie-breaker.
+
+Activity summaries must reflect the executor that actually owns the session.
+Codex App directory reads combine persisted metadata with bounded read-only IPC
+owner state; the private reader's `notLoaded` does not describe another executor.
+Unknown state remains unknown. The [Codex adapter reference](../../internal/codex/README.md)
+owns lock probing, subscription bounds and runtime-state normalization. Local
+and remote controllers consume the same `status`/`activeTurnId` fields.
+
 ## Persistence and recovery
 
 The new `agents.db` uses the existing private-permission SQLite settings store. It stores per-instance metadata indexes and separate per-session history records; no cloud schema is required. Persist history before including a new ID in the index. Serialize snapshot writes so an older completion cannot overwrite a newer transcript.
 
 ReignHub-owned sessions resume with the stored native session ID or Pi session file. ACP `session/load` replay becomes canonical history. Native sessions are listed only when both listing and loading are advertised. SDK/tool reasoning and raw tool output are not exposed as user-facing messages.
+
+## Session removal
+
+The optional `provider.SessionRemover` implements `session.remove` for both
+in-process and remote callers. `capabilities.sessionRemoval` advertises the
+implemented outcome: `archive`, `detach` or `delete`; omission means unsupported.
+The controller uses one Remove session action and describes that outcome before
+submission. Providers reject running, waiting and restoring sessions. Removal
+must never silently cancel independent Agent execution.
+
+Codex App/CLI use `thread/read` metadata to reject active work, then the supported
+`thread/archive` request with the exact `threadId`. The installed Codex
+`app-server generate-json-schema` contract was checked for these parameters.
+No writer takeover or private history-file deletion is used. ACP v1 and Pi do not
+provide a portable native deletion operation: their shared Provider implements
+`detach`, persisting a per-instance exclusion in `agents.db`, retaining native
+history, and preventing native discovery from reimporting the removed entry.
+An idle ReignHub-owned runtime is closed after successful persistence.
+
+Removal goes through normal mutation ordering and durable receipts. A lost Codex
+archive acknowledgement is `WRITE_OUTCOME_UNKNOWN`; neither the controller nor
+transport retries it. Controller-local cache fences survive restart until a
+complete directory has observed the entry's absence. Successful removal updates
+all sidebar sections and clears its pin without changing another conversation
+or draft. After an uncertain result, a fresh complete directory confirming absence
+also closes the removed conversation and its pending confirmation; partial reads
+or an entry that remains present never authorize replay. Service pairing/relay contracts are unchanged; Go and Worker continue
+to forward encrypted frames without understanding Agent operations.
 
 ## Validation and scope
 

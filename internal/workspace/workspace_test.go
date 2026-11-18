@@ -3,6 +3,7 @@ package workspace
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/monkeyWie/reignhub/internal/provider"
@@ -90,5 +91,39 @@ func TestResultDoesNotMutateProviderPages(t *testing.T) {
 	empty := Result(provider.SessionPage{Sessions: []provider.Session{}}).(provider.SessionPage)
 	if empty.Sessions == nil {
 		t.Fatal("empty JSON array became null")
+	}
+}
+
+func TestRepositoryIdentityAcrossDevices(t *testing.T) {
+	root := t.TempDir()
+	makeRepo := func(name, remote string) string {
+		dir := filepath.Join(root, name)
+		if err := os.MkdirAll(filepath.Join(dir, ".git"), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, ".git", "config"), []byte("[remote \"origin\"]\n url = "+remote+"\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		return dir
+	}
+	a := makeRepo("mac", "git@github.com:team/repo.git")
+	b := makeRepo("linux", "https://fixture-user:fixture-secret@github.com/team/repo.git?access=fixture-secret#fragment")
+	c := makeRepo("unrelated", "https://github.com/other/repo.git")
+	var r Resolver
+	first := r.Session(provider.Session{CWD: a})
+	second := r.Session(provider.Session{CWD: b})
+	other := r.Session(provider.Session{CWD: c})
+	if first.ProjectKey == "" || first.ProjectKey != second.ProjectKey || first.ProjectKey == other.ProjectKey {
+		t.Fatal("repository identity mismatch", first.ProjectKey, second.ProjectKey, other.ProjectKey)
+	}
+	if strings.Contains(second.ProjectKey, "fixture") || strings.Contains(second.ProjectKey, "github.com") {
+		t.Fatal("raw origin leaked")
+	}
+	sub := r.Session(provider.Session{CWD: filepath.Join(b, "ui"), ProjectDir: filepath.Join(b, "ui")})
+	if sub.ProjectKey == first.ProjectKey || sub.ProjectKey == "" {
+		t.Fatal("subproject identity lost")
+	}
+	if repositoryIdentity("/local/repo") != "" || repositoryIdentity("file:///local/repo") != "" {
+		t.Fatal("local origin acquired global identity")
 	}
 }

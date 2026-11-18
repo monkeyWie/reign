@@ -101,9 +101,13 @@ export interface Provider {
   state: string;
   detail: string;
   installed: boolean;
+  enabled: boolean;
   running: boolean;
   controllable: boolean;
-  capabilities: Record<string, boolean>;
+  capabilities: {
+    sessionRemoval?: "archive" | "detach" | "delete";
+    [name: string]: boolean | number | string | undefined;
+  };
   model?: string;
 }
 export interface Session {
@@ -112,7 +116,14 @@ export interface Session {
   title: string;
   preview: string;
   cwd: string;
+  projectDir?: string;
+  projectKey?: string;
+  /** Unix milliseconds; 0 means the Agent did not supply a creation time. */
+  createdAt: number;
+  /** Unix milliseconds. */
   updatedAt: number;
+  /** Latest user submission or successful reply completion, in Unix milliseconds. */
+  recencyAt?: number;
   status: string;
   model?: string;
   activeTurnId?: string;
@@ -145,6 +156,15 @@ export interface Item {
     detail?: string;
     status?: string;
   }[];
+}
+export interface Turn {
+  id: string;
+  status: string;
+  items: Item[];
+  /** Provider-recorded elapsed milliseconds. Omitted when unknown. */
+  durationMs?: number;
+  /** Same fixed conversation boundary as Session.recencyAt. */
+  recencyAt?: number;
 }
 export interface RPCRequest {
   id?: string;

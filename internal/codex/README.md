@@ -57,6 +57,39 @@ notes](../../docs/research/verification/codex-input-2026-11-18/README.md).
 
 ## State and history diagnosis
 
+Session directories enrich the private reader's metadata with the actual App
+owner's runtime state. `thread/list` on a separate app-server can report
+`notLoaded` for a thread actively executing in the App; it is not authoritative
+for that external owner. The adapter probes OS writer locks, follows only held
+threads through existing read-only IPC and projects activity into the shared
+Session summary. No `resume`, conversation-item hydration, writer takeover or App
+restart is used. IPC snapshots remain host-local; directory clients receive
+metadata, not unselected conversation content.
+
+Directory enrichment has four concurrent reads and a two-second page budget,
+sharing the existing 128-follower cap. Unknown ownership, disconnect or failed
+state reads produce unknown activity, never idle/completion. Terminal owner state
+is preserved when the writer releases its lock, then directory-only followers
+are released; explicitly opened conversation subscriptions remain owned by their
+normal lifecycle. Active runtime flags and pending requests represent waiting
+for input/approval. `TestDirectoryUsesLiveAppOwnerWithoutOpeningConversation`
+uses isolated IPC and real temporary OS locks to cover active/completed state
+without operating real Agent conversations.
+
+Recent ordering uses fixed conversation boundaries, not `thread.updatedAt`.
+IPC turns supply `turnStartedAtMs` and completed `durationMs`; app-server turns
+supply `startedAt`/`completedAt` in seconds. Explicit steering-user creation
+times also advance recency. Only a successful completed turn contributes its
+end time; streaming durations and assistant/tool timestamps never do. For
+directory rows without live boundaries, read only the latest turn metadata via
+`thread/turns/list` (`limit: 1`, `itemsView: "notLoaded"`). This is a read-only
+metadata request, not conversation hydration. It has four concurrent slots and
+a two-second page budget, with an at-most-2,048-entry cache keyed by session and
+metadata revision/status. Failures retain known timing and retry on later scans.
+Older reads cannot regress a known event time. No full transcript is fetched
+for sidebar ordering. `recency_test.go` verifies streaming, steering, completion,
+metadata edits, caching and failed-read recovery with isolated fixtures.
+
 Unknown state or patch structures can break watch independently of history. Schema version alone does not identify App versus IDE creation. Read verified v11/v13 state and apply Immer array-path patches transactionally against revisions; reject unknown structures. Initial history and watch run independently, with read-only history fallback and canonical/live merging. The adapter currently publishes v11 owner state; reading v13 is not complete v13 owner support.
 
 Sources and regressions: [state handling](ipc_state.go), [schema](ipc_schema.go), [schema tests](ipc_schema_test.go), [ownership tests](ipc_test.go) and [controller history failure tests](../../clients/nsgo/hubui/session_failure_test.go). Use isolated fixtures; real App behavior and unsupported upstream operations require separate verification.
@@ -65,4 +98,38 @@ App-owned turns also contain `steeringUserMessage` items: read their `input`, pr
 
 Asset-bearing live updates invalidate history instead of publishing an unprocessed input envelope. The cancellable transcript reader imports both regular and steering image/file inputs. Keep already displayed cards until their imported replacements arrive. Plain text remains incremental. Regressions cover both verified state versions, acknowledgements, ordering and live image import in [message tests](ipc_messages_test.go).
 
-Windows uses `\\.\pipe\codex-ipc`, installed-package discovery and OS writer-lock checks. The App must be running under the same user, with its local IPC router available. Cross-compilation and isolated protocol tests do not establish real Windows App interoperability.
+Preserve assistant `phase` in snapshots and item events so the controller can
+distinguish commentary from final answers. When one IPC update both finishes a
+turn and extends its answer, publish full authoritative items before the terminal
+turn event. Terminal item corrections also use full item events, never text
+deltas: controllers deliberately ignore streaming deltas after completion.
+`TestIPCCompletionPublishesFullAnswerBeforeTerminalStatus` covers both verified
+IPC versions, the final text tail, a late correction and history phase parity.
+
+Preserve `durationMs` from canonical IPC entities as well as the live tail in
+normalized turns and watch events, including duration-only corrections after
+completion. Prefer Codex's recorded duration; when it is unavailable, a valid
+app-server `startedAt`/`completedAt` pair (Unix seconds) supplies elapsed time.
+Missing or invalid timing stays unknown. Do not derive duration from receipt time,
+message timestamps or summed tool durations. Progressive history must retain the
+same metadata as a full transcript.
+
+Windows uses `\\.\pipe\codex-ipc` through Microsoft's `go-winio`, with platform
+file suffixes separating it from Unix sockets. The client requests data
+read/write, read attributes and synchronize rights; generic write additionally
+requests server-instance and attribute/EA rights which a pipe DACL can reject.
+Permission denial retains its cause across retries and points to Windows user /
+privilege alignment, not an absent App. Do not change the App's ACL or elevate it.
+
+Package discovery uses the current user's registered package names and Win32
+`GetPackagePathByFullName`, then validates the package manifest and executable.
+Process discovery uses Toolhelp and process handles; it launches no PowerShell or
+process-listing command. Actual CLI metadata probes and private stdio backends use
+the shared `system.HideConsole` Windows adapter (`CREATE_NO_WINDOW` + `HideWindow`).
+The App integration attaches automatically when installed, running and enabled;
+it never launches or restarts the official App.
+
+Windows fixtures cover restricted named-pipe data exchange and a console-less
+child with redirected IO/cancellation. These tests require native Windows to run;
+cross-compilation and isolated protocol tests do not establish real Windows App
+interoperability or confirm the user's pipe ACL.

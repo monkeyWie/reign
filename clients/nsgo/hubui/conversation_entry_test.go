@@ -23,9 +23,8 @@ func TestMobileSessionEntryStartsAtLatestAfterDelayedHistory(t *testing.T) {
 	f := &conversationEntryAPI{&independentStreamAPI{demoAPI: newDemoAPI(), snapshots: make(chan snapshotRequest, 4), events: make(chan Object, 8), approvalsStarted: make(chan struct{})}}
 	app := nsgotest.Start(t, func(cx *core.Scope) core.Node { return RootWithAPI(cx, f, true) }, nsgotest.Size(390, 844), nsgotest.Environment(core.Environment{OS: core.OSAndroid, Idiom: core.IdiomPhone}))
 	app.WaitFor("id:device-demo-device", time.Second)
-	app.Press("id:device-demo-device")
-	app.WaitFor("id:session-demo-chat", time.Second)
-	app.Press("id:session-demo-chat")
+	app.WaitFor(sessionSelector("demo-device", "codex-app", "demo-chat"), time.Second)
+	app.Press(sessionSelector("demo-device", "codex-app", "demo-chat"))
 	app.WaitUntil(time.Second, func() bool { return len(f.snapshots) > 0 })
 	app.WaitFor("id:transcript-loading", time.Second)
 	request := <-f.snapshots
@@ -41,8 +40,8 @@ func TestMobileSessionEntryStartsAtLatestAfterDelayedHistory(t *testing.T) {
 	app.Scroll("id:chat-message-list", -250)
 	app.WaitFor("id:jump-to-latest", time.Second)
 	app.Press("id:back-sessions")
-	app.WaitFor("id:session-demo-chat", time.Second)
-	app.Press("id:session-demo-chat")
+	app.WaitFor(sessionSelector("demo-device", "codex-app", "demo-chat"), time.Second)
+	app.Press(sessionSelector("demo-device", "codex-app", "demo-chat"))
 	assertBottom()
 	app.Screenshot("mobile-session-entry-at-latest")
 }

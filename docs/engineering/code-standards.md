@@ -13,7 +13,8 @@ Keep rules in their owning reference; comments explain reasons and constraints. 
 - Wrap identifiable causes with `%w`; prefer typed errors and `errors.Is` / `errors.As`. Centralize unavoidable vendor text classification at the adapter boundary.
 - Every goroutine, timer and subscription has an owner and termination path. Bound concurrency, queues, buffers, reassembly and deduplication. Report limits without silently discarding content and advancing its cursor.
 - Never block on network, process, channel or disk work under a lock needed by its consumer. Publish shared state before handing it off; shallow copying a map does not isolate it. Check generation before applying async results.
-- Isolate platform implementations with build tags, file suffixes and narrow adapters. Use pinned dependencies and public NSGo APIs; do not modify module caches or introduce a runtime for one platform convenience.
+- Every OS-dependent capability uses compile-time-selected files and narrow adapters, including tests and explicit unsupported fallbacks. Use recognized suffixes (`*_windows.go`, `*_darwin.go`) or `//go:build` constraints for platform groups; do not branch on `runtime.GOOS` in shared capability implementations. Use pinned dependencies and public NSGo APIs; do not modify module caches or introduce a runtime for one platform convenience.
+- On Windows, inspect and control processes with Win32 calls through `golang.org/x/sys/windows` / syscall. Do not spawn PowerShell, `cmd`, `tasklist` or similar utilities for discovery. Actual Agent executables may use `os/exec` (which invokes CreateProcess); configure their platform attributes in Windows-only code. Background probes and stdio executors use `CREATE_NO_WINDOW` as well as `HideWindow`, preserving redirected IO and cancellation. Named pipes use Microsoft's `go-winio` with the minimum client access rights; never widen another application's ACL or elevate it automatically.
 
 ## TypeScript and UI
 

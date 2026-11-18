@@ -107,9 +107,12 @@ func (p *Provider) observeStream(m rpc.Message) {
 	var params struct {
 		ThreadID, TurnID, ItemID, Delta string
 		SummaryIndex                    int
-		Turn                            struct{ ID, Status string }
-		Item                            json.RawMessage
-		StartedAtMS, CompletedAtMS      *int64
+		Turn                            struct {
+			ID, Status                         string
+			DurationMS, StartedAt, CompletedAt *int64
+		}
+		Item                       json.RawMessage
+		StartedAtMS, CompletedAtMS *int64
 	}
 	if json.Unmarshal(m.Params, &params) != nil || params.ThreadID == "" {
 		return
@@ -120,6 +123,7 @@ func (p *Provider) observeStream(m rpc.Message) {
 	event := provider.StreamEvent{SessionID: params.ThreadID, TurnID: params.TurnID, ItemID: params.ItemID}
 	if strings.HasPrefix(m.Method, "turn/") {
 		event.Kind, event.TurnID, event.Status = "turn", params.Turn.ID, params.Turn.Status
+		event.DurationMS = turnDuration(params.Turn.DurationMS, params.Turn.StartedAt, params.Turn.CompletedAt)
 		if event.Status == "" {
 			if m.Method == "turn/started" {
 				event.Status = "inProgress"
@@ -127,6 +131,8 @@ func (p *Provider) observeStream(m rpc.Message) {
 				event.Status = "completed"
 			}
 		}
+		event.RecencyAt = recordedTurnRecency(event.Status, params.Turn.StartedAt, params.Turn.CompletedAt, nil, nil, params.Turn.DurationMS)
+		p.rememberSessionRecency(params.ThreadID, event.RecencyAt)
 		if event.TurnID != "" {
 			s.log.Publish(event)
 			if m.Method == "turn/completed" {
@@ -167,6 +173,7 @@ func (p *Provider) observeStream(m rpc.Message) {
 		} else if params.CompletedAtMS != nil {
 			item.TimestampMS = params.CompletedAtMS
 		}
+		p.rememberSessionRecency(params.ThreadID, provider.ConversationRecency([]provider.Turn{{Items: []provider.Item{item}}}))
 		key := params.ThreadID + "/" + params.TurnID + "/" + item.ID
 		if len(s.items) >= 256 {
 			s.items = map[string]*liveItem{}

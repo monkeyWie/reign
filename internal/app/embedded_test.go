@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"encoding/json"
+	"github.com/monkeyWie/reignhub/internal/clienthub"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -187,5 +189,93 @@ func TestEmbeddedShutdownCancelsOutstandingCalls(t *testing.T) {
 	}
 	if err := r.Close(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestLocalControllerUsesSharedBusinessAndCacheWithoutService(t *testing.T) {
+	c, err := config.Load(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Refuse every service request. Local Agent management must remain usable.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Error(w, "unavailable", 503) }))
+	defer server.Close()
+	c.ServiceURL = server.URL
+	agent := testagent.New()
+	runtime, err := startEmbedded(context.Background(), c, map[string]provider.Provider{"demo": agent})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer runtime.Close()
+	hub, err := clienthub.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer hub.Close()
+	hub.SetLocal(runtime, "Fixture")
+	list, err := hub.List()
+	if err != nil || len(list) != 1 || list[0]["id"] != control.LocalTarget || list[0]["connected"] != true {
+		t.Fatal(list, err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	value, err := hub.Call(ctx, control.LocalTarget, control.Request{Method: "providers"})
+	if err != nil || value == nil {
+		t.Fatal(value, err)
+	}
+	_, err = hub.Sync(ctx, control.LocalTarget, "demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cache, err := hub.Cached(control.LocalTarget, control.Request{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cache.(map[string]any)["sessions"].([]map[string]any)) != 1 {
+		t.Fatal("local directory bypassed shared cache")
+	}
+	request := control.Request{ID: "fixture-create", Method: "create", Provider: "demo", Options: provider.CreateOptions{CWD: t.TempDir()}}
+	created, err := hub.Call(ctx, control.LocalTarget, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Both entry paths consult the same durable execution receipt.
+	repeated := runtime.Dispatcher.HandleRemote(ctx, request)
+	if repeated.Error != "" {
+		t.Fatal(repeated.Error)
+	}
+	var again map[string]any
+	if err := json.Unmarshal(repeated.Result, &again); err != nil {
+		t.Fatal(err)
+	}
+	id := created.(map[string]any)["id"].(string)
+	if again["id"] != id || len(agent.SessionsByID) != 2 {
+		t.Fatal("local/remote creation did not share receipt")
+	}
+	send := control.Request{ID: "fixture-send", Method: "send", Provider: "demo", Session: id, Text: "isolated fixture"}
+	if _, err := hub.Call(ctx, control.LocalTarget, send); err != nil {
+		t.Fatal(err)
+	}
+	if response := runtime.Dispatcher.HandleRemote(ctx, send); response.Error != "" {
+		t.Fatal(response.Error)
+	}
+	if agent.Sends != 1 {
+		t.Fatal("duplicate command executed")
+	}
+	transcript, err := hub.Call(ctx, control.LocalTarget, control.Request{Method: "transcript", Provider: "demo", Session: id})
+	if err != nil || transcript == nil {
+		t.Fatal(transcript, err)
+	}
+	if response := runtime.Dispatcher.HandleRemote(ctx, control.Request{Method: "host.info"}); response.Error == "" {
+		t.Fatal("remote crossed local administration boundary")
+	}
+	if err := hub.Disconnect(control.LocalTarget); err == nil {
+		t.Fatal("local runtime was remotely disconnected")
+	}
+	if err := hub.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := runtime.Call(ctx, control.Request{Method: "providers"}, nil); err != nil {
+		t.Fatal("controller closed application-owned runtime", err)
 	}
 }

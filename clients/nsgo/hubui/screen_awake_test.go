@@ -48,15 +48,15 @@ func TestAndroidConversationKeepsScreenOnOnlyWhileVisibleAndActive(t *testing.T)
 	}
 	app.Press("id:back-sessions")
 	app.WaitUntil(time.Second, func() bool { return !awake.Load() })
-	app.Press("id:session-demo-chat")
+	app.Press(sessionSelector("demo-device", "codex-app", "demo-chat"))
 	app.WaitUntil(time.Second, awake.Load)
 	app.Back()
 	app.WaitUntil(time.Second, func() bool { return !awake.Load() })
 	// A wider phone/tablet layout does not use the native stack.
 	app.Resize(720, 844)
-	app.Press("id:session-demo-chat")
+	app.Press(sessionSelector("demo-device", "codex-app", "demo-chat"))
 	app.WaitUntil(time.Second, awake.Load)
-	app.Press("id:back-sessions")
+	app.Back()
 	app.WaitUntil(time.Second, func() bool { return !awake.Load() })
 }
 

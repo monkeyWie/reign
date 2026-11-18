@@ -274,6 +274,7 @@ func (w *sessionStream) batch(b Object) {
 		}
 		next, refresh := applyEvents(s.transcript, events)
 		s.transcript = next
+		s.updateSelectedSummary()
 		s.trackNativeTask(w.target, w.provider, w.session, next)
 		s.reconcileOutgoing(time.Time{})
 		s.rebuildMessages()

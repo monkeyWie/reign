@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-func TestPassiveMetricsExcludeWatchesAndCancelledNavigation(t *testing.T) {
+func TestPassiveMetricsExcludeWatchesAndFailedResponses(t *testing.T) {
 	var m Meter
 	initial := m.Snapshot()
 	if _, ok := initial["responseMs"]; ok || initial["lastProgressMs"] != int64(-1) {
@@ -30,8 +30,20 @@ func TestPassiveMetricsExcludeWatchesAndCancelledNavigation(t *testing.T) {
 	failure := m.Begin("sync")
 	failure(errors.New("timeout"))
 	got := m.Snapshot()
-	if got["sentBytes"] != int64(4096) || got["receivedBytes"] != int64(2048) || got["requestSamples"] != 2 || got["requestFailurePercent"] != float64(50) || got["pendingRequests"] != 0 {
+	if got["sentBytes"] != int64(4096) || got["receivedBytes"] != int64(2048) || got["pendingRequests"] != 0 {
 		t.Fatal("bad passive measurements", got)
+	}
+	if _, ok := got["requestFailurePercent"]; ok {
+		t.Fatal("application errors exposed as a network failure rate", got)
+	}
+	if _, ok := got["responseMs"]; !ok {
+		t.Fatal("successful request did not provide response latency", got)
+	}
+	lastResponse := m.lastResponse
+	failure = m.Begin("sync")
+	failure(context.DeadlineExceeded)
+	if m.lastResponse != lastResponse || m.Snapshot()["pendingRequests"] != 0 {
+		t.Fatal("failed request changed successful response sample or stayed pending")
 	}
 	// Old traffic must expire without any timer, polling goroutine or request.
 	m.mu.Lock()
@@ -61,7 +73,7 @@ func TestPassiveMetricsConcurrentFramesAndSnapshots(t *testing.T) {
 	}
 	wg.Wait()
 	got := m.Snapshot()
-	if got["sentBytes"] != int64(8000) || got["receivedBytes"] != int64(4000) || got["pendingRequests"] != 0 || got["requestSamples"] != 24 {
+	if got["sentBytes"] != int64(8000) || got["receivedBytes"] != int64(4000) || got["pendingRequests"] != 0 {
 		t.Fatal(got)
 	}
 }

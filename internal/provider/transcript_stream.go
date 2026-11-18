@@ -29,7 +29,7 @@ func ObserveTranscript(ctx context.Context, fragment Transcript) error {
 
 // EmitTranscriptTurn sends each message separately, retaining empty turn status.
 func EmitTranscriptTurn(ctx context.Context, metadata Transcript, turn Turn) error {
-	metadata.Turns = []Turn{{ID: turn.ID, Status: turn.Status, Items: []Item{}}}
+	metadata.Turns = []Turn{{ID: turn.ID, Status: turn.Status, DurationMS: turn.DurationMS, RecencyAt: turn.RecencyAt, Items: []Item{}}}
 	if len(turn.Items) == 0 {
 		return ObserveTranscript(ctx, metadata)
 	}
@@ -47,7 +47,7 @@ func EmitTranscriptTurn(ctx context.Context, metadata Transcript, turn Turn) err
 				part.Text, part.TextOffset = item.Text[offset:end], new(offset)
 				offset = end
 			}
-			metadata.Turns = []Turn{{ID: turn.ID, Status: turn.Status, Items: []Item{part}}}
+			metadata.Turns = []Turn{{ID: turn.ID, Status: turn.Status, DurationMS: turn.DurationMS, RecencyAt: turn.RecencyAt, Items: []Item{part}}}
 			if err := ObserveTranscript(ctx, metadata); err != nil {
 				return err
 			}
@@ -88,6 +88,8 @@ func (b *TranscriptBuffer) Add(fragment Transcript) error {
 		}
 		target := &b.Turns[index]
 		target.Status = turn.Status
+		target.DurationMS = turn.DurationMS
+		target.RecencyAt = max(target.RecencyAt, turn.RecencyAt)
 		for _, item := range turn.Items {
 			j, exists := b.items[turn.ID][item.ID]
 			if item.TextOffset != nil {

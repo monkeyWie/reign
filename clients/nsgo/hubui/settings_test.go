@@ -9,7 +9,7 @@ import (
 
 func TestSettingsThemePreservesWorkspace(t *testing.T) {
 	app := startDemo(t, 1320, 880)
-	app.WaitFor("id:local-dashboard", 3*time.Second)
+	app.WaitFor("id:session-sidebar", 3*time.Second)
 	if app.Exists("id:add-agent") || app.Exists("id:configure-agent-claude-code") {
 		t.Fatal("Agent controls remain on dashboard")
 	}
@@ -68,7 +68,7 @@ func TestSettingsNarrowNavigationAndSearch(t *testing.T) {
 	app.Press("id:settings-nav-general")
 	app.Screenshot("settings-narrow-appearance")
 	app.Press("id:settings-close")
-	app.Find("id:mobile-devices")
+	app.Find("id:session-sidebar")
 }
 func TestAppearancePreferencesPersist(t *testing.T) {
 	var state *State

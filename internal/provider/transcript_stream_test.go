@@ -9,7 +9,7 @@ import (
 
 func TestHistoryStreamsLongReplyBeforeFollowingUserMessage(t *testing.T) {
 	answer := strings.Repeat("长回复🙂 mixed text.\n", 2000)
-	turn := Turn{ID: "turn", Status: "completed", Items: []Item{
+	turn := Turn{ID: "turn", Status: "completed", DurationMS: new(int64(135000)), RecencyAt: 1794960135000, Items: []Item{
 		{ID: "u1", Role: "user", Text: "first question"},
 		{ID: "a1", Role: "assistant", Phase: "commentary", Text: answer},
 		{ID: "u2", Role: "user", Text: "next question"},
@@ -24,6 +24,12 @@ func TestHistoryStreamsLongReplyBeforeFollowingUserMessage(t *testing.T) {
 		}
 		if err := history.Add(fragment); err != nil {
 			return err
+		}
+		if history.Turns[0].RecencyAt != turn.RecencyAt {
+			t.Fatal("progressive history lost the conversation boundary")
+		}
+		if history.Turns[0].DurationMS == nil || *history.Turns[0].DurationMS != 135000 {
+			t.Fatal("progressive history lost the recorded turn duration")
 		}
 		items := history.Turns[0].Items
 		if item.ID == "a1" {

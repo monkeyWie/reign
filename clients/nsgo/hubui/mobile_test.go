@@ -32,8 +32,8 @@ func testMobileDeviceAndScanner(t *testing.T, os core.OS, scan bool) {
 	api := &mobileDemo{newDemoAPI()}
 	app := nsgotest.Start(t, func(cx *core.Scope) core.Node { return RootWithAPI(cx, api, true) }, nsgotest.Size(390, 844), nsgotest.Environment(core.Environment{OS: os, Idiom: core.IdiomPhone, Locale: "zh-CN"}))
 	app.WaitFor("id:device-second", time.Second)
-	app.Find("text:MacBook Pro")
-	app.Find("text:开发工作站")
+	app.Find("id:device-demo-device")
+	app.Find("id:device-second")
 	if app.Exists("text:Relay · WebSocket") || app.Exists("text:P2P · WebRTC") {
 		t.Fatal("device list exposed connection paths instead of presence")
 	}
@@ -41,17 +41,14 @@ func testMobileDeviceAndScanner(t *testing.T, os core.OS, scan bool) {
 	if !scan {
 		app.Screenshot("mobile-devices")
 	}
-	app.Press("id:device-second")
-	app.WaitFor("id:session-demo-chat", time.Second)
-	app.Press("id:session-demo-chat")
+	app.WaitFor(sessionSelector("second", "codex-app", "demo-chat"), time.Second)
+	app.Press(sessionSelector("second", "codex-app", "demo-chat"))
 	app.WaitFor("id:chat-input", time.Second)
 	app.Back()
 	app.Find("id:session-sidebar")
 	app.Back()
-	app.Find("id:mobile-devices")
-	app.Press("id:device-demo-device")
-	app.WaitFor("id:session-demo-chat", time.Second)
-	app.Press("id:back-devices")
+	app.Find("id:session-sidebar")
+	app.WaitFor(sessionSelector("demo-device", "codex-app", "demo-chat"), time.Second)
 	if !scan {
 		return
 	}
@@ -74,7 +71,7 @@ func testMobileDeviceAndScanner(t *testing.T, os core.OS, scan bool) {
 	if app.Exists("id:dialog-scan") {
 		t.Fatal("system back did not dismiss camera")
 	}
-	app.Find("id:mobile-devices")
+	app.Find("id:session-sidebar")
 }
 func TestBrowserDeviceNames(t *testing.T) {
 	for _, tc := range []struct{ ua, want string }{

@@ -21,7 +21,7 @@ type progressiveProvider struct {
 func (p *progressiveProvider) Transcript(ctx context.Context, _, _ string) (provider.Transcript, error) {
 	out := provider.Transcript{StreamEpoch: "history", StreamCursor: 7, Session: provider.Session{ID: "session"}, NextCursor: "older"}
 	for i := range 40 {
-		turn := provider.Turn{ID: fmt.Sprint(i), Status: "completed", Items: []provider.Item{{ID: "message", Role: "assistant", Text: fmt.Sprintf("消息 %d🙂", i)}}}
+		turn := provider.Turn{ID: fmt.Sprint(i), Status: "completed", DurationMS: new(int64(135000 + i)), Items: []provider.Item{{ID: "message", Role: "assistant", Text: fmt.Sprintf("消息 %d🙂", i)}}}
 		out.Turns = append(out.Turns, turn)
 		if err := provider.EmitTranscriptTurn(ctx, out, turn); err != nil {
 			return provider.Transcript{}, err
@@ -65,6 +65,9 @@ func TestTranscriptMessagesArriveBeforeSnapshotCompletes(t *testing.T) {
 		if first.Turns[0].Items[0].Text != "消息 0🙂" {
 			t.Fatal(first)
 		}
+		if first.Turns[0].DurationMS == nil || *first.Turns[0].DurationMS != 135000 {
+			t.Fatal("encrypted history fragment lost duration")
+		}
 	case <-ctx.Done():
 		t.Fatal("first message blocked on complete snapshot")
 	}
@@ -79,6 +82,9 @@ func TestTranscriptMessagesArriveBeforeSnapshotCompletes(t *testing.T) {
 	}
 	if len(fragments) != 39 || len(out.Turns) != 40 || out.Turns[39].Items[0].Text != "消息 39🙂" || out.NextCursor != "older" || out.StreamCursor != 7 {
 		t.Fatalf("history fragments were dropped or reordered: fragments=%d transcript=%+v", len(fragments), out)
+	}
+	if out.Turns[39].DurationMS == nil || *out.Turns[39].DurationMS != 135039 {
+		t.Fatal("assembled remote transcript lost duration")
 	}
 }
 

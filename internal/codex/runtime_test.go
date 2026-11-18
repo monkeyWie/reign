@@ -4,9 +4,11 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"testing"
 	"time"
 
@@ -37,6 +39,24 @@ func TestMain(m *testing.M) {
 		os.Exit(0)
 	}
 	os.Exit(m.Run())
+}
+
+func TestAppIPCConnectionErrorPreservesCauseAndGuidance(t *testing.T) {
+	for _, tc := range []struct {
+		cause error
+		hint  string
+	}{
+		{os.ErrPermission, "相同权限级别"}, {os.ErrNotExist, "先打开"},
+		{context.DeadlineExceeded, "超时"}, {errors.New("fixture failure"), "连接 Codex App IPC 失败"},
+	} {
+		err := appIPCConnectionError(fmt.Errorf("fixture: %w", tc.cause))
+		if !errors.Is(err, tc.cause) || !strings.Contains(err.Error(), tc.hint) {
+			t.Fatal(err)
+		}
+		if !errors.Is(tc.cause, os.ErrNotExist) && strings.Contains(err.Error(), "先打开") {
+			t.Fatal("misleading missing-App advice", err)
+		}
+	}
 }
 func TestPrivateRuntimeClosesAndReleasesProcess(t *testing.T) {
 	ctx, stop := context.WithTimeout(context.Background(), 5*time.Second)

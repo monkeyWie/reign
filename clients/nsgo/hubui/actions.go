@@ -83,7 +83,7 @@ func actionSpinner(cx *core.Scope, id, title string, inverse bool, size core.Poi
 
 func pressStyle(cx *core.Scope) core.Style {
 	c := palette(cx)
-	return core.Style{Hover: &core.Style{Background: c.muted}, Active: &core.Style{Background: c.selected, Opacity: core.Alpha(.8)}, FocusVisible: &core.Style{OutlineWidth: 2, OutlineColor: c.accent}}
+	return core.Style{Hover: &core.Style{Background: c.muted}, Active: &core.Style{Background: c.selected, Opacity: core.Alpha(.8)}, FocusVisible: &core.Style{OutlineWidth: 2, OutlineColor: c.focus}}
 }
 
 func (s *State) approvalKey(a Object) string { return "approval:" + s.key() + ":" + str(a, "id") }
@@ -105,6 +105,33 @@ func (s *State) approvalAction(a, decision Object) {
 
 func labelledIconButton(cx *core.Scope, id, title string, icon func() *core.SVG, onPress func()) core.Node {
 	v := button(cx, id, "", icon, "ghost", onPress).(core.View)
-	v.Label, v.Tooltip = title, label(cx, title, 12, false)
+	v.Label, v.Tooltip = title, tooltipCard(cx, label(cx, title, 12, false))
+	return v
+}
+
+// Secondary controls stay in the layout, avoiding title jumps. Keyboard focus
+// reveals the same controls; touch uses the row's shared context menu instead.
+func contextualAffordance(cx *core.Scope, group string, touchVisible bool) core.Style {
+	if !cx.Env().Desktop() {
+		if touchVisible {
+			return core.Style{}
+		}
+		return core.Style{Display: core.DisplayNone}
+	}
+	// Auto is the zero/unset style value; On explicitly overrides hidden None.
+	shown := &core.Style{Opacity: core.Alpha(1), PointerEvents: core.PointerEventsOn}
+	return core.Style{Opacity: core.Alpha(0), PointerEvents: core.PointerEventsNone, GroupStyle: &core.GroupStyle{Name: group, Hover: shown, FocusWithin: shown}}
+}
+func contextualIconButton(cx *core.Scope, id, title string, icon func() *core.SVG, action func()) core.View {
+	v := labelledIconButton(cx, id, title, icon, action).(core.View)
+	tip := tooltipCard(cx, label(cx, title, 12, false))
+	tip.Placement, tip.Offset = core.PlaceTop, 6
+	tip.PopupStyle.Padding, tip.PopupStyle.CornerRadius = core.Symmetric(5, 8), 6
+	v.Tooltip = tip
+	v.Style.Width, v.Style.Height, v.Style.MinHeight, v.Style.Padding = core.Pt(30), core.Pt(30), core.Pt(30), core.All(7)
+	v.StyleFunc = func() core.Style {
+		c := palette(cx)
+		return core.Style{Color: c.mutedText, Hover: &core.Style{Color: c.foreground}, Active: &core.Style{Color: c.foreground, Opacity: core.Alpha(.65)}, FocusVisible: &core.Style{Color: c.foreground, OutlineWidth: 2, OutlineColor: c.focus}}
+	}
 	return v
 }

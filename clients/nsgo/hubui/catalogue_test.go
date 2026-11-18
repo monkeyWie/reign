@@ -3,6 +3,7 @@ package hubui
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -62,7 +63,7 @@ func TestSessionRefreshFeedback(t *testing.T) {
 			if f.syncs.Load() != 1 {
 				t.Fatal("duplicate refresh request")
 			}
-			app.WaitFor("id:session-demo-chat", time.Second)
+			app.WaitFor(sessionSelector("demo-device", "codex-app", "demo-chat"), time.Second)
 			app.Screenshot("session-refresh-" + outcome)
 			if outcome == "cancel" {
 				app.Post(func() { s.cx.Post(func() { s.cancelCatalogue(); s.changed() }) })
@@ -74,7 +75,17 @@ func TestSessionRefreshFeedback(t *testing.T) {
 			if control.Props.Busy || control.Props.Disabled {
 				t.Fatal("refresh feedback did not finish")
 			}
-			app.WaitFor("id:session-demo-chat", time.Second)
+			app.WaitFor(sessionSelector("demo-device", "codex-app", "demo-chat"), time.Second)
+			if outcome == "failure" {
+				app.Post(func() {
+					s.cx.Post(func() {
+						if !strings.Contains(s.connectionDetails("demo-device"), "codex-app: fixture catalogue unavailable") {
+							t.Error("ready provider failure lost its provider scope")
+						}
+					})
+				})
+				app.Settle()
+			}
 		})
 	}
 }
@@ -135,7 +146,7 @@ func TestSessionRefreshBackgroundIsSilentAndManualSupersedesIt(t *testing.T) {
 	if control.Props.Busy || control.Props.Disabled || app.Exists("id:refresh-sessions-loading") {
 		t.Fatal("background refresh animated or disabled the manual refresh control")
 	}
-	app.WaitFor("id:session-cached", time.Second)
+	app.WaitFor(sessionSelector("demo-device", "codex-app", "cached"), time.Second)
 	app.Screenshot("background-refresh-silent")
 	app.PressAt("id:refresh-sessions", core.Point{X: 12, Y: 12})
 	manual := next()
@@ -147,13 +158,13 @@ func TestSessionRefreshBackgroundIsSilentAndManualSupersedesIt(t *testing.T) {
 	}
 	background.result <- []Object{{"id": "stale", "providerId": "codex-app", "title": "Stale conversation"}}
 	app.Advance(100 * time.Millisecond)
-	if !app.Exists("id:refresh-sessions-loading") || app.Exists("id:session-stale") {
+	if !app.Exists("id:refresh-sessions-loading") || app.Exists(sessionSelector("demo-device", "codex-app", "stale")) {
 		t.Fatal("stale background response affected the manual request")
 	}
 	manual.result <- []Object{{"id": "fresh", "providerId": "codex-app", "title": "Fresh conversation"}}
-	app.WaitFor("id:session-fresh", time.Second)
+	app.WaitFor(sessionSelector("demo-device", "codex-app", "fresh"), time.Second)
 	app.WaitUntil(time.Second, func() bool { return !app.Exists("id:refresh-sessions-loading") })
-	if app.Exists("id:session-stale") || app.Find("id:refresh-sessions").Props.Disabled {
+	if app.Exists(sessionSelector("demo-device", "codex-app", "stale")) || app.Find("id:refresh-sessions").Props.Disabled {
 		t.Fatal("manual refresh did not finish with the fresh result")
 	}
 }
@@ -193,20 +204,19 @@ func TestColdCatalogueIsUsableBeforeFullScanAndMessagesLoadOnOpen(t *testing.T) 
 	f := &lazyCatalogueAPI{demoAPI: newDemoAPI(), release: make(chan struct{})}
 	app := nsgotest.Start(t, func(cx *core.Scope) core.Node { return RootWithAPI(cx, f, true) }, nsgotest.Size(390, 844))
 	app.WaitFor("id:device-demo-device", time.Second)
-	app.Press("id:device-demo-device")
-	app.WaitFor("id:session-demo-chat", time.Second)
+	app.WaitFor(sessionSelector("demo-device", "codex-app", "demo-chat"), time.Second)
 	// A different provider must remain usable while the App directory is blocked.
-	app.WaitFor("id:session-demo-cli", time.Second)
+	app.WaitFor(sessionSelector("demo-device", "codex-cli", "demo-cli"), time.Second)
 	app.WaitUntil(time.Second, func() bool { return f.syncs.Load() > 0 })
 	if f.transcripts.Load() != 0 || f.models.Load() != 0 {
 		t.Fatal("opening a device eagerly loaded messages/models")
 	}
-	app.Press("id:session-demo-chat")
+	app.Press(sessionSelector("demo-device", "codex-app", "demo-chat"))
 	app.WaitUntil(time.Second, func() bool { return f.transcripts.Load() == 1 })
 	app.WaitFor("id:message-demo-turn|demo-assistant", time.Second)
 	close(f.release)
 	app.Press("id:back-sessions")
-	app.WaitFor("id:session-older-chat", time.Second)
+	app.WaitFor(sessionSelector("demo-device", "codex-app", "older-chat"), time.Second)
 	if f.transcripts.Load() != 1 {
 		t.Fatal("directory completion loaded unrelated transcripts")
 	}
@@ -230,20 +240,104 @@ func TestBackFromStalledHistoryPreservesCatalogueAcrossDiscoveryFailure(t *testi
 	f := &disappearingProviderAPI{independentStreamAPI: &independentStreamAPI{demoAPI: newDemoAPI(), snapshots: make(chan snapshotRequest, 4), events: make(chan Object, 8), approvalsStarted: make(chan struct{})}}
 	app := nsgotest.Start(t, func(cx *core.Scope) core.Node { return RootWithAPI(cx, f, true) }, nsgotest.Size(390, 844))
 	app.WaitFor("id:device-demo-device", time.Second)
-	app.Press("id:device-demo-device")
-	app.WaitFor("id:session-demo-chat", time.Second)
-	app.Press("id:session-demo-chat")
+	app.WaitFor(sessionSelector("demo-device", "codex-app", "demo-chat"), time.Second)
+	app.Press(sessionSelector("demo-device", "codex-app", "demo-chat"))
 	app.WaitUntil(time.Second, func() bool { return len(f.snapshots) > 0 })
 	app.WaitFor("id:message-demo-turn|demo-assistant", time.Second)
 	f.missing.Store(true)
 	app.Press("id:back-sessions")
-	app.WaitFor("id:session-demo-chat", time.Second)
+	app.WaitFor(sessionSelector("demo-device", "codex-app", "demo-chat"), time.Second)
 	app.Press("id:refresh-sessions")
 	app.WaitUntil(time.Second, func() bool { return !app.Exists("id:refresh-sessions-loading") })
-	app.Find("id:session-demo-chat")
+	app.Find(sessionSelector("demo-device", "codex-app", "demo-chat"))
 	f.missing.Store(false)
 	f.failSync.Store(true)
 	app.Press("id:refresh-sessions")
 	app.WaitUntil(time.Second, func() bool { return !app.Exists("id:refresh-sessions-loading") })
-	app.Find("id:session-demo-chat")
+	app.Find(sessionSelector("demo-device", "codex-app", "demo-chat"))
+}
+
+type unavailableCatalogueAPI struct {
+	*demoAPI
+	ready              atomic.Bool
+	cliReads, appSyncs atomic.Int32
+}
+
+func (f *unavailableCatalogueAPI) Call(ctx context.Context, method string, p Object, target string, r Object) (any, error) {
+	if method == "client.call" && str(r, "method") == "providers" {
+		providers := demoProviders()
+		if !f.ready.Load() {
+			providers[1]["state"] = "unavailable"
+			providers[1]["detail"] = "CLI background is not running"
+		}
+		return providers, nil
+	}
+	if method == "client.sync" && str(p, "provider") == "codex-app" {
+		f.appSyncs.Add(1)
+	}
+	if method == "client.sync" && str(p, "provider") == "codex-cli" || method == "client.call" && str(r, "method") == "sessions" && str(r, "provider") == "codex-cli" {
+		f.cliReads.Add(1)
+		if !f.ready.Load() {
+			return nil, errors.New("Agent is not ready")
+		}
+	}
+	return f.demoAPI.Call(ctx, method, p, target, r)
+}
+
+func TestCatalogueSkipsUnavailableHistoryProviderAndResumesWhenReady(t *testing.T) {
+	for _, cached := range []bool{false, true} {
+		name := "cold"
+		if cached {
+			name = "cached"
+		}
+		t.Run(name, func(t *testing.T) {
+			f := &unavailableCatalogueAPI{demoAPI: newDemoAPI()}
+			var s *State
+			app := nsgotest.Start(t, func(cx *core.Scope) core.Node {
+				cx.SetTheme(core.DefaultTheme())
+				s = newState(cx, f)
+				s.target = "demo-device"
+				s.devices = []Object{{"id": s.target, "connected": true}}
+				if cached {
+					s.sessions = []Object{{"id": "demo-cli", "providerId": "codex-cli", "title": "Cached CLI conversation"}}
+				}
+				return s.directory(cx)
+			}, nsgotest.Size(390, 844))
+			refresh := func(want int32) {
+				app.Press("id:refresh-sessions")
+				app.WaitUntil(time.Second, func() bool {
+					return f.appSyncs.Load() >= want && !app.Exists("id:refresh-sessions-loading")
+				})
+				app.Post(func() {
+					s.cx.Post(func() {
+						if detail := s.connectionDetails("demo-device"); detail != "" {
+							t.Error("unavailable provider created a connection issue", detail)
+						}
+					})
+				})
+				app.Settle()
+			}
+			refresh(1)
+			app.WaitFor(sessionSelector("demo-device", "codex-app", "demo-chat"), time.Second)
+			if f.cliReads.Load() != 0 {
+				t.Fatal("unavailable history provider received directory requests")
+			}
+			if cached {
+				app.WaitFor(sessionSelector("demo-device", "codex-cli", "demo-cli"), time.Second)
+			}
+			f.ready.Store(true)
+			refresh(2)
+			app.WaitFor(sessionSelector("demo-device", "codex-cli", "demo-cli"), time.Second)
+			if f.cliReads.Load() == 0 {
+				t.Fatal("provider did not resume synchronization after becoming ready")
+			}
+			reads := f.cliReads.Load()
+			f.ready.Store(false)
+			refresh(3)
+			app.WaitFor(sessionSelector("demo-device", "codex-cli", "demo-cli"), time.Second)
+			if f.cliReads.Load() != reads {
+				t.Fatal("provider becoming unavailable restarted rejected reads")
+			}
+		})
+	}
 }

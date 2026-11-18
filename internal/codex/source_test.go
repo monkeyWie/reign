@@ -42,9 +42,9 @@ func TestSessionCreationSourceIsIndependentOfAccessProvider(t *testing.T) {
 				if cli {
 					p.kind, wantProvider = "cli", "codex-cli"
 				}
-				td := thread{ID: "original", Cwd: "/work/project", Source: json.RawMessage(tc.source), Originator: tc.originator, UpdatedAt: 42}
+				td := thread{ID: "original", Cwd: "/work/project", Source: json.RawMessage(tc.source), Originator: tc.originator, UpdatedAt: 42, CreatedAt: 12}
 				s := p.session(td)
-				if s.SourceKind != tc.want || s.Source != tc.source || s.Originator != tc.originator || s.ProviderID != wantProvider || s.ID != "original" || s.CWD != "/work/project" || s.UpdatedAt != 42 {
+				if s.SourceKind != tc.want || s.Source != tc.source || s.Originator != tc.originator || s.ProviderID != wantProvider || s.ID != "original" || s.CWD != "/work/project" || s.UpdatedAt != 42000 || s.CreatedAt != 12000 {
 					t.Fatalf("creation source or access route lost: %+v", s)
 				}
 			}
@@ -76,6 +76,8 @@ func TestSessionListExcludesSDKAndPreservesPagination(t *testing.T) {
 				continue
 			case "project/list":
 				result = json.RawMessage(`{"data":[{"id":"project","name":"Project","roots":[{"path":"/project"}]}]}`)
+			case "thread/turns/list":
+				result = json.RawMessage(`{"data":[]}`)
 			case "thread/list":
 				var params struct {
 					SourceKinds                    []string
@@ -135,5 +137,16 @@ func TestSessionListExcludesSDKAndPreservesPagination(t *testing.T) {
 	third, err := p.Sessions(ctx, second.NextCursor)
 	if err != nil || len(third.Sessions) != 1 || third.Sessions[0].SourceKind != "subAgent" || third.NextCursor != "" {
 		t.Fatalf("bad third page: %+v, %v", third, err)
+	}
+}
+
+func TestIPCCreationAndActivityDatesRemainIndependent(t *testing.T) {
+	td := stateThread(map[string]any{"id": "fixture", "createdAt": "2026-11-18T00:00:00Z", "updatedAt": float64(1794963600000)})
+	if td.CreatedAt != 1794960000000 || td.UpdatedAt != 1794963600000 {
+		t.Fatalf("IPC timestamps: %+v", td)
+	}
+	unknown := stateThread(map[string]any{"id": "fixture", "updatedAt": float64(1794963600000)})
+	if unknown.CreatedAt != 0 {
+		t.Fatal("missing creation time inferred from activity")
 	}
 }

@@ -63,6 +63,16 @@ func TestSendingLongMessageAndJumpToLatestReachTheBottom(t *testing.T) {
 	app.Post(func() { s.cx.Post(func() { s.timeline.ScrollTo(core.Point{}, false) }) })
 	app.Settle()
 	app.WaitFor("id:jump-to-latest", time.Second)
+	jump := app.Find("id:jump-to-latest")
+	timeline := globalBounds(app.Find("id:timeline"))
+	bounds := globalBounds(jump)
+	if delta := bounds.Origin.X + bounds.Size.Width/2 - timeline.Origin.X - timeline.Size.Width/2; delta < -1 || delta > 1 {
+		t.Fatal("jump-to-latest is not centered above the composer")
+	}
+	if bounds.Size.Width != bounds.Size.Height || jump.Props.Label == "" {
+		t.Fatal("jump-to-latest lost its circular shape or accessible name")
+	}
+	app.Screenshot("jump-to-latest-icon")
 	app.Press("id:jump-to-latest")
 	app.WaitUntil(time.Second, func() bool { return !app.Exists("id:jump-to-latest") })
 	app.Screenshot("long-message-follows-bottom")

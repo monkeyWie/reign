@@ -7,7 +7,7 @@ description: Connect Claude Code, Cursor, DeepSeek Harness and other ACP agents.
 
 ## Install and sign in
 
-Install the agent on the host computer and complete its own CLI sign-in. Open **Settings → Agent** in ReignHub and enable its preset. Installing ReignHub does not install agents or model subscriptions.
+Install the agent on the host computer and complete its own CLI sign-in. ReignHub connects automatically when the agent is ready. Its switch defaults on; use **Settings → Agent** to turn it off or adjust setup. Installing ReignHub does not install agents or model subscriptions.
 
 | Agent            | Executable         | Arguments                                 | Environment                          |
 | ---------------- | ------------------ | ----------------------------------------- | ------------------------------------ |
@@ -40,7 +40,7 @@ Choose **Add ACP Agent** in **Settings → Agent** on the host. Enter a unique i
 }
 ```
 
-Save and restart ReignHub, then enable the instance. Existing presets have a **Configure** action for changing executable paths, arguments and environment variables. Multiple IDs can launch the same agent with different settings. Account isolation follows the agent's own configuration.
+Save and restart ReignHub; the instance connects automatically when configured. Existing presets have a **Configure** action for changing executable paths, arguments and environment variables. Multiple IDs can launch the same agent with different settings. Account isolation follows the agent's own configuration.
 
 Arguments are literal array elements. There is no shell expansion: use an executable path, separate arguments and the `env` map, rather than a shell command string. On Windows, use an `.exe`, or `node.exe` with the JavaScript entry point in `args`, for npm-based agents. Keep credentials in the agent's own login store or host environment. Agent launch settings stay on the host and cannot be edited by remote controllers.
 

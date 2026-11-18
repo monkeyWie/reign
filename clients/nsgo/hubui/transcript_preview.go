@@ -115,6 +115,8 @@ func (b *transcriptPreview) add(fragment provider.Transcript) error {
 		}
 		target := b.turns[i]
 		target["status"] = turn["status"]
+		target["durationMs"] = turn["durationMs"]
+		target["recencyAt"] = max(number(target, "recencyAt"), number(turn, "recencyAt"))
 		items := objects(target["items"])
 		for _, item := range objects(turn["items"]) {
 			key := str(item, "id")

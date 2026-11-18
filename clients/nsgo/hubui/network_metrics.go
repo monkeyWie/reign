@@ -31,11 +31,6 @@ func (s *State) networkValue(cx *core.Scope, id, key string) string {
 		return i18n.FormatInteger(i18n.Language(cx), float64(number(m, key))) + " ms"
 	case "uploadBps", "downloadBps":
 		return networkRate(number(m, key))
-	case "requestFailurePercent":
-		if number(m, "requestSamples") == 0 {
-			return "—"
-		}
-		return i18n.FormatNumberSkeleton(i18n.Language(cx), float64(number(m, key))/100, "percent .#")
 	case "connectedMs":
 		if number(m, key) < 0 {
 			return "—"
@@ -65,7 +60,6 @@ func (s *State) networkCard(cx *core.Scope, id string) core.Node {
 			{"connectedMs", msgs.ConnectionTime(), ""},
 			{"uploadBps", msgs.UploadRate(), msgs.RateHint()},
 			{"downloadBps", msgs.DownloadRate(), msgs.RateHint()},
-			{"requestFailurePercent", msgs.RequestFailures(), msgs.RequestFailuresHint()},
 			{"lastProgressMs", msgs.LastData(), ""},
 			{"pendingRequests", msgs.PendingRequests(), ""},
 		}
@@ -76,7 +70,7 @@ func (s *State) networkCard(cx *core.Scope, id string) core.Node {
 			value.Style.FontWeight = core.FontWeightSemibold
 			item := core.View{Style: core.Style{MinWidth: core.Pt(0), Gap: 2}, Children: []core.Node{label(cx, field.title, 10, true), value}}
 			if field.hint != "" {
-				item.Tooltip = label(cx, field.hint, 12, false)
+				item.Tooltip = tooltipCard(cx, label(cx, field.hint, 12, false))
 			}
 			cards = append(cards, item)
 		}
@@ -103,7 +97,7 @@ func (s *State) networkSummary(id string) string {
 	}
 	// Fixed field names make copied diagnostics useful across UI languages.
 	lines := []string{}
-	for _, key := range []string{"responseMs", "lastResponseMs", "uploadBps", "downloadBps", "sentBytes", "receivedBytes", "pendingRequests", "requestSamples", "requestFailurePercent", "lastProgressMs", "connectedMs"} {
+	for _, key := range []string{"responseMs", "lastResponseMs", "uploadBps", "downloadBps", "sentBytes", "receivedBytes", "pendingRequests", "lastProgressMs", "connectedMs"} {
 		if value, ok := m[key]; ok {
 			lines = append(lines, fmt.Sprintf("%s=%v", key, value))
 		}

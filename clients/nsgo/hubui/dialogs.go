@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"github.com/monkeyWie/reignhub/clients/nsgo/hubui/locales"
 	"image"
 	_ "image/jpeg"
 	_ "image/png"
@@ -21,6 +22,12 @@ import (
 )
 
 func (s *State) dialogView(cx *core.Scope, kind string) core.Node {
+	if strings.HasPrefix(kind, "agent-help:") {
+		return s.agentHelp(cx, strings.TrimPrefix(kind, "agent-help:"))
+	}
+	if kind == "remove-session" {
+		return s.removeSessionDialog(cx)
+	}
 	if kind == "attachment-download" {
 		return s.downloadView(cx)
 	}
@@ -56,6 +63,9 @@ func (s *State) dialogView(cx *core.Scope, kind string) core.Node {
 	}
 	mounted := true
 	dialogTarget := s.target
+	if (kind == "device" || kind == "forget") && s.deviceMenuTarget != "" {
+		dialogTarget = s.deviceMenuTarget
+	}
 	cx.Cleanup(func() { mounted = false })
 	close := func() {
 		if mounted {
@@ -113,7 +123,7 @@ func (s *State) dialogView(cx *core.Scope, kind string) core.Node {
 		initial, _ := json.MarshalIndent(def, "", "  ")
 		id := core.NewSignal(cx, idValue)
 		settings := core.NewSignal(cx, string(initial))
-		children = append(children, label(cx, "Agent 在这台电脑上运行。先安装并登录对应 CLI；参数为 JSON 数组，每个元素是一个原样参数。", 13, true), field("agent-id", "Agent ID（如 my-agent）", id, false), core.Input{TestID: "agent-settings", Disabled: pending, Label: "Agent 配置 JSON", Value: settings.Get, OnChange: settings.Set, Multiline: true, Style: core.Style{Height: core.Pt(230), FontSize: 12}}, label(cx, "支持 acp 和 pi。保存后重启 ReignHub 生效。环境变量只保存在本机，不会同步给控制端。", 12, true))
+		children = append(children, label(cx, "Agent 在这台电脑上运行。先安装并登录对应 CLI；参数为 JSON 数组，每个元素是一个原样参数。", 13, true), field("agent-id", "Agent ID（如 my-agent）", id, false), core.Input{TestID: "agent-settings", Disabled: pending, Label: "Agent 配置 JSON", Value: settings.Get, OnChange: settings.Set, Multiline: true, Style: core.Style{Height: core.Pt(230), FontSize: 12}, StyleFunc: func() core.Style { return textInputStyle(cx) }}, label(cx, "支持 acp 和 pi。保存后重启 ReignHub 生效。环境变量只保存在本机，不会同步给控制端。", 12, true))
 		footer = append(footer, s.actionButton(cx, "save-agent", "保存配置", nil, "primary", func() {
 			var value Object
 			if err := json.Unmarshal([]byte(settings.Get()), &value); err != nil {
@@ -269,61 +279,110 @@ func (s *State) dialogView(cx *core.Scope, kind string) core.Node {
 				return s.api.Call(ctx, "host.activate", Object{"provider": provider}, "", Object{"expected": expected, "confirmRestart": false})
 			}, func(any) { close(); s.poll() })
 		}))
+	case kind == "local-access":
+		title = locales.For(cx).AccessManagement()
+		children = append(children, s.localAccess(cx))
+		footer = nil
+	case kind == "local":
+		title = locales.For(s.cx).LocalManagement()
+		d.Style.Width = core.Pt(740)
+		children = append(children, core.View{Style: core.Style{MinHeight: core.Pt(0)}, StyleFunc: func() core.Style {
+			return core.Style{Height: core.Pt(min(600, max(160, cx.Env().Window().Height-160)))}
+		}, Children: []core.Node{s.local(cx)}})
+		footer = nil
+	case kind == "device":
+		title = s.environmentName(dialogTarget)
+		target := dialogTarget
+		children = append(children, dynamicText(cx, func() string { s.read(); return s.connectionTitle(target) }, 13, true), label(cx, locales.For(s.cx).DeviceJoinsDirectory(), 13, true),
+			button(cx, "device-details", "连接详情", lucide.Info, "outline", func() { s.connectionDetailTarget = target; s.dialog.Set("connection-status") }),
+			labelledIconButton(cx, "forget-device", "移除设备", lucide.Trash, func() { s.dialog.Set("forget") }),
+		)
+		footer = []core.Node{
+			button(cx, "reconnect-device", "连接 / 重连", lucide.RefreshCw, "primary", func() {
+				if s.connectionReady(target) {
+					s.reconnectDevice(target)
+				} else {
+					s.connectSavedDevice(target)
+				}
+				close()
+			}),
+			s.actionButton(cx, "disconnect-device", "断开", nil, "outline", func() {
+				s.call("disconnect:"+target, "client.disconnect", Object{"id": target}, func(any) { s.cancelTargetCatalogue(target); close() })
+			}),
+		}
 	case kind == "create":
 		title = "新建会话"
 		cwd := core.NewSignal(cx, s.createDirectory)
-		provider := core.NewSignal(cx, "")
-		options := []ui.Option[string]{}
-		for _, p := range s.providers {
-			if providerReady(p) {
-				options = append(options, ui.Option[string]{Value: str(p, "id"), Label: str(p, "name")})
+		target := core.NewSignal(cx, dialogTarget)
+		agent := core.NewSignal(cx, "")
+		environments := []ui.Option[string]{}
+		for _, device := range s.devices {
+			id := str(device, "id")
+			if s.connectionReady(id) {
+				environments = append(environments, ui.Option[string]{Value: id, Label: s.environmentName(id)})
 			}
 		}
-		if len(options) > 0 {
-			provider.Set(options[0].Value)
+		valid := false
+		for _, option := range environments {
+			if option.Value == target.GetUntracked() {
+				valid = true
+			}
 		}
-		children = append(children, ui.Select[string]{TestID: "new-session-provider", Disabled: pending, Label: "Agent", Options: options, Value: provider.Get, OnChange: provider.Set}, field("new-session-cwd", "工作目录（被控电脑上的绝对路径）", cwd, false))
-		footer = append(footer, busyButton(cx, "create-session-confirm", "创建", nil, "primary", pending, func() {
-			target, p, directory := dialogTarget, provider.Get(), cwd.Get()
-			s.runAction("create-session-confirm:"+dialogTarget, func(ctx context.Context) (any, error) {
-				return rpc(ctx, s.api, target, p, "", "create", Object{"options": Object{"cwd": directory}})
-			}, func(v any) {
-				if mounted && s.target == target {
-					close()
-					s.selectSession(object(v))
-					s.poll()
-				}
-			})
-		}))
-	case kind == "directory":
-		title = "项目"
-		footer = nil
-		count := 0
-		path := ""
-		paths := []string{}
-		seen := map[string]bool{}
-		for _, g := range directories(s.sessions) {
-			if g.Key == s.directoryInfo {
-				title = g.Title
-				count = len(g.Sessions)
-				path = g.Path
-				for _, ss := range g.Sessions {
-					cwd := str(ss, "cwd")
-					if cwd != "" && !seen[cwd] {
-						seen[cwd] = true
-						paths = append(paths, cwd)
+		if !valid && len(environments) > 0 {
+			target.Set(environments[0].Value)
+		}
+		children = append(children, ui.Select[string]{TestID: "new-session-device", Disabled: pending, Label: locales.For(s.cx).ExecutionDevice(), Options: environments, Value: target.Get, OnChange: func(id string) { target.Set(id); cwd.Set(""); agent.Set("") }},
+			core.Dynamic(func(cx *core.Scope) core.Node {
+				id := target.Get()
+				s.read()
+				options := []ui.Option[string]{}
+				for _, p := range s.workspaces[id].providers {
+					if providerReady(p) && flag(object(p["capabilities"]), "create") {
+						options = append(options, ui.Option[string]{Value: str(p, "id"), Label: str(p, "name")})
 					}
 				}
+				selected := agent.GetUntracked()
+				found := false
+				for _, p := range options {
+					if p.Value == selected {
+						found = true
+					}
+				}
+				if !found {
+					selected = ""
+					if len(options) > 0 {
+						selected = options[0].Value
+					}
+					agent.Set(selected)
+				}
+				if len(options) == 0 {
+					return label(cx, locales.For(s.cx).NoCreateAgent(), 13, true)
+				}
+				return ui.Select[string]{TestID: "new-session-provider", Disabled: pending, Label: "Agent", Options: options, Value: agent.Get, OnChange: agent.Set}
+			}), field("new-session-cwd", locales.For(s.cx).ExecutionDirectory(), cwd, false),
+		)
+		footer = append(footer, busyButton(cx, "create-session-confirm", "创建", nil, "primary", pending, func() {
+			id, p, directory := target.Get(), agent.Get(), cwd.Get()
+			if p == "" || id == "" || !s.connectionReady(id) {
+				s.error = locales.For(s.cx).ConnectAndSelectAgent()
+				s.changed()
+				return
 			}
-		}
-		children = append(children, label(cx, fmt.Sprintf("%d 次聊天", count), 13, true), core.Text{Content: path, Selectable: core.SelectableOn, Style: core.Style{FontSize: 13}})
-		footer = append(footer, s.copyButton(cx, "copy-directory", "复制路径", "outline", func() string { return path }))
-		if len(paths) > 1 {
-			children = append(children, label(cx, "工作区", 13, true))
-			for _, cwd := range paths {
-				children = append(children, core.Text{Content: cwd, Selectable: core.SelectableOn, Style: core.Style{FontSize: 12}})
-			}
-		}
+			s.runAction("create-session-confirm:"+dialogTarget, func(ctx context.Context) (any, error) {
+				return rpc(ctx, s.api, id, p, "", "create", Object{"options": Object{"cwd": directory}})
+			}, func(v any) {
+				session := copyObject(object(v))
+				session["deviceId"] = id
+				s.cancelTargetCatalogue(id)
+				s.applyEnvironmentPage(id, p, []Object{session}, false)
+				if mounted {
+					close()
+					s.selectSession(session)
+				}
+				s.poll()
+			})
+		}))
+
 	case kind == "clear-cache":
 		title = "清除这台设备的附件缓存？"
 		children = append(children, label(cx, "仅清除控制端已下载的附件，下次查看时会从被控端重新读取。", 13, true))

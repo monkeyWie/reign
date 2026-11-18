@@ -3,20 +3,9 @@ package hubui
 import (
 	"strings"
 
-	"github.com/monkeyWie/reignhub/internal/brandicons"
 	"github.com/nsgo-dev/nsgo/core"
 	"github.com/nsgo-dev/nsgo/icons/lucide"
 )
-
-// Use the same recognizable brand silhouettes as the website.
-var controllerLogos = func() map[string]*core.SVG {
-	logos := map[string]*core.SVG{}
-	for key, path := range brandicons.Paths() {
-		logos[key] = core.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="` + path + `"/></svg>`))
-	}
-	logos["chromium"] = logos["chrome"]
-	return logos
-}()
 
 func browserIconKey(name string) string {
 	name = strings.ToLower(strings.TrimSpace(name))
@@ -51,7 +40,7 @@ func controllerIconKey(info Object) string {
 }
 func identityGlyph(cx *core.Scope, info Object, size core.Points) core.Node {
 	key := controllerIconKey(info)
-	if svg := controllerLogos[key]; svg != nil {
+	if svg := brandLogos[key]; svg != nil {
 		return core.Icon{SVG: svg, TestID: "controller-platform-" + key, Style: core.Style{Width: core.Pt(size), Height: core.Pt(size), FlexShrink: 0}, StyleFunc: func() core.Style { return core.Style{Color: palette(cx).foreground} }}
 	}
 	if key == "browser" {

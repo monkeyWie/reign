@@ -108,7 +108,7 @@ func TestCachedAndPreviewCataloguesExcludeSDK(t *testing.T) {
 		{"id": "exec", "providerId": "codex-app", "sourceKind": "exec"},
 		{"id": "cli", "providerId": "codex-cli", "sourceKind": "cli", "cwd": "/project"},
 	}
-	groups := directories(sessions)
+	groups := projectGroups(sessions)
 	if len(groups) != 1 || len(groups[0].Sessions) != 1 || str(groups[0].Sessions[0], "id") != "cli" {
 		t.Fatal("cached SDK sessions leaked", groups)
 	}

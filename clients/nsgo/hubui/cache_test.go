@@ -74,10 +74,13 @@ func (f *cachedWorkspaceAPI) Call(ctx context.Context, method string, p Object, 
 func (f *cachedWorkspaceAPI) cachedTranscript(text string) Object {
 	return Object{"session": f.sessions[0], "turns": []Object{{"id": "cached", "status": "completed", "items": []Object{{"id": "reply", "role": "assistant", "text": text}}}}}
 }
-func startCachedWorkspace(t *testing.T, connected bool) (*nsgotest.App, *cachedWorkspaceAPI) {
+func startCachedWorkspace(t *testing.T, connected bool, noCache ...bool) (*nsgotest.App, *cachedWorkspaceAPI) {
 	t.Helper()
 	f := &cachedWorkspaceAPI{demoAPI: newDemoAPI(), connectResult: make(chan error, 1), liveRelease: make(chan struct{})}
 	f.online.Store(connected)
+	if len(noCache) > 0 {
+		f.noCache.Store(noCache[0])
+	}
 	app := nsgotest.Start(t, func(cx *core.Scope) core.Node { return RootWithAPI(cx, f, true) }, nsgotest.Size(390, 844))
 	app.WaitFor("id:device-demo-device", time.Second)
 	return app, f
@@ -85,12 +88,11 @@ func startCachedWorkspace(t *testing.T, connected bool) (*nsgotest.App, *cachedW
 
 func TestSavedDeviceOpensCachedMessagesWhileConnectingAndAfterFailure(t *testing.T) {
 	app, f := startCachedWorkspace(t, false)
-	app.Press("id:device-demo-device")
-	app.WaitFor("id:session-demo-chat", time.Second)
+	app.WaitFor(sessionSelector("demo-device", "codex-app", "demo-chat"), time.Second)
 	if app.Exists("id:dialog-connecting") || app.Exists("id:dialog-connection-status") {
 		t.Fatal("navigation opened a blocking connection panel")
 	}
-	app.Press("id:session-demo-chat")
+	app.Press(sessionSelector("demo-device", "codex-app", "demo-chat"))
 	app.WaitFor("text:本地保存的完整消息", time.Second)
 	app.Find("id:connection-retrying")
 	app.Type("id:chat-input", "离线也可以编辑草稿")
@@ -119,9 +121,8 @@ func TestSavedDeviceOpensCachedMessagesWhileConnectingAndAfterFailure(t *testing
 
 func TestConnectedSlowPeerShowsCacheBeforeLiveReadsComplete(t *testing.T) {
 	app, f := startCachedWorkspace(t, true)
-	app.Press("id:device-demo-device")
-	app.WaitFor("id:session-demo-chat", time.Second)
-	app.Press("id:session-demo-chat")
+	app.WaitFor(sessionSelector("demo-device", "codex-app", "demo-chat"), time.Second)
+	app.Press(sessionSelector("demo-device", "codex-app", "demo-chat"))
 	app.WaitFor("text:本地保存的完整消息", time.Second)
 	app.WaitUntil(time.Second, func() bool { return f.liveReads.Load() >= 2 })
 	if app.Exists("id:transcript-loading") {
@@ -135,13 +136,11 @@ func TestConnectedSlowPeerShowsCacheBeforeLiveReadsComplete(t *testing.T) {
 }
 
 func TestNoCachedSessionsShowsLoadingAndStopsAfterConnectionFailure(t *testing.T) {
-	app, f := startCachedWorkspace(t, false)
-	f.noCache.Store(true)
-	app.Press("id:device-demo-device")
+	app, f := startCachedWorkspace(t, false, true)
 	app.WaitFor("id:session-sidebar", time.Second)
 	app.WaitFor("id:sessions-loading", time.Second)
 	f.connectResult <- errors.New("设备离线")
-	app.WaitFor("text:暂无本地会话，连接后会自动同步。", time.Second)
+	app.WaitFor("id:empty-sessions-action", time.Second)
 	if app.Exists("id:sessions-loading") || app.Exists("id:dialog-connecting") {
 		t.Fatal("failure left an endless loading or modal")
 	}
@@ -171,9 +170,8 @@ func TestLateDiskSnapshotCannotOverwriteNewerLiveMessages(t *testing.T) {
 	f := &lateSnapshotAPI{cachedWorkspaceAPI: base, started: make(chan struct{}), release: make(chan struct{})}
 	app := nsgotest.Start(t, func(cx *core.Scope) core.Node { return RootWithAPI(cx, f, true) }, nsgotest.Size(390, 844))
 	app.WaitFor("id:device-demo-device", time.Second)
-	app.Press("id:device-demo-device")
-	app.WaitFor("id:session-demo-chat", time.Second)
-	app.Press("id:session-demo-chat")
+	app.WaitFor(sessionSelector("demo-device", "codex-app", "demo-chat"), time.Second)
+	app.Press(sessionSelector("demo-device", "codex-app", "demo-chat"))
 	app.WaitFor("text:后台同步到的最新消息", time.Second)
 	close(f.release)
 	app.WaitUntil(time.Second, func() bool {

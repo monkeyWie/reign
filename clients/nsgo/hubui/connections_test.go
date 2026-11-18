@@ -148,6 +148,7 @@ func TestNeverConnectedDeviceDoesNotStartAutomaticRetries(t *testing.T) {
 	app.Post(func() {
 		s.cx.Post(func() {
 			s.devices = []Object{{"id": "never-connected", "connected": false, "autoReconnect": true}}
+			s.connection("never-connected").attempt = &connectAttempt{complete: true}
 			s.autoReconnect()
 			checked <- s.connection("never-connected").reconnecting
 		})

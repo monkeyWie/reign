@@ -91,11 +91,11 @@ func (s *State) preferences(cx *core.Scope, initial string) core.Node {
 					if s.api.CanHost() {
 						return s.agentSettings(cx)
 					}
-					return card(cx, glyph(cx, lucide.Bot, 28), label(cx, "在电脑上管理 Agent", 18, false), label(cx, "请在被控电脑的 ReignHub 中打开「设置 → Agent」，配置本机运行的 Agent。", 14, true))
+					return contentSection(cx, "", "", glyph(cx, lucide.Bot, 28), label(cx, "在电脑上管理 Agent", 18, false), label(cx, "请在被控电脑的 ReignHub 中打开「设置 → Agent」，配置本机运行的 Agent。", 14, true))
 				case "connection":
 					return s.connectionSettings(cx)
 				case "account":
-					return card(cx, glyph(cx, lucide.User, 28), label(cx, "账号与设备同步", 18, false), label(cx, "登录账号，将已配对的设备带到你的其他客户端。", 14, true), button(cx, "settings-account", "管理账号", nil, "primary", func() { s.openSettingsDialog("account") }))
+					return contentSection(cx, "", "", glyph(cx, lucide.User, 28), label(cx, "账号与设备同步", 18, false), label(cx, "登录账号，将已配对的设备带到你的其他客户端。", 14, true), button(cx, "settings-account", "管理账号", nil, "primary", func() { s.openSettingsDialog("account") }))
 				case "about":
 					return core.View{Style: core.Style{Gap: 20}, Children: []core.Node{s.brand(cx, 28, false), label(cx, "你的 Agent，随处连接。", 16, false), label(cx, "在桌面、手机和浏览器之间，继续你的工作。", 14, true), button(cx, "settings-docs", "使用文档", lucide.BookOpen, "outline", func() { cx.OpenURL(serviceOrigin()+"/docs", nil) }), button(cx, "settings-source", "开源项目", lucide.GitBranch, "ghost", func() { cx.OpenURL("https://github.com/monkeyWie/reignhub", nil) })}}
 				default:
@@ -132,10 +132,10 @@ func (s *State) appearanceSettings(cx *core.Scope) core.Node {
 }
 func (s *State) connectionSettings(cx *core.Scope) core.Node {
 	if !s.api.CanHost() {
-		connection := card(cx, label(cx, "连接服务", 18, false), label(cx, serviceOrigin(), 14, true), label(cx, "连接设备时，可以选择官方服务或你自己部署的服务。", 14, true), button(cx, "settings-connect", "连接设备", lucide.Plus, "primary", func() { s.openSettingsDialog("connect") }))
+		connection := contentSection(cx, "", "", label(cx, "连接服务", 18, false), label(cx, serviceOrigin(), 14, true), label(cx, "连接设备时，可以选择官方服务或你自己部署的服务。", 14, true), button(cx, "settings-connect", "连接设备", lucide.Plus, "primary", func() { s.openSettingsDialog("connect") }))
 		if !isWeb() && cx.Env().OS() == core.OSAndroid {
 			return core.View{Style: core.Style{Gap: 16}, Children: []core.Node{connection,
-				card(cx, label(cx, "后台连接", 18, false), label(cx, "连接期间通过前台服务保持网络。若锁屏后仍断开，可在系统电池设置中允许 ReignHub 后台运行。", 13, true),
+				contentSection(cx, "", "", label(cx, "后台连接", 18, false), label(cx, "连接期间通过前台服务保持网络。若锁屏后仍断开，可在系统电池设置中允许 ReignHub 后台运行。", 13, true),
 					button(cx, "background-settings", "打开系统后台设置", lucide.Settings, "outline", func() {
 						cx.CallHost("ras.background-settings", nil, func(_ any, err error) {
 							if err != nil {
@@ -148,19 +148,17 @@ func (s *State) connectionSettings(cx *core.Scope) core.Node {
 		}
 		return connection
 	}
-	return card(cx, label(cx, "本机服务", 18, false), dynamicText(cx, func() string { s.read(); return str(s.host, "serviceUrl") }, 14, true), dynamicText(cx, func() string { s.read(); return str(s.host, "name") }, 14, false), label(cx, "优先直连，自动回退到加密中继。", 13, true), button(cx, "settings-service", "配置服务", lucide.Network, "outline", func() { s.openSettingsDialog("service-settings") }), button(cx, "settings-password", "访问密码", lucide.LockKeyhole, "ghost", func() { s.openSettingsDialog("password") }))
+	return contentSection(cx, "", "", label(cx, "本机服务", 18, false), dynamicText(cx, func() string { s.read(); return str(s.host, "serviceUrl") }, 14, true), dynamicText(cx, func() string { s.read(); return str(s.host, "name") }, 14, false), label(cx, "优先直连，自动回退到加密中继。", 13, true), button(cx, "settings-service", "配置服务", lucide.Network, "outline", func() { s.openSettingsDialog("service-settings") }), button(cx, "settings-password", "访问密码", lucide.LockKeyhole, "ghost", func() { s.openSettingsDialog("password") }))
 }
 
 func (s *State) agentSettings(cx *core.Scope) core.Node {
 	return core.View{TestID: "agent-settings-list", Style: core.Style{Gap: 16}, Children: []core.Node{
-		label(cx, "本机 Agent", 22, false), label(cx, "管理运行在这台电脑上的 Agent，供已授权设备远程访问。", 13, true),
+		label(cx, "本机 Agent", 22, false),
 		button(cx, "add-agent", "添加 ACP Agent", lucide.Plus, "outline", func() { s.openSettingsDialog("agent-config") }),
 		core.Each(func() []Object { s.read(); return s.localProviders }, func(p Object) string { return str(p, "id") }, func(cx *core.Scope, p func() Object, _ func() int) core.Node {
 			mounted := true
 			cx.Cleanup(func() { mounted = false })
-			info := row(glyph(cx, lucide.Bot, 22), core.View{Style: fill.Merge(core.Style{Gap: 6}), Children: []core.Node{dynamicText(cx, func() string { return str(p(), "name") }, 15, false), dynamicText(cx, func() string {
-				return choose(flag(p(), "installed"), "已安装", "未安装") + " · " + str(p(), "detail")
-			}, 12, true)}})
+			info := row(agentGlyph(cx, str(p(), "id"), 22), agentLabel(cx, p), s.agentControls(cx, "settings-", p, s.openSettingsDialog))
 			actions := core.View{Style: core.Style{Direction: core.Row, Gap: 8, JustifyContent: core.JustifyEnd, Wrap: core.Wrap}, Children: []core.Node{
 				core.Show{When: func() bool { return str(p(), "id") != "codex-app" && str(p(), "id") != "codex-cli" }, Then: func(cx *core.Scope) core.Node {
 					return s.actionButton(cx, "configure-agent-"+str(p(), "id"), "配置", lucide.SlidersHorizontal, "ghost", func() {
@@ -173,19 +171,8 @@ func (s *State) agentSettings(cx *core.Scope) core.Node {
 						})
 					})
 				}},
-				core.Show{When: func() bool {
-					return flag(p(), "installed") && str(p(), "state") != "unsupported" && !providerReady(p())
-				}, Then: func(cx *core.Scope) core.Node {
-					return s.actionButton(cx, "enable-"+str(p(), "id"), "启用", nil, "outline", func() {
-						if flag(object(p()["capabilities"]), "desktop") {
-							s.openSettingsDialog("activate:" + str(p(), "id"))
-						} else {
-							s.call("enable-"+str(p(), "id"), "host.enable", Object{"provider": p()["id"]}, nil)
-						}
-					})
-				}},
 			}}
-			return card(cx, info, actions)
+			return core.View{Style: core.Style{Gap: 16}, Children: []core.Node{sectionDivider(cx), contentSection(cx, "", "", info, actions)}}
 		}),
 	}}
 }

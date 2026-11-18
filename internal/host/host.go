@@ -18,9 +18,7 @@ import (
 	"github.com/monkeyWie/reignhub/internal/store"
 	"golang.org/x/crypto/bcrypt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -46,22 +44,30 @@ type Intent struct {
 	Remember bool              `json:"remember"`
 }
 type Manager struct {
-	mu         sync.Mutex
-	activation sync.Mutex
-	cfg        config.Config
-	state      saved
-	pending    map[string]deviceservice.Pair
-	intents    map[string]Intent
-	status     string
-	network    *remote.HostStatus
-	d          *control.Dispatcher
-	ice        func(config.Config) remote.Options
-	path       string
-	attempts   map[string][]time.Time
+	mu            sync.Mutex
+	activation    sync.Mutex
+	configMu      sync.Mutex
+	cfg           config.Config
+	state         saved
+	pending       map[string]deviceservice.Pair
+	intents       map[string]Intent
+	status        string
+	network       *remote.HostStatus
+	d             *control.Dispatcher
+	ice           func(config.Config) remote.Options
+	path          string
+	attempts      map[string][]time.Time
+	agentAttempts map[string]context.CancelFunc
+	agentWake     map[string]chan struct{}
 }
 
 func New(c config.Config, d *control.Dispatcher, ice func(config.Config) remote.Options) *Manager {
-	return &Manager{cfg: c, d: d, ice: ice, pending: map[string]deviceservice.Pair{}, intents: map[string]Intent{}, attempts: map[string][]time.Time{}, status: "尚未配置设备服务"}
+	m := &Manager{cfg: c, d: d, ice: ice, pending: map[string]deviceservice.Pair{}, intents: map[string]Intent{}, attempts: map[string][]time.Time{}, agentAttempts: map[string]context.CancelFunc{}, agentWake: map[string]chan struct{}{}, status: "尚未配置设备服务"}
+	d.ProviderEnabled = m.agentEnabled
+	for id := range d.Providers {
+		m.agentWake[id] = make(chan struct{}, 1)
+	}
+	return m
 }
 func (m *Manager) save() error { return saveIdentity(m.path, m.state) }
 func saveIdentity(path string, s saved) error {
@@ -80,25 +86,88 @@ func (m *Manager) Network() control.NetworkStatus {
 	return out
 }
 
-// Reconcile attachable Agents independently of device registration and pairing.
-// This never launches an Agent; disruptive setup remains a local user action.
+// Each integration owns its retry loop and setup budget. Neither network
+// registration nor a slow Agent can hold up another integration.
 func (m *Manager) autoConnect(ctx context.Context) {
-	tick := time.NewTicker(5 * time.Second)
-	defer tick.Stop()
-	for {
-		for _, p := range m.d.Providers {
-			if connector, ok := p.(provider.AutoConnector); ok {
-				attempt, cancel := context.WithTimeout(ctx, 10*time.Second)
-				_ = connector.AutoConnect(attempt)
-				cancel()
-			}
+	var workers sync.WaitGroup
+	for id, p := range m.d.Providers {
+		connector, ok := p.(provider.AutoConnector)
+		if !ok {
+			continue
 		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-tick.C:
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			for ctx.Err() == nil {
+				attempt, cancel := context.WithTimeout(ctx, 30*time.Second)
+				m.mu.Lock()
+				enabled := m.cfg.AgentIsEnabled(id)
+				if enabled {
+					m.agentAttempts[id] = cancel
+				}
+				m.mu.Unlock()
+				if enabled {
+					_ = connector.AutoConnect(attempt)
+				}
+				cancel()
+				m.mu.Lock()
+				delete(m.agentAttempts, id)
+				m.mu.Unlock()
+				timer := time.NewTimer(5 * time.Second)
+				select {
+				case <-ctx.Done():
+					timer.Stop()
+					return
+				case <-m.agentWake[id]:
+					timer.Stop()
+				case <-timer.C:
+				}
+			}
+		}()
+	}
+	workers.Wait()
+}
+
+func (m *Manager) agentEnabled(id string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.cfg.AgentIsEnabled(id)
+}
+
+// Disabling blocks new access and attachment; it does not terminate a user's
+// App or interrupt tasks already accepted by an owned runtime.
+func (m *Manager) setAgentEnabled(id string, enabled bool) error {
+	if m.d.Providers[id] == nil {
+		return fmt.Errorf("未知 Agent")
+	}
+	m.configMu.Lock()
+	defer m.configMu.Unlock()
+	m.mu.Lock()
+	previous := m.cfg.AgentEnabled
+	next := make(map[string]bool, len(previous)+1)
+	for key, value := range previous {
+		next[key] = value
+	}
+	next[id] = enabled
+	config := m.cfg
+	config.AgentEnabled = next
+	m.mu.Unlock()
+	if err := config.Save(); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.cfg.AgentEnabled = next
+	if !enabled {
+		if cancel := m.agentAttempts[id]; cancel != nil {
+			cancel()
 		}
 	}
+	select {
+	case m.agentWake[id] <- struct{}{}:
+	default:
+	}
+	return nil
 }
 func (m *Manager) Run(ctx context.Context) {
 	done := make(chan struct{})
@@ -287,10 +356,7 @@ func (m *Manager) poll(ctx context.Context) {
 			uiPath := m.cfg.UIPath
 			m.mu.Unlock()
 			// Bring the local authorization window forward, including when it was closed.
-			if runtime.GOOS == "darwin" && strings.HasSuffix(uiPath, ".app") {
-				cmd := exec.CommandContext(ctx, "/usr/bin/open", uiPath)
-				_ = cmd.Run()
-			}
+			showAuthorizationWindow(ctx, uiPath)
 		}
 		if in.Password != "" {
 			ok := len(recent) < 5 && password != "" && bcrypt.CompareHashAndPassword([]byte(password), []byte(in.Password)) == nil
@@ -365,6 +431,7 @@ func (m *Manager) Local(ctx context.Context, r control.Request) (any, error) {
 		Allow                                            bool
 		Remember                                         bool
 		ClearPassword                                    bool
+		Enabled                                          *bool
 	}
 	if len(r.Params) > 0 {
 		if e := json.Unmarshal(r.Params, &in); e != nil {
@@ -372,6 +439,11 @@ func (m *Manager) Local(ctx context.Context, r control.Request) (any, error) {
 		}
 	}
 	switch r.Method {
+	case "host.agent.enabled":
+		if in.Enabled == nil {
+			return nil, fmt.Errorf("缺少 Agent 开关状态")
+		}
+		return nil, m.setAgentEnabled(in.Provider, *in.Enabled)
 	case "host.agents":
 		m.mu.Lock()
 		defer m.mu.Unlock()
@@ -387,6 +459,8 @@ func (m *Manager) Local(ctx context.Context, r control.Request) (any, error) {
 		if err := agents.Validate(edit.ID, edit.Agent); err != nil {
 			return nil, err
 		}
+		m.configMu.Lock()
+		defer m.configMu.Unlock()
 		m.mu.Lock()
 		defer m.mu.Unlock()
 		if m.cfg.Agents == nil {
@@ -439,6 +513,8 @@ func (m *Manager) Local(ctx context.Context, r control.Request) (any, error) {
 		if e != nil {
 			return nil, e
 		}
+		m.configMu.Lock()
+		defer m.configMu.Unlock()
 		m.mu.Lock()
 		defer m.mu.Unlock()
 		m.cfg.ServiceURL = url
@@ -493,20 +569,8 @@ func (m *Manager) Local(ctx context.Context, r control.Request) (any, error) {
 		if e := p.Start(ctx); e != nil {
 			return nil, e
 		}
-		// Remember backend setup for providers that own a managed backend.
-		// CLI attachment is discovered automatically and needs no saved switch.
-		managed, ownsRuntime := p.(provider.ManagedProvider)
-		if p.Status(ctx).Capabilities.Desktop || ownsRuntime && managed.Managed() {
-			m.mu.Lock()
-			if m.cfg.ManagedAgents == nil {
-				m.cfg.ManagedAgents = map[string]bool{}
-			}
-			m.cfg.ManagedAgents[in.Provider] = true
-			e := m.cfg.Save()
-			m.mu.Unlock()
-			if e != nil {
-				return nil, e
-			}
+		if err := m.setAgentEnabled(in.Provider, true); err != nil {
+			return nil, err
 		}
 		if r.Method == "host.activate" {
 			return nil, p.ConnectDesktop(ctx, r.Expected, r.ConfirmRestart)

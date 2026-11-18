@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -65,8 +64,8 @@ func spawn(parent context.Context, def config.Agent, extra []string, cwd string)
 	if err != nil {
 		return nil, err
 	}
-	if runtime.GOOS == "windows" && (strings.EqualFold(filepath.Ext(path), ".cmd") || strings.EqualFold(filepath.Ext(path), ".bat")) {
-		return nil, errors.New("请配置 Agent 的 .exe 或使用 node.exe 加脚本路径启动，避免通过 shell 解释参数")
+	if err := validateExecutable(path); err != nil {
+		return nil, err
 	}
 	life, cancel := context.WithCancel(parent)
 	cmd := exec.CommandContext(life, path, append(append([]string{}, def.Args...), extra...)...)

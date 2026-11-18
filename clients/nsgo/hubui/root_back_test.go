@@ -39,10 +39,10 @@ func TestAndroidBackConfirmationResetsAfterNavigation(t *testing.T) {
 	app := nsgotest.Start(t, func(cx *core.Scope) core.Node { return RootWithAPI(cx, &mobileDemo{newDemoAPI()}, true) }, nsgotest.Size(390, 844), nsgotest.Environment(core.Environment{OS: core.OSAndroid, Idiom: core.IdiomPhone}))
 	app.WaitFor("id:device-demo-device", time.Second)
 	app.Back()
-	app.Press("id:device-demo-device")
-	app.WaitFor("id:session-demo-chat", time.Second)
+	app.WaitFor(sessionSelector("demo-device", "codex-app", "demo-chat"), time.Second)
+	app.Press(sessionSelector("demo-device", "codex-app", "demo-chat"))
 	app.Back()
-	app.Find("id:mobile-devices")
+	app.Find("id:session-sidebar")
 	app.Back()
 	app.Find("text:" + rootBackHint)
 	if app.BackUnhandled != 0 {
@@ -51,7 +51,7 @@ func TestAndroidBackConfirmationResetsAfterNavigation(t *testing.T) {
 	// Dismissing a modal consumes Back before the root exit guard.
 	app.Press("id:connect-device")
 	app.Back()
-	app.Find("id:mobile-devices")
+	app.Find("id:session-sidebar")
 	if app.BackUnhandled != 0 {
 		t.Fatal("dismissing a modal exited the app")
 	}

@@ -3,15 +3,119 @@ package hubui
 import (
 	"context"
 	"errors"
+	"fmt"
+	"reflect"
+	"sort"
+	"time"
 
 	"github.com/monkeyWie/reignhub/internal/provider"
 )
 
-// A cold directory starts with one metadata page per provider. Full directory
-// reconciliation runs independently; none of these paths requests transcripts.
-func (s *State) loadCatalogue(ctx context.Context, cancel context.CancelFunc, generation uint64, target string, known map[string]bool) {
+// Each environment owns its directory lifetime. Navigation never cancels it.
+// Generations fence late callbacks after reconnect, removal or manual refresh.
+type catalogueState struct {
+	generation                            uint64
+	cancel                                context.CancelFunc
+	polling, manual, cached, cacheLoading bool
+	loaded                                bool
+	completed                             map[string]bool
+	nextPoll                              time.Time
+}
+
+func (s *State) catalogue(target string) *catalogueState {
+	if s.catalogues == nil {
+		s.catalogues = map[string]*catalogueState{}
+	}
+	if s.catalogues[target] == nil {
+		s.catalogues[target] = &catalogueState{completed: map[string]bool{}}
+	}
+	return s.catalogues[target]
+}
+func (s *State) anyConnected() bool {
+	for _, d := range s.devices {
+		if s.connectionReady(str(d, "id")) {
+			return true
+		}
+	}
+	return false
+}
+func (s *State) cancelTargetCatalogue(target string) {
+	c := s.catalogue(target)
+	if c.cancel != nil {
+		c.cancel()
+		c.cancel = nil
+	}
+	c.generation++
+	c.nextPoll = time.Time{}
+	c.polling, c.manual = false, false
+	s.catalogueProgress()
+}
+func (s *State) catalogueProgress() {
+	s.polling, s.manualRefresh, s.cacheLoading = false, false, false
+	for _, c := range s.catalogues {
+		s.polling = s.polling || c.polling
+		s.manualRefresh = s.manualRefresh || c.manual
+		s.cacheLoading = s.cacheLoading || c.cacheLoading
+	}
+}
+func (s *State) reconcileEnvironments() {
+	known := map[string]bool{}
+	for _, d := range s.devices {
+		id := str(d, "id")
+		known[id] = true
+		c := s.catalogue(id)
+		w := s.workspace(id)
+		s.workspaces[id] = w
+		if !c.cached {
+			s.loadCachedWorkspace(id)
+		}
+		if !flag(d, "connected") && c.polling {
+			s.cancelTargetCatalogue(id)
+		}
+	}
+	for id := range s.catalogues {
+		if !known[id] {
+			s.cancelTargetCatalogue(id)
+			delete(s.catalogues, id)
+			delete(s.workspaces, id)
+		}
+	}
+	s.publishWorkspaces()
+	s.catalogueVersion++
+	s.pollCatalogues()
+}
+func (s *State) pollCatalogues() {
+	if s.suspended || s.ctx.Err() != nil {
+		return
+	}
+	manual := s.manualRefresh
+	for _, d := range s.devices {
+		target := str(d, "id")
+		c := s.catalogue(target)
+		if c.polling || !s.connectionReady(target) || !manual && time.Now().Before(c.nextPoll) {
+			continue
+		}
+		c.polling, c.manual = true, manual
+		c.generation++
+		generation := c.generation
+		ctx, cancel := context.WithCancel(s.ctx)
+		c.cancel = cancel
+		known := map[string]bool{}
+		for _, session := range s.workspaces[target].sessions {
+			known[str(session, "providerId")] = true
+		}
+		go s.loadCatalogue(ctx, cancel, c, generation, target, known)
+	}
+	s.catalogueProgress()
+	s.changed()
+}
+
+// Metadata only: no background transcript downloads for unselected sessions.
+func (s *State) loadCatalogue(ctx context.Context, cancel context.CancelFunc, instance *catalogueState, generation uint64, target string, known map[string]bool) {
 	defer cancel()
-	current := func() bool { return s.ctx.Err() == nil && generation == s.pollGeneration && s.target == target }
+	current := func() bool {
+		return s.ctx.Err() == nil && s.catalogues[target] == instance && generation == s.catalogues[target].generation
+	}
 	v, err := rpc(ctx, s.api, target, "", "", "providers", nil)
 	providers := visibleProviders(objects(v))
 	if err == nil {
@@ -19,31 +123,41 @@ func (s *State) loadCatalogue(ctx context.Context, cancel context.CancelFunc, ge
 			if !current() {
 				return
 			}
-			s.providers = providers
-			// Discovery reports current availability, not authoritative deletions.
-			// Only a successful directory reconciliation may remove cached sessions.
-			s.rememberWorkspace()
+			w := s.workspace(target)
+			if !reflect.DeepEqual(w.providers, providers) {
+				s.catalogueVersion++
+			}
+			w.providers = providers
+			s.workspaces[target] = w
+			s.publishWorkspaces()
 			s.changed()
 		})
 		results := make(chan error, len(providers))
+		slots := make(chan struct{}, 4)
 		count := 0
 		for _, p := range providers {
-			if p["installed"] == false {
-				continue
-			}
-			if !providerReady(p) && !flag(object(p["capabilities"]), "history") {
+			// History is a capability, not availability or deletion authority. Retain
+			// cached sessions and resume synchronization when the Agent becomes ready.
+			if p["installed"] == false || !providerReady(p) {
 				continue
 			}
 			providerID := str(p, "id")
 			count++
 			go func() {
+				select {
+				case slots <- struct{}{}:
+					defer func() { <-slots }()
+				case <-ctx.Done():
+					results <- ctx.Err()
+					return
+				}
 				if !known[providerID] {
 					page, previewErr := rpc(ctx, s.api, target, providerID, "", "sessions", nil)
 					if previewErr == nil {
 						sessions := objects(object(page)["sessions"])
 						s.cx.Post(func() {
 							if current() {
-								s.applyCataloguePage(providerID, sessions, false)
+								s.applyEnvironmentPage(target, providerID, sessions, false)
 							}
 						})
 					}
@@ -53,14 +167,17 @@ func (s *State) loadCatalogue(ctx context.Context, cancel context.CancelFunc, ge
 					sessions := objects(list)
 					s.cx.Post(func() {
 						if current() {
-							s.applyCataloguePage(providerID, sessions, true)
+							s.applyEnvironmentPage(target, providerID, sessions, true)
 						}
 					})
+				}
+				if syncErr != nil {
+					syncErr = fmt.Errorf("%s: %w", providerID, syncErr)
 				}
 				results <- syncErr
 			}()
 		}
-		failures := []error{}
+		var failures []error
 		for range count {
 			if e := <-results; e != nil {
 				failures = append(failures, e)
@@ -72,41 +189,93 @@ func (s *State) loadCatalogue(ctx context.Context, cancel context.CancelFunc, ge
 		if !current() {
 			return
 		}
-		s.polling = false
-		s.manualRefresh = false
-		s.pollCancel = nil
+		c := s.catalogue(target)
+		c.polling, c.manual, c.cancel = false, false, nil
+		c.loaded = true
+		c.nextPoll = time.Now().Add(2 * time.Second)
+		s.catalogueProgress()
 		s.setConnectionIssue(target, "catalogue", err)
 		s.changed()
-		s.autoReconnect()
 	})
 }
-
+func (s *State) workspace(target string) workspaceCache {
+	if s.workspaces == nil {
+		s.workspaces = map[string]workspaceCache{}
+	}
+	w, ok := s.workspaces[target]
+	if !ok {
+		for _, session := range s.sessions {
+			id := str(session, "deviceId")
+			if id == target || id == "" && target == s.target {
+				w.sessions = append(w.sessions, session)
+			}
+		}
+		if target == s.target {
+			w.providers = s.providers
+		}
+	}
+	return w
+}
+func (s *State) publishWorkspaces() {
+	keys := make([]string, 0, len(s.workspaces))
+	for id := range s.workspaces {
+		keys = append(keys, id)
+	}
+	sort.Strings(keys)
+	var sessions []Object
+	for _, id := range keys {
+		for _, session := range s.workspaces[id].sessions {
+			if !visibleSession(session) {
+				continue
+			}
+			entry := copyObject(session)
+			entry["deviceId"] = id
+			sessions = append(sessions, entry)
+		}
+	}
+	s.providers = s.workspaces[s.target].providers
+	if !reflect.DeepEqual(s.sessions, sessions) {
+		s.sessions = sessions
+		s.catalogueVersion++
+	}
+}
 func (s *State) applyCataloguePage(providerID string, incoming []Object, complete bool) {
-	// An incomplete first page must not delete older cached sessions. The complete
-	// incremental directory remains authoritative for deletions and reconciliation.
+	s.applyEnvironmentPage(s.target, providerID, incoming, complete)
+}
+func (s *State) applyEnvironmentPage(target, providerID string, incoming []Object, complete bool) {
+	s.observeSessionActivity(target, incoming)
+	if complete {
+		s.reconcileSessionRemovals(target, providerID, incoming)
+	}
+	w := s.workspace(target)
 	merged := map[string]Object{}
-	for _, session := range s.sessions {
+	previous := map[string]Object{}
+	for _, session := range w.sessions {
+		previous[str(session, "providerId")+"|"+str(session, "id")] = session
 		if visibleSession(session) && (!complete || str(session, "providerId") != providerID) {
 			merged[str(session, "providerId")+"|"+str(session, "id")] = session
 		}
 	}
 	for _, session := range incoming {
 		if str(session, "providerId") == providerID && visibleSession(session) {
-			merged[providerID+"|"+str(session, "id")] = session
+			key := providerID + "|" + str(session, "id")
+			next := copyObject(session)
+			next["recencyAt"] = max(number(previous[key], "recencyAt"), number(session, "recencyAt"))
+			merged[key] = next
 		}
 	}
-	s.sessions = make([]Object, 0, len(merged))
+	w.sessions = make([]Object, 0, len(merged))
 	for _, session := range merged {
-		s.sessions = append(s.sessions, session)
+		w.sessions = append(w.sessions, session)
 	}
-	s.catalogueVersion++
-	s.rememberWorkspace()
+	sort.Slice(w.sessions, func(i, j int) bool { return sessionIdentity(w.sessions[i]) < sessionIdentity(w.sessions[j]) })
+	s.workspaces[target] = w
+	if complete {
+		s.catalogue(target).completed[providerID] = true
+	}
+	s.publishWorkspaces()
 	s.changed()
 }
-
 func visibleSession(s Object) bool {
-	return str(s, "providerId") != "codex-vscode" && provider.SyncSession(provider.Session{
-		ProviderID: str(s, "providerId"), Source: str(s, "source"),
-		SourceKind: str(s, "sourceKind"), Originator: str(s, "originator"),
-	})
+	return str(s, "providerId") != "codex-vscode" && provider.SyncSession(provider.Session{ProviderID: str(s, "providerId"), Source: str(s, "source"), SourceKind: str(s, "sourceKind"), Originator: str(s, "originator")})
 }

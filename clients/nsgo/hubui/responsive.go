@@ -7,14 +7,14 @@ import (
 )
 
 // Layout depends only on the available viewport, never the platform or OS.
-// Compact uses a page stack; medium keeps the device sidebar; wide also keeps
-// the session directory next to the conversation.
+// Compact uses a page stack; larger viewports keep the unified directory
+// next to the conversation. The wide breakpoint only tunes content styling.
 const (
 	compactBreakpoint core.Points = 650
 	wideBreakpoint    core.Points = 1000
 )
 
-func (s *State) narrowLayout() bool { return s.width.Get() < wideBreakpoint }
+func (s *State) narrowLayout() bool { return s.width.Get() < compactBreakpoint }
 
 // Card collections respond to their container, independently of page/sidebar
 // breakpoints. Clamp the track minimum below the preferred card width so a

@@ -277,6 +277,27 @@ func (s *State) rebuildMessages() {
 	positions := map[string]int{}
 	for i, row := range s.messageRows {
 		positions[row.ID] = i
+		// A completed process group replaces its earlier live rows. Pending
+		// submissions keep their predecessor when those rows are folded.
+		for _, detail := range row.Details {
+			positions[detail.ID] = i
+		}
+	}
+	// A turn-wide process summary can include records after a visible steer.
+	// Keep pending submissions after that steer, even when their immediate
+	// predecessor has moved into the earlier summary.
+	for _, turn := range objects(s.transcript["turns"]) {
+		previous := -1
+		for _, item := range objects(turn["items"]) {
+			id := str(turn, "id") + "|" + str(item, "id")
+			if str(item, "role") == "tool" {
+				id = str(turn, "id") + "|tools|" + str(item, "id")
+			}
+			if position, ok := positions[id]; ok {
+				previous = max(previous, position)
+				positions[id] = previous
+			}
+		}
 	}
 	buckets := make([][]Message, len(s.messageRows)+1)
 	for _, m := range s.outgoing[s.key()] {

@@ -39,6 +39,28 @@ type Hub struct {
 	connections map[string]*remote.Client
 	busy        map[string]bool
 	generation  map[string]uint64
+	local       control.Caller
+	localName   string
+}
+
+// SetLocal attaches an application-owned runtime. Closing a controller or
+// disconnecting a remote peer must not stop local Agent execution.
+func (h *Hub) SetLocal(c control.Caller, name string) {
+	h.mu.Lock()
+	h.local, h.localName = c, name
+	h.mu.Unlock()
+}
+
+func (h *Hub) caller(id string) control.Caller {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if id == control.LocalTarget {
+		return h.local
+	}
+	if c := h.connections[id]; c != nil {
+		return c
+	}
+	return nil
 }
 
 func New(dir string) (*Hub, error) {
@@ -102,6 +124,12 @@ func (h *Hub) List() ([]map[string]any, error) {
 		return nil, e
 	}
 	r := []map[string]any{}
+	h.mu.Lock()
+	local, name := h.local, h.localName
+	h.mu.Unlock()
+	if local != nil {
+		r = append(r, map[string]any{"id": control.LocalTarget, "name": name, "local": true, "connected": true, "path": "In-process"})
+	}
 	for _, k := range keys {
 		var s Saved
 		if e = h.DB.Get(k, &s); e != nil {
@@ -343,6 +371,9 @@ func (h *Hub) connect(ctx context.Context, service, code, public, password, name
 	return s, nil
 }
 func (h *Hub) Disconnect(id string) error {
+	if id == control.LocalTarget {
+		return fmt.Errorf("本机环境不能断开；请在 Agent 设置中管理本机接入")
+	}
 	h.mu.Lock()
 	h.generation[id]++
 	c := h.connections[id]
@@ -361,6 +392,9 @@ func (h *Hub) Disconnect(id string) error {
 	return nil
 }
 func (h *Hub) Forget(id string) error {
+	if id == control.LocalTarget {
+		return fmt.Errorf("本机环境不能移除")
+	}
 	_ = h.Assets.Clear(id)
 	h.Disconnect(id)
 	keys, e := h.DB.Keys("rpc:" + id + ":")
@@ -389,9 +423,7 @@ func (h *Hub) Call(ctx context.Context, id string, r control.Request) (any, erro
 	cacheRequest.Fresh = false
 	raw, _ := json.Marshal(cacheRequest)
 	cacheKey := "rpc:" + id + ":" + string(raw)
-	h.mu.Lock()
-	c := h.connections[id]
-	h.mu.Unlock()
+	c := h.caller(id)
 	if c == nil || c.Path() == "Disconnected" {
 		if !r.Fresh && control.ReadOnly(r.Method) {
 			var data any
@@ -461,9 +493,7 @@ func (h *Hub) Sync(ctx context.Context, id, p string) (any, error) {
 		Items  map[string]map[string]any
 	}
 	_ = h.DB.Get("directory:"+id+":"+p, &state)
-	h.mu.Lock()
-	c := h.connections[id]
-	h.mu.Unlock()
+	c := h.caller(id)
 	if c == nil || c.Path() == "Disconnected" {
 		return nil, fmt.Errorf("设备离线：保留本地会话，连接后重试同步")
 	}

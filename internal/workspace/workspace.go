@@ -2,6 +2,10 @@
 package workspace
 
 import (
+	"crypto/sha256"
+	"fmt"
+	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,7 +24,10 @@ type checkout struct{ root, repository, gitDir string }
 
 // Resolver caches filesystem reads for one catalogue snapshot/request. Nothing
 // is persisted: newly created projects and worktrees are picked up next time.
-type Resolver struct{ paths map[string]checkout }
+type Resolver struct {
+	paths        map[string]checkout
+	repositories map[string]string
+}
 
 func (r *Resolver) directory(path string) checkout {
 	path = CanonicalPath(path)
@@ -92,7 +99,84 @@ func (r *Resolver) Session(session provider.Session) provider.Session {
 		info := r.directory(session.CWD)
 		session.ProjectDir = info.repository
 	}
+	if session.ProjectKey == "" && session.ProjectDir != "" {
+		info := r.directory(session.ProjectDir)
+		if key := r.repositoryKey(info.gitDir); key != "" {
+			// Explicit subprojects keep their repository-relative identity.
+			rel, err := filepath.Rel(info.repository, session.ProjectDir)
+			if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+				session.ProjectKey = key + ":" + filepath.ToSlash(rel)
+			}
+		}
+	}
 	return session
+}
+
+func (r *Resolver) repositoryKey(gitDir string) string {
+	if gitDir == "" {
+		return ""
+	}
+	if key, ok := r.repositories[gitDir]; ok {
+		return key
+	}
+	if r.repositories == nil {
+		r.repositories = map[string]string{}
+	}
+	r.repositories[gitDir] = ""
+	f, err := os.Open(filepath.Join(gitDir, "config"))
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	raw, err := io.ReadAll(io.LimitReader(f, 128<<10))
+	if err != nil {
+		return ""
+	}
+	origin := false
+	for _, line := range strings.Split(string(raw), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "[") {
+			origin = line == `[remote "origin"]`
+			continue
+		}
+		if !origin {
+			continue
+		}
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) != 2 || strings.TrimSpace(parts[0]) != "url" {
+			continue
+		}
+		key := repositoryIdentity(strings.Trim(strings.TrimSpace(parts[1]), `"`))
+		r.repositories[gitDir] = key
+		return key
+	}
+	return ""
+}
+
+// Credentials, query parameters and fragments never leave the owning host.
+// SSH and HTTPS routes to the same repository share an opaque identity.
+func repositoryIdentity(remote string) string {
+	if !strings.Contains(remote, "://") {
+		if at := strings.Index(remote, "@"); at >= 0 {
+			remote = remote[at+1:]
+			if colon := strings.Index(remote, ":"); colon >= 0 {
+				remote = "ssh://" + remote[:colon] + "/" + remote[colon+1:]
+			}
+		}
+	}
+	u, err := url.Parse(remote)
+	if err != nil || u.Hostname() == "" || u.Scheme == "file" {
+		return ""
+	}
+	path := strings.TrimSuffix(strings.Trim(u.Path, "/"), ".git")
+	if path == "" {
+		return ""
+	}
+	host := strings.ToLower(u.Hostname())
+	if port := u.Port(); port != "" && !(u.Scheme == "ssh" && port == "22" || u.Scheme == "https" && port == "443" || u.Scheme == "http" && port == "80") {
+		host += ":" + port
+	}
+	return fmt.Sprintf("git:%x", sha256.Sum256([]byte(host+"/"+path)))
 }
 
 // Result enriches the common API boundary without mutating provider snapshots.

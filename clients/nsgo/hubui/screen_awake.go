@@ -20,7 +20,7 @@ func (s *State) observeScreenAwake() {
 		if width < compactBreakpoint {
 			return s.phoneRoute.Get() == "chat:"+s.key()
 		}
-		return width >= wideBreakpoint || s.narrowChat
+		return true
 	})
 	s.cx.Effect(func() { set(wanted.Get()) })
 }

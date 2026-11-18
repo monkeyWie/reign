@@ -1,6 +1,7 @@
 package hubui
 
 import (
+	"context"
 	_ "github.com/nsgo-dev/nsgo"
 	"github.com/nsgo-dev/nsgo/core"
 	"github.com/nsgo-dev/nsgo/nsgotest"
@@ -11,20 +12,19 @@ import (
 func TestMain(m *testing.M) { nsgotest.Main(m) }
 func startDemo(t *testing.T, w, h core.Points) *nsgotest.App {
 	t.Helper()
-	return nsgotest.Start(t, func(cx *core.Scope) core.Node { return RootWithAPI(cx, newDemoAPI(), true) }, nsgotest.Size(w, h), nsgotest.Environment(core.Environment{OS: core.OSMacOS, Idiom: core.IdiomDesktop, Locale: "zh-CN"}))
+	return nsgotest.Start(t, func(cx *core.Scope) core.Node { return RootWithAPI(cx, &localDemo{newDemoAPI()}, true) }, nsgotest.Size(w, h), nsgotest.Environment(core.Environment{OS: core.OSMacOS, Idiom: core.IdiomDesktop, Locale: "zh-CN"}))
 }
 func openDemoChat(t *testing.T, app *nsgotest.App) {
 	t.Helper()
 	app.WaitFor("id:device-demo-device", 3*time.Second)
-	app.Press("id:device-demo-device")
-	app.WaitFor("id:session-demo-chat", 5*time.Second)
-	app.Press("id:session-demo-chat")
+	app.WaitFor(sessionSelector("demo-device", "codex-app", "demo-chat"), 5*time.Second)
+	app.Press(sessionSelector("demo-device", "codex-app", "demo-chat"))
 	app.WaitFor("id:chat-input", 3*time.Second)
 	app.WaitFor("id:message-demo-turn|demo-assistant", 5*time.Second)
 }
 func TestDesktopNavigationAndDrafts(t *testing.T) {
 	app := startDemo(t, 1320, 880)
-	app.WaitFor("id:local-dashboard", 3*time.Second)
+	app.WaitFor("id:session-sidebar", 3*time.Second)
 	app.Screenshot("desktop-dashboard")
 	openDemoChat(t, app)
 	if width := app.Find("id:session-sidebar").Frame.Size.Width; width != 300 {
@@ -38,9 +38,9 @@ func TestDesktopNavigationAndDrafts(t *testing.T) {
 	if app.Find("id:chat-input").ID != inputID {
 		t.Fatal("poll rebuilt editor")
 	}
-	app.Press("id:session-demo-cli")
+	app.Press(sessionSelector("demo-device", "codex-cli", "demo-cli"))
 	app.WaitFor("id:chat-input", 3*time.Second)
-	app.Press("id:session-demo-chat")
+	app.Press(sessionSelector("demo-device", "codex-app", "demo-chat"))
 	app.WaitUntil(3*time.Second, func() bool { return app.Find("id:chat-input").Text == "未发送的草稿" })
 	app.Screenshot("desktop-conversation")
 	app.Press("id:theme-toggle")
@@ -70,20 +70,16 @@ func TestPhoneNavigation(t *testing.T) {
 	app.Press("id:back-sessions")
 	app.Find("id:session-sidebar")
 	app.Screenshot("phone-sessions")
-	app.Press("id:session-demo-chat")
+	app.Press(sessionSelector("demo-device", "codex-app", "demo-chat"))
 	app.WaitUntil(time.Second, func() bool { return app.Find("id:chat-input").Text == "手机草稿" })
 	app.Back()
 	app.Find("id:session-sidebar")
 	app.Back()
-	app.Find("id:mobile-devices")
-	app.Find("text:工作电脑")
-	app.Find("text:ID 123456")
-	app.Find("text:在线")
-	// Returning to the same device must reopen its sessions, not silently return.
-	app.Press("id:device-demo-device")
 	app.Find("id:session-sidebar")
-	app.Press("id:back-devices")
-	app.Find("id:mobile-devices")
+	app.Press("id:device-demo-device")
+	app.Find("id:dialog-device")
+	app.Press("id:dialog-device-close")
+	app.Find("id:session-sidebar")
 }
 func TestComposerSubmit(t *testing.T) {
 	app := startDemo(t, 1320, 880)
@@ -95,6 +91,8 @@ func TestComposerSubmit(t *testing.T) {
 
 func TestDeviceCopyFeedback(t *testing.T) {
 	app := startDemo(t, 1320, 880)
+	app.WaitFor("id:session-sidebar", 3*time.Second)
+	app.Press("id:device-local")
 	app.WaitFor("id:device-code", 3*time.Second)
 	app.WaitUntil(3*time.Second, func() bool { return app.Find("id:device-code").Text == "266 556" })
 	app.Press("id:copy-device-id")
@@ -104,13 +102,21 @@ func TestDeviceCopyFeedback(t *testing.T) {
 	if app.Exists("id:notice") {
 		t.Fatal("copy must not show a corner notification")
 	}
-	app.Find("role:button 已复制")
+	if app.Find("id:copy-device-id").Props.Label != "已复制" {
+		t.Fatal("copy button did not show confirmation")
+	}
 	app.Screenshot("device-copy-feedback")
-	app.WaitUntil(3*time.Second, func() bool { return app.Exists("role:button 复制 ID") && !app.Exists("id:notice") })
+	app.WaitUntil(3*time.Second, func() bool {
+		return app.Find("id:copy-device-id").Props.Label == "复制 ID" && !app.Exists("id:notice")
+	})
 	app.Press("id:copy-device-id")
-	app.Find("role:button 已复制")
+	if app.Find("id:copy-device-id").Props.Label != "已复制" {
+		t.Fatal("copy button did not show confirmation")
+	}
 	app.Press("id:copy-device-id")
-	app.WaitUntil(3*time.Second, func() bool { return app.Exists("role:button 复制 ID") && !app.Exists("id:notice") })
+	app.WaitUntil(3*time.Second, func() bool {
+		return app.Find("id:copy-device-id").Props.Label == "复制 ID" && !app.Exists("id:notice")
+	})
 }
 
 func TestLiveStatusAndEditorStability(t *testing.T) {
@@ -157,4 +163,18 @@ func TestLiveStatusAndEditorStability(t *testing.T) {
 	}
 	app.Hover("id:message-t|a")
 	app.Find("id:message-actions-t|a")
+}
+
+func sessionSelector(target, agent, id string) string {
+	return "id:" + sessionRowID("all", Object{"deviceId": target, "providerId": agent, "id": id})
+}
+
+type localDemo struct{ *demoAPI }
+
+func (d *localDemo) Call(ctx context.Context, method string, p Object, target string, r Object) (any, error) {
+	v, err := d.demoAPI.Call(ctx, method, p, target, r)
+	if method == "client.list" {
+		return append([]Object{{"id": "local", "name": "本机", "local": true, "connected": true}}, objects(v)...), err
+	}
+	return v, err
 }

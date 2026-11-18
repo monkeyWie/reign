@@ -14,6 +14,74 @@ import (
 	"github.com/monkeyWie/reignhub/internal/events"
 )
 
+func TestIPCCompletionPublishesFullAnswerBeforeTerminalStatus(t *testing.T) {
+	for _, version := range []int{11, 13} {
+		t.Run(fmt.Sprint(version), func(t *testing.T) {
+			p := New(config.Config{DataDir: t.TempDir()}, "", events.New())
+			b := newAppIPC(p)
+			defer b.cancel()
+			p.ipc = b
+			b.followed["s"] = &followedThread{owner: "app", changed: make(chan struct{})}
+			state := map[string]any{"id": "s", "turns": []any{map[string]any{"turnId": "t", "status": "inProgress", "items": []any{
+				map[string]any{"id": "progress", "type": "agentMessage", "phase": "commentary", "text": "Working"},
+				map[string]any{"id": "answer", "type": "agentMessage", "phase": "final_answer", "text": "Ready"},
+			}}}}
+			broadcast := func(change any) {
+				b.Broadcast(codexipc.Message{Method: "thread-stream-state-changed", Source: "app", Version: version, Params: rawJSON(map[string]any{"hostId": "local", "conversationId": "s", "change": change})})
+			}
+			broadcast(map[string]any{"type": "snapshot", "revision": 1, "conversationState": state})
+			epoch, cursor := p.stream().log.Position()
+			broadcast(map[string]any{"type": "patches", "baseRevision": 1, "revision": 2, "patches": []any{
+				map[string]any{"op": "replace", "path": []any{"turns", 0, "status"}, "value": "completed"},
+				map[string]any{"op": "add", "path": []any{"turns", 0, "durationMs"}, "value": 135123},
+				map[string]any{"op": "replace", "path": []any{"turns", 0, "items", 1, "text"}, "value": "Ready to use"},
+			}})
+			batch, err := p.stream().log.Probe(context.Background(), "s", epoch, cursor)
+			if err != nil {
+				t.Fatal(err)
+			}
+			answer, terminal := -1, -1
+			for i, event := range batch.Events {
+				if event.ItemID == "answer" && event.Kind == "item" && event.Item.Text == "Ready to use" && event.Item.Phase == "final_answer" {
+					answer = i
+				}
+				if event.Kind == "turn" && event.Status == "completed" {
+					terminal = i
+					if event.DurationMS == nil || *event.DurationMS != 135123 {
+						t.Fatal("completion lost elapsed time")
+					}
+				}
+			}
+			if answer < 0 || terminal <= answer {
+				t.Fatalf("final answer was sent as an ignorable late delta: %+v", batch.Events)
+			}
+			epoch, cursor = p.stream().log.Position()
+			broadcast(map[string]any{"type": "patches", "baseRevision": 2, "revision": 3, "patches": []any{
+				map[string]any{"op": "replace", "path": []any{"turns", 0, "items", 1, "text"}, "value": "Ready to use now"},
+			}})
+			batch, err = p.stream().log.Probe(context.Background(), "s", epoch, cursor)
+			if err != nil || len(batch.Events) != 1 || batch.Events[0].Kind != "item" || batch.Events[0].Item.Text != "Ready to use now" {
+				t.Fatalf("late terminal correction was not authoritative: %+v %v", batch, err)
+			}
+			epoch, cursor = p.stream().log.Position()
+			broadcast(map[string]any{"type": "patches", "baseRevision": 3, "revision": 4, "patches": []any{
+				map[string]any{"op": "replace", "path": []any{"turns", 0, "durationMs"}, "value": 136000},
+			}})
+			batch, err = p.stream().log.Probe(context.Background(), "s", epoch, cursor)
+			if err != nil || len(batch.Events) != 1 || batch.Events[0].Kind != "turn" || batch.Events[0].DurationMS == nil || *batch.Events[0].DurationMS != 136000 {
+				t.Fatalf("duration-only correction was lost: %+v %v", batch, err)
+			}
+			out, err := p.Transcript(context.Background(), "s", "")
+			if err != nil || len(out.Turns) != 1 || len(out.Turns[0].Items) != 2 || out.Turns[0].Items[0].Phase != "commentary" || out.Turns[0].Items[1].Phase != "final_answer" || out.Turns[0].Items[1].Text != "Ready to use now" {
+				t.Fatalf("history lost the message phases or final content: %+v %v", out, err)
+			}
+			if out.Turns[0].DurationMS == nil || *out.Turns[0].DurationMS != 136000 {
+				t.Fatal("transcript duration differs from live completion")
+			}
+		})
+	}
+}
+
 func TestIPCSteeringMessagesSurviveHistoryMergeAndAcknowledgement(t *testing.T) {
 	for _, version := range []int{11, 13} {
 		t.Run(fmt.Sprint(version), func(t *testing.T) {

@@ -8,7 +8,6 @@ import (
 	"log"
 	"path/filepath"
 	"sync"
-	"time"
 
 	"github.com/monkeyWie/reignhub/internal/agents"
 	"github.com/monkeyWie/reignhub/internal/assets"
@@ -49,9 +48,6 @@ func StartEmbedded(ctx context.Context, c config.Config) (*Embedded, error) {
 	providers := map[string]provider.Provider{"codex-app": backend, "codex-cli": cli}
 	closers := []func() error{backend.Close, cli.Close}
 	for id, def := range agents.Catalog(c.Agents) {
-		if def.Disabled {
-			continue
-		}
 		if err := agents.Validate(id, def); err != nil {
 			log.Printf("Agent %s: %v", id, err)
 			continue
@@ -68,24 +64,6 @@ func StartEmbedded(ctx context.Context, c config.Config) (*Embedded, error) {
 		return nil, err
 	}
 	r.closers = closers
-	// Each Agent owns its startup deadline. Slow third-party initialization cannot
-	// hold up the host service or the local-first controller UI.
-	for id, p := range providers {
-		if !c.ManagedAgents[id] {
-			continue
-		}
-		go func(id string, p provider.Provider) {
-			budget := 2 * time.Minute
-			if id == "codex-app" {
-				budget = 15 * time.Second
-			}
-			setup, cancel := context.WithTimeout(r.ctx, budget)
-			defer cancel()
-			if err := p.Start(setup); err != nil {
-				log.Printf("Agent %s initialization: %v", id, err)
-			}
-		}(id, p)
-	}
 	return r, nil
 }
 
@@ -122,7 +100,10 @@ func (r *Embedded) Call(ctx context.Context, req control.Request, out any) error
 	stop := context.AfterFunc(r.ctx, cancel)
 	defer stop()
 	defer cancel()
-	response := r.Dispatcher.Handle(callCtx, req)
+	if req.ID == "" {
+		req.ID = "local/" + device.Random()
+	}
+	response := r.Dispatcher.HandleRequest(callCtx, req)
 	if response.Error != "" {
 		return &control.ResponseError{Code: response.Code, Message: response.Error}
 	}

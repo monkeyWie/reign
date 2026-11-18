@@ -32,7 +32,7 @@ func testBrowserBackStaysInCompactWorkspace(t *testing.T) {
 	app.Type("id:chat-input", "返回后保留的草稿")
 	pressBrowserBack(t, app)
 	app.WaitFor("id:session-sidebar", time.Second)
-	app.Press("id:session-demo-chat")
+	app.Press(sessionSelector("demo-device", "codex-app", "demo-chat"))
 	app.WaitUntil(time.Second, func() bool { return app.Find("id:chat-input").Text == "返回后保留的草稿" })
 	// An in-app Back must not leave an extra browser step behind.
 	app.Press("id:back-sessions")
@@ -62,7 +62,7 @@ func testBrowserBackStaysInWideWorkspace(t *testing.T) {
 	if app.Exists("id:chat-input") {
 		t.Fatal("wide Back did not close the selected conversation")
 	}
-	app.Press("id:session-demo-chat")
+	app.Press(sessionSelector("demo-device", "codex-app", "demo-chat"))
 	app.WaitUntil(time.Second, func() bool { return app.Find("id:chat-input").Text == "桌面草稿" })
 	pressBrowserBack(t, app)
 	pressBrowserBack(t, app)

@@ -18,6 +18,49 @@ A live subscription failure must not gate initial history or erase cached conten
 
 **Evidence:** [History failure tests](../../clients/nsgo/hubui/session_failure_test.go), [controller stream tests](../../clients/nsgo/hubui/session_stream_test.go).
 
+## Completed answer buried under progress or missing its final text
+
+Inspect message phase and event order separately. Rendering every assistant item
+as a permanent reply leaves progress commentary above the answer. Use explicit
+phase metadata for collapsed process details, retaining unknown messages and
+commentary when no answer is available. Completion can also share a batch with
+the final text tail: a terminal event sent first makes later text deltas stale.
+Publish authoritative final items before the terminal event and accept terminal
+item corrections, including shorter corrected text. Never infer successful
+completion from disconnect or silently discard the only available response.
+
+**Evidence:** [Controller completion tests](../../clients/nsgo/hubui/work_summary_test.go)
+and [Codex IPC completion regression](../../internal/codex/ipc_messages_test.go).
+
+## Repeated Agent errors on a connected device
+
+An installed CLI with no shared daemon can report unavailable while Codex App is
+healthy. Reading every history-capable Provider can repeatedly request that
+unavailable CLI even though the network is working. Check Provider availability
+before directory reads; preserve cached sessions and rediscover readiness on the
+next refresh. Do not start the CLI daemon to make unrelated App synchronization
+succeed. Real failures from ready Providers remain errors and identify their
+Provider ID.
+
+**Evidence:** [Catalogue recovery regression](../../clients/nsgo/hubui/catalogue_test.go),
+[CLI discovery](../../internal/codex/cli.go).
+
+## Windows console flashes or App access denied
+
+Repeated console flashes can come from periodic executable probes. Use native
+Win32 discovery and compile-time platform adapters. `HideWindow` alone can still
+allocate a console; background Agent commands also need `CREATE_NO_WINDOW` while
+retaining their pipes and cancellation. Do not hide the symptom by slowing polls.
+
+Named-pipe `Access is denied` does not mean the App is closed. The default
+`go-winio` dial requests generic read/write; generic write can include unnecessary
+server rights. Request only client communication rights, preserve the real error
+through retries, and check user / privilege alignment if denial persists. Never
+broaden the vendor pipe ACL or automatically run either App as administrator.
+See [Windows adapter notes](../../internal/codex/README.md),
+[console fixture](../../internal/system/console_windows_test.go) and
+[restricted-pipe fixture](../../internal/codexipc/local_windows_test.go).
+
 ## Relay, WebRTC and TCP logs disagree with the panel
 
 Relay preparation, temporary relay use, WebRTC selection and later TCP standby readiness can all occur during parallel setup. The last channel-established event is not necessarily the active business path. Distinguish standby readiness from path selection.
@@ -49,6 +92,39 @@ Check active-attempt state, start/end time, generation and latest events togethe
 A handler starting network work does not itself acknowledge activation. Check shared active styles and local busy state, accessible labels, duplicate suppression and completion/failure cleanup. A refresh returning unchanged content must still show that its request ran. Test the visible control while the response is held.
 
 Spinner resets often indicate component replacement, not incorrect animation duration. Check node identity and avoid rebuilding whole histories on text deltas. Catch-up dots must not consume list height and must disappear once caught up even while generation continues. Preserve bottom anchors across keyboard/viewport changes and selection/focus across background updates. See [frontend design](frontend-design.md).
+
+A keyed virtual row can still remount if its `Dynamic` constructor reads the
+whole row value reactively after checking an identity memo. Capture construction
+data untracked; keep changing labels, indentation and tooltip contents in their
+own reactive properties. Test real directory updates, not only unrelated notice
+updates, and check both node identity and animation progress while the hint is
+open. See [sidebar stability tests](../../clients/nsgo/hubui/sidebar_stability_test.go).
+
+The same trap applies above the list: a workspace constructor that reads the
+environment or palette can subscribe its entire subtree to appearance changes. Keep layout
+and conversation boundaries dependent on their breakpoint/selection memos, and
+read child construction data untracked. Verify spinner and editor identity, not
+just restored draft text, across theme changes on the browser/native targets.
+See [activity and appearance regression](../../clients/nsgo/hubui/session_activity_test.go).
+
+If simultaneous loading rings rotate at different angles, their animations have
+independent start times. Bind them to the workspace's shared rotation value in
+[loading.go](../../clients/nsgo/hubui/loading.go). Its owner must outlive individual
+rows; mounting a late row joins the current phase, and removing the last ring
+stops the animation. [The synchronization regression](../../clients/nsgo/hubui/loading_test.go)
+covers staggered starts, disposal and reduced-motion changes.
+
+## Recent sessions repeatedly swapping order
+
+Do not sort by a general `updatedAt`: output chunks and metadata can change it,
+and a directory refresh can alternate with an older selected-session snapshot.
+Use the fixed `recencyAt` conversation boundary instead (submission or successful
+reply completion), preserving the latest known value across directory, history
+and live events. Status still updates independently. No clock value should be
+created by a poll, cache restore, navigation or text delta.
+
+**Evidence:** [Recent ordering regression](../../clients/nsgo/hubui/session_recency_test.go)
+and [Provider boundary/caching tests](../../internal/codex/recency_test.go).
 
 ## Upload stalls or later images fail immediately
 

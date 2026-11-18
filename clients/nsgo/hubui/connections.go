@@ -17,15 +17,16 @@ import (
 // Transport readiness is independent of provider read failures. Keep those
 // failures for diagnostics without declaring a healthy socket disconnected.
 type connectionHealth struct {
-	attempt       *connectAttempt
-	issues        map[string]string
-	retryFailures int
-	reconnecting  bool
-	waitingOnline bool
-	established   bool
-	diagnostics   []connectionStep
-	observed      bool
-	lastTransport string
+	attempt        *connectAttempt
+	issues         map[string]string
+	retryFailures  int
+	reconnecting   bool
+	waitingOnline  bool
+	established    bool
+	startupResumed bool
+	diagnostics    []connectionStep
+	observed       bool
+	lastTransport  string
 }
 
 func (s *State) connection(id string) *connectionHealth {
@@ -103,7 +104,7 @@ func (s *State) connectionRecovering(id string) bool {
 	}
 	for _, d := range s.devices {
 		if str(d, "id") == id {
-			return h.established && !flag(d, "connected") && flag(d, "autoReconnect")
+			return (h.established || h.startupResumed) && !flag(d, "connected") && flag(d, "autoReconnect")
 		}
 	}
 	return false
@@ -120,7 +121,11 @@ func (s *State) connectionTitle(id string) string {
 	}
 	return "未连接"
 }
-func (s *State) connectionIndicator(cx *core.Scope, target func() string) core.Node {
+func (s *State) connectionIndicator(cx *core.Scope, target func() string, namespace ...string) core.Node {
+	prefix := ""
+	if len(namespace) > 0 {
+		prefix = namespace[0]
+	}
 	status := core.NewMemo(cx, func() [2]string { s.read(); id := target(); return [2]string{id, s.connectionTitle(id)} })
 	return core.Dynamic(func(cx *core.Scope) core.Node {
 		value := status.Get()
@@ -129,7 +134,7 @@ func (s *State) connectionIndicator(cx *core.Scope, target func() string) core.N
 		if s.connectionProblem(id) && !s.connectionRecovering(id) {
 			icon = lucide.WifiOff
 		}
-		node := button(cx, "connection-status-"+id, "", icon, "ghost", func() {
+		node := button(cx, prefix+"connection-status-"+id, "", icon, "ghost", func() {
 			cx.DismissKeyboard()
 			s.connectionDetailTarget = id
 			s.dialog.Set("connection-status")
@@ -203,12 +208,7 @@ func (s *State) connectionDetails(id string) string {
 func (s *State) acceptConnection(id string, devices []Object) {
 	s.presenceGeneration++
 	s.presencePolling = false
-	if s.pollCancel != nil {
-		s.pollCancel()
-		s.pollCancel = nil
-	}
-	s.pollGeneration++
-	s.polling = false
+	s.cancelTargetCatalogue(id)
 	s.devices = devices
 	s.observeTransports()
 	h := s.connection(id)
@@ -216,6 +216,7 @@ func (s *State) acceptConnection(id string, devices []Object) {
 	h.waitingOnline = false
 	h.issues = map[string]string{}
 	delete(s.connection("").issues, "presence")
+	s.reconcileEnvironments()
 }
 
 func (s *State) reconnectDevice(id string) { s.reconnect(id, false) }
@@ -251,6 +252,7 @@ func (s *State) connectDevice(id string, automatic, pair bool) {
 	h.waitingOnline = false
 	if !automatic {
 		h.established = false
+		h.startupResumed = false
 	}
 	ctx, cancel := context.WithCancel(s.ctx)
 	params := Object{}
@@ -320,6 +322,9 @@ func (s *State) connectDevice(id string, automatic, pair bool) {
 			a.finish(finished, err)
 			h.reconnecting = false
 			if err != nil {
+				if !h.established {
+					h.startupResumed = false
+				}
 				h.retryFailures++
 				s.retrying[id] = time.Now().Add(min(15*time.Second, time.Second<<min(h.retryFailures, 4)))
 			} else {
@@ -385,13 +390,9 @@ func (s *State) setBackground(background bool) {
 		}
 		s.directoryGeneration++
 		s.directoryChecking = false
-		if s.pollCancel != nil {
-			s.pollCancel()
-			s.pollCancel = nil
-		}
+		s.cancelCatalogue()
 		s.presenceGeneration++
 		s.presencePolling = false
-		s.pollGeneration++
 		s.polling = false
 		if s.watchCancel != nil && (suspend || wasSuspended) {
 			s.watchCancel()

@@ -1,3 +1,5 @@
+//go:build unix
+
 package codex
 
 import (
@@ -8,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -21,9 +22,6 @@ import (
 
 func fakeCLI(t *testing.T, metadata string) (*Provider, string) {
 	t.Helper()
-	if runtime.GOOS == "windows" {
-		t.Skip("Unix CLI fixture")
-	}
 	dir := t.TempDir()
 	state, calls := filepath.Join(dir, "state"), filepath.Join(dir, "calls")
 	t.Setenv("AGENTHUB_TEST_CLI_STATE", state)

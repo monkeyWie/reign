@@ -26,7 +26,7 @@ type State struct {
 	clientName                                              string
 	drafts                                                  map[string]draftState
 	expanded                                                map[string]bool
-	createDirectory, directoryInfo                          string
+	createDirectory                                         string
 	cx                                                      *core.Scope
 	api                                                     API
 	ctx                                                     context.Context
@@ -47,7 +47,8 @@ type State struct {
 	manualRefresh                                           bool
 	actions                                                 map[string]bool
 	draft                                                   *core.Signal[string]
-	deviceWidth, sessionWidth                               *core.Signal[core.Points]
+	sessionWidth                                            *core.Signal[core.Points]
+	sidebarHidden                                           *core.Signal[bool]
 	collapsed                                               map[string]bool
 	models                                                  []Object
 	messageRows                                             []Message
@@ -65,8 +66,6 @@ type State struct {
 	connections                                             map[string]*connectionHealth
 	connectionDetailTarget                                  string
 	suspended                                               bool
-	pollCancel                                              context.CancelFunc
-	pollGeneration                                          uint64
 	presencePolling                                         bool
 	presenceGeneration                                      uint64
 	devicePresence                                          map[string]Object
@@ -75,17 +74,28 @@ type State struct {
 	directoryCancel                                         context.CancelFunc
 	timezone                                                *time.Location
 	timeline                                                *core.Ref
+	loadingMotion                                           *loadingMotion
 	pendingSends                                            map[string]string
 	outgoing                                                map[string][]*outgoingMessage
 	streamKey, streamEpoch                                  string
 	streamCursor                                            int64
 	connectAttempt                                          *connectAttempt
 	workspaces                                              map[string]workspaceCache
+	catalogues                                              map[string]*catalogueState
+	grouping                                                string
+	filters                                                 sessionFilters
+	removedSessions                                         map[string]bool
+	removalTarget                                           Object
+	uncertainRemovals                                       map[string]bool
+	unreadSessions                                          map[string]bool
+	sessionActivity                                         map[string]string
+	pinned                                                  map[string]int64
+	deviceMenuTarget                                        string
 	sessionCache                                            map[string]Object
 	sessionCacheOrder                                       []string
 	cacheLoading, transcriptLoading, localPolling           bool
+	localProviderGeneration                                 uint64
 	catalogueVersion, sessionGeneration                     uint64
-	deviceGeneration                                        uint64
 	transcriptSyncing, snapshotScheduled                    bool
 	syncVisible                                             bool
 	stream                                                  *sessionStream
@@ -107,9 +117,12 @@ func newState(cx *core.Scope, api API) *State {
 	identified.setInfo(platformClientInfo())
 	api = identified
 	ctx, cancel := context.WithCancel(context.Background())
-	s := &State{clientName: platformDeviceName(), drafts: map[string]draftState{}, expanded: map[string]bool{}, cx: cx, api: api, ctx: ctx, cancel: cancel, revision: core.NewSignal(cx, 0), width: core.NewSignal(cx, core.Points(1320)), dialog: core.NewSignal(cx, ""), draft: core.NewSignal(cx, ""), deviceWidth: core.NewSignal(cx, core.Points(210)), sessionWidth: core.NewSignal(cx, core.Points(300)), collapsed: map[string]bool{}, images: map[string][]byte{}, loadingImages: map[string]bool{}, previewIndex: core.NewSignal(cx, 0), prompted: map[string]bool{}, retrying: map[string]time.Time{}, timeline: &core.Ref{}}
+	s := &State{clientName: platformDeviceName(), drafts: map[string]draftState{}, expanded: map[string]bool{}, cx: cx, api: api, ctx: ctx, cancel: cancel, revision: core.NewSignal(cx, 0), width: core.NewSignal(cx, core.Points(1320)), dialog: core.NewSignal(cx, ""), draft: core.NewSignal(cx, ""), sessionWidth: core.NewSignal(cx, core.Points(300)), collapsed: map[string]bool{}, images: map[string][]byte{}, loadingImages: map[string]bool{}, previewIndex: core.NewSignal(cx, 0), prompted: map[string]bool{}, retrying: map[string]time.Time{}, timeline: &core.Ref{}}
 	s.snapshots = newSnapshotWriter(ctx, api)
+	s.loadingMotion = newLoadingMotion(cx)
 	s.phoneRoute = core.NewSignal(cx, "")
+	s.sidebarHidden = core.NewSignal(cx, false)
+	s.loadSidebarPreferences()
 	cx.Cleanup(func() {
 		cancel()
 		if s.watchCancel != nil {
@@ -206,6 +219,7 @@ func (s *State) pollLocal() {
 		return
 	}
 	s.localPolling = true
+	generation := s.localProviderGeneration
 	go func() {
 		info, err := s.api.Call(s.ctx, "host.info", nil, "", nil)
 		var providers any
@@ -220,28 +234,29 @@ func (s *State) pollLocal() {
 			if info != nil {
 				s.host = object(info)
 			}
-			if providers != nil {
+			if providers != nil && generation == s.localProviderGeneration {
 				s.localProviders = visibleProviders(objects(providers))
 			}
 			s.setConnectionIssue("", "catalogue", err)
 			s.changed()
 			s.promptHost()
+			if generation != s.localProviderGeneration {
+				s.pollLocal()
+			}
 		})
 	}()
 }
 
 func (s *State) cancelCatalogue() {
-	if s.pollCancel != nil {
-		s.pollCancel()
-		s.pollCancel = nil
+	for target := range s.catalogues {
+		s.cancelTargetCatalogue(target)
 	}
-	s.pollGeneration++
 	s.polling = false
 	s.manualRefresh = false
 }
 
 func (s *State) refreshSessions() {
-	if s.manualRefresh || s.suspended || s.target == "" || !s.connected() || s.ctx.Err() != nil {
+	if s.manualRefresh || s.suspended || !s.anyConnected() || s.ctx.Err() != nil {
 		return
 	}
 	// A manual refresh supersedes a background read instead of showing its
@@ -257,20 +272,7 @@ func (s *State) poll() {
 	}
 	s.pollPresence()
 	s.pollLocal()
-	if s.polling || s.target == "" || !s.connected() {
-		return
-	}
-	s.polling = true
-	s.pollGeneration++
-	generation, target := s.pollGeneration, s.target
-	ctx, cancel := context.WithCancel(s.ctx)
-	s.pollCancel = cancel
-	s.changed()
-	known := map[string]bool{}
-	for _, session := range s.sessions {
-		known[str(session, "providerId")] = true
-	}
-	go s.loadCatalogue(ctx, cancel, generation, target, known)
+	s.pollCatalogues()
 }
 
 // Presence is local transport state. Never block reconnect detection behind a
@@ -295,6 +297,7 @@ func (s *State) pollPresence() {
 			s.setConnectionIssue("", "presence", err)
 			if err == nil {
 				s.devices = objects(v)
+				s.reconcileEnvironments()
 				s.observeTransports()
 				s.openNativeSession()
 				s.refreshDevicePresence()
@@ -340,24 +343,16 @@ func (s *State) selectDevice(id string) {
 	}
 	s.rememberDraft()
 	s.rememberSession()
-	s.rememberWorkspace()
-	s.cancelCatalogue()
 	if s.watchCancel != nil {
 		s.watchCancel()
 	}
 	s.target = id
-	s.deviceGeneration++
 	s.selected = nil
 	s.transcriptSyncing = false
 	s.transcript = nil
 	s.messageRows = nil
 	s.approvals = nil
-	s.providers = nil
-	s.sessions = nil
-	s.cacheLoading = false
-	if workspace, ok := s.workspaces[id]; ok {
-		s.providers, s.sessions = workspace.providers, workspace.sessions
-	}
+	s.providers = s.workspaces[id].providers
 	s.narrowChat = false
 	s.draft.Set("")
 	s.uploads = nil
@@ -367,6 +362,14 @@ func (s *State) selectDevice(id string) {
 	s.poll()
 }
 func (s *State) selectSession(session Object) {
+	s.markSessionRead(session)
+	target := str(session, "deviceId")
+	if target == "" {
+		target = s.target
+	}
+	if target != s.target {
+		s.selectDevice(target)
+	}
 	if s.key() == s.target+"|"+str(session, "providerId")+"|"+str(session, "id") {
 		s.narrowChat = true
 		s.showPhoneChat()
@@ -447,6 +450,10 @@ func (s *State) setTranscript(t Object) {
 	s.transcriptLoading = false
 	s.restoreOutgoing(t)
 	s.transcript = mergeLatest(s.transcript, t)
+	summary := copyObject(object(s.transcript["session"]))
+	summary["recencyAt"] = transcriptRecency(s.transcript)
+	s.transcript["session"] = summary
+	s.updateSelectedSummary()
 	s.reconcileOutgoing(time.Time{})
 	s.rebuildMessages()
 	if s.model == "" {
@@ -606,7 +613,7 @@ func (s *State) decision(a Object, decision string) {
 	s.approvalAction(a, Object{"decision": decision})
 }
 func (s *State) autoReconnect() {
-	if s.suspended {
+	if s.suspended || s.directoryChecking {
 		return
 	}
 	for _, d := range s.devices {
@@ -626,7 +633,10 @@ func (s *State) autoReconnect() {
 			}
 			continue
 		}
-		if h.established && flag(d, "autoReconnect") && time.Now().After(s.retrying[id]) {
+		if flag(d, "autoReconnect") && (h.established || h.startupResumed || h.attempt == nil) && time.Now().After(s.retrying[id]) {
+			if h.attempt == nil {
+				h.startupResumed = true
+			}
 			s.reconnect(id, true)
 		}
 	}

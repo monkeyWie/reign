@@ -3,14 +3,12 @@ package hubui
 import (
 	"github.com/nsgo-dev/nsgo/base"
 	"github.com/nsgo-dev/nsgo/core"
-	"github.com/nsgo-dev/nsgo/icons/lucide"
 	"strings"
 )
 
-// Mobile pages are real native stack entries. Keeping the device page below
-// sessions and chat lets system Back and interactive swipe pop the same routes.
+// The compact workspace has one aggregate list and one conversation page.
 func (s *State) phonePages(cx *core.Scope) core.Node {
-	nav := base.NewNav(cx, "devices")
+	nav := base.NewNav(cx, "sessions")
 	s.phoneNav = nav
 	cx.Effect(func() {
 		routes := nav.Routes()
@@ -25,23 +23,14 @@ func (s *State) phonePages(cx *core.Scope) core.Node {
 			s.phoneRoute.Set("")
 		}
 	})
-	if s.target != "" {
-		nav.Push("sessions:" + s.target)
-	}
 	if s.narrowChat && s.selected != nil {
 		nav.Push("chat:" + s.key())
 	}
 	return nav.Stack(fill, func(cx *core.Scope, route string, _ func() int) base.NavPage {
 		page := base.NavPage{TestID: "page-" + strings.Split(route, ":")[0], HeaderHidden: true, Style: fill}
-		switch {
-		case route == "local":
-			page.Children = []core.Node{button(cx, "back-local", "设备", lucide.ArrowLeft, "ghost", func() { nav.Pop(1) }), s.local(cx)}
-		case route == "devices":
-			page.Children = []core.Node{s.phoneDevices(cx)}
-		case strings.HasPrefix(route, "sessions:"):
+		if route == "sessions" {
 			page.Children = []core.Node{s.directory(cx)}
-			page.OnDismiss = func() { s.rememberDraft(); s.narrowChat = false; s.changed() }
-		default:
+		} else {
 			page.Children = []core.Node{s.conversation(cx, true)}
 			page.OnDismiss = func() { s.rememberDraft(); s.narrowChat = false; s.changed() }
 		}
@@ -49,30 +38,22 @@ func (s *State) phonePages(cx *core.Scope) core.Node {
 	})
 }
 func (s *State) showPhoneSessions() {
-	if s.phoneNav == nil {
-		return
-	}
-	routes := []string{"devices"}
-	if s.target != "" {
-		routes = append(routes, "sessions:"+s.target)
-	}
 	s.narrowChat = false
-	s.phoneNav.SetRoutesKeeping(func(a, b string) bool { return a == b }, routes...)
+	if s.phoneNav != nil {
+		s.phoneNav.SetRoutesKeeping(func(a, b string) bool { return a == b }, "sessions")
+	}
 }
 func (s *State) showPhoneChat() {
-	if s.phoneNav == nil {
-		return
+	if s.phoneNav != nil {
+		s.phoneNav.SetRoutesKeeping(func(a, b string) bool { return a == b }, "sessions", "chat:"+s.key())
 	}
-	s.phoneNav.SetRoutesKeeping(func(a, b string) bool { return a == b }, "devices", "sessions:"+s.target, "chat:"+s.key())
 }
 func (s *State) backSessions() {
 	s.rememberDraft()
 	s.narrowChat = false
 	if s.phoneNav != nil {
-		s.phoneNav.Pop(1)
-	} else if s.width.GetUntracked() >= wideBreakpoint {
-		// A wide workspace keeps the directory beside the chat; closing the
-		// chat therefore clears its selection while retaining the cached draft.
+		s.phoneNav.PopToRoot()
+	} else {
 		s.rememberSession()
 		if s.watchCancel != nil {
 			s.watchCancel()
@@ -85,14 +66,7 @@ func (s *State) backSessions() {
 	}
 	s.changed()
 }
-func (s *State) backDevices() {
-	s.rememberDraft()
-	s.narrowChat = false
-	if s.phoneNav != nil {
-		s.phoneNav.PopToRoot()
-	}
-	s.changed()
-}
+func (s *State) backDevices() { s.backSessions() }
 func deviceName(d Object) string {
 	if n := strings.TrimSpace(str(d, "name")); n != "" && n != "RAS" {
 		return n
@@ -117,34 +91,4 @@ func deviceStatus(d Object) string {
 		return "已连接 · 正在协商连接路径"
 	}
 	return path
-}
-func (s *State) phoneDevices(cx *core.Scope) core.Node {
-	nodes := []core.Node{
-		core.View{Style: core.Style{Padding: core.All(20), Gap: 16}, Children: []core.Node{
-			row(s.brand(cx, 24, false), spacer(), core.Show{When: func() bool { s.read(); return s.connectionProblem("") }, Then: func(cx *core.Scope) core.Node { return s.connectionIndicator(cx, func() string { return "" }) }}, labelledIconButton(cx, "mobile-account", "账号与设备同步", lucide.User, func() { s.dialog.Set("account") }), labelledIconButton(cx, "server-settings", "设置", lucide.Settings, func() { s.openSettings("general") })),
-			label(cx, "选择设备，查看与管理它的 Agent 会话", 13, true),
-			row(button(cx, "connect-device", "连接设备", lucide.Plus, "primary", func() { s.scanned = nil; s.dialog.Set("connect") }), core.Show{When: func() bool { return isMobile(cx) }, Then: func(cx *core.Scope) core.Node {
-				return button(cx, "scan-qr", "扫一扫", lucide.ScanLine, "outline", func() { s.scan(cx) })
-			}}),
-		}},
-	}
-	if s.api.CanHost() {
-		nodes = append(nodes, button(cx, "home", "这台电脑", lucide.Monitor, "outline", func() { s.phoneNav.Push("local") }))
-	}
-	nodes = append(nodes, core.Scroll{Style: fill, Children: []core.Node{core.View{Style: core.Style{Padding: core.Symmetric(4, 16), Gap: 10}, Children: []core.Node{
-		core.Show{When: func() bool { s.read(); return len(s.devices) == 0 }, Then: func(cx *core.Scope) core.Node {
-			return card(cx, label(cx, "尚未连接设备", 16, false), label(cx, "输入电脑上的设备 ID，或扫描设备二维码开始连接。已配对设备会保存在本机。", 13, true))
-		}},
-		core.Each(func() []Object { s.read(); return s.devices }, func(d Object) string { return str(d, "id") }, func(cx *core.Scope, d func() Object, _ func() int) core.Node {
-			return core.View{TestID: "device-" + str(d(), "id"), Role: core.RoleButton, LabelFunc: func() string { return deviceName(d()) }, OnPress: func(core.PressEvent) { s.openDevice(str(d(), "id")) }, Style: core.Style{Padding: core.All(16), Gap: 9, CornerRadius: 10, BorderWidth: 1, MinHeight: core.Pt(96)}, StyleFunc: func() core.Style {
-				p := palette(cx)
-				return pressStyle(cx).Merge(core.Style{Background: p.background, BorderColor: p.border})
-			}, Children: []core.Node{
-				row(glyph(cx, lucide.Monitor, 20), singleLine(cx, func() string { return deviceName(d()) }, 16, false), spacer(), s.devicePresenceIndicator(cx, d), glyph(cx, lucide.ChevronRight, 18)),
-				dynamicText(cx, func() string { return "ID " + str(d(), "connectionId") }, 12, true),
-				dynamicText(cx, func() string { return s.deviceListStatus(d()) }, 12, true),
-			}}
-		}),
-	}}}})
-	return core.View{TestID: "mobile-devices", Style: fill, Children: nodes}
 }

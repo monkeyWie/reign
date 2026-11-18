@@ -1,22 +1,12 @@
 package hubui
 
 import (
-	"github.com/nsgo-dev/nsgo/core"
-	"github.com/nsgo-dev/nsgo/ui"
 	"time"
+
+	"github.com/nsgo-dev/nsgo/core"
 )
 
 type workspaceCache struct{ providers, sessions []Object }
-
-func (s *State) rememberWorkspace() {
-	if s.target == "" {
-		return
-	}
-	if s.workspaces == nil {
-		s.workspaces = map[string]workspaceCache{}
-	}
-	s.workspaces[s.target] = workspaceCache{s.providers, s.sessions}
-}
 
 func (s *State) rememberSession() {
 	s.persistSnapshot()
@@ -42,29 +32,38 @@ func (s *State) loadCachedWorkspace(target string) {
 	if target == "" {
 		return
 	}
-	s.cacheLoading = true
-	version, generation := s.catalogueVersion, s.deviceGeneration
+	c := s.catalogue(target)
+	if c.cached {
+		return
+	}
+	c.cached, c.cacheLoading = true, true
+	s.catalogueProgress()
 	go func() {
 		v, err := s.api.Call(s.ctx, "client.cached", nil, target, nil)
 		s.cx.Post(func() {
-			if s.ctx.Err() != nil || s.target != target || generation != s.deviceGeneration {
+			if s.ctx.Err() != nil || s.catalogues[target] != c {
 				return
 			}
-			s.cacheLoading = false
+			c.cacheLoading = false
+			s.catalogueProgress()
 			// A slow disk result must never replace a newer remote catalogue.
-			if err == nil && version == s.catalogueVersion {
+			if err == nil {
 				cached := object(v)
-				if p := objects(cached["providers"]); len(p) > 0 {
-					s.providers = visibleProviders(p)
+				w := s.workspace(target)
+				if p := objects(cached["providers"]); len(p) > 0 && len(w.providers) == 0 {
+					w.providers = visibleProviders(p)
 				}
-				if sessions := objects(cached["sessions"]); len(sessions) > 0 && len(s.sessions) == 0 {
-					for _, session := range sessions {
-						if visibleSession(session) {
-							s.sessions = append(s.sessions, session)
-						}
+				known := map[string]bool{}
+				for _, session := range w.sessions {
+					known[sessionIdentity(session)] = true
+				}
+				for _, session := range objects(cached["sessions"]) {
+					if visibleSession(session) && !c.completed[str(session, "providerId")] && !known[sessionIdentity(session)] {
+						w.sessions = append(w.sessions, session)
 					}
 				}
-				s.rememberWorkspace()
+				s.workspaces[target] = w
+				s.publishWorkspaces()
 			}
 			s.changed()
 		})
@@ -112,30 +111,25 @@ func (s *State) loadCachedSession() {
 }
 
 func (s *State) cataloguePending() bool {
-	return s.cacheLoading || s.connection(s.target).reconnecting || s.connected() && s.polling
-}
-
-func (s *State) emptyCatalogue(cx *core.Scope) core.Node {
-	return core.Show{When: func() bool { s.read(); return len(s.sessions) == 0 }, Then: func(cx *core.Scope) core.Node {
-		return core.View{TestID: "session-list-placeholder", Style: core.Style{Padding: core.All(24), Gap: 12, AlignItems: core.AlignCenter}, Children: []core.Node{
-			core.Show{When: func() bool { s.read(); return s.cataloguePending() }, Then: func(*core.Scope) core.Node {
-				return ui.Spinner{TestID: "sessions-loading", Label: "正在加载会话", Size: 18}
-			}},
-			dynamicText(cx, func() string {
-				s.read()
-				if s.cacheLoading {
-					return "正在读取本地会话…"
-				}
-				if s.cataloguePending() {
-					return "正在同步会话…"
-				}
-				if s.connected() {
-					return "暂无会话，可以新建聊天。"
-				}
-				return "暂无本地会话，连接后会自动同步。"
-			}, 12, true),
-		}}
-	}}
+	if s.cacheLoading {
+		return true
+	}
+	if s.polling {
+		if len(s.catalogues) == 0 {
+			return true
+		}
+		for _, c := range s.catalogues {
+			if c.polling && (!c.loaded || c.manual) {
+				return true
+			}
+		}
+	}
+	for _, h := range s.connections {
+		if h.reconnecting {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *State) emptyTranscript(cx *core.Scope) core.Node {
@@ -146,7 +140,7 @@ func (s *State) emptyTranscript(cx *core.Scope) core.Node {
 		}
 		return core.View{TestID: "transcript-placeholder", Style: core.Style{Position: core.Absolute, Top: core.Pct(40), Left: core.Pt(24), Right: core.Pt(24), Gap: 12, AlignItems: core.AlignCenter}, Children: []core.Node{
 			core.Show{When: pending, Then: func(*core.Scope) core.Node {
-				return ui.Spinner{TestID: "transcript-loading", Label: "正在加载消息", Size: 20}
+				return s.loadingRing("transcript-loading", "正在加载消息", 20)
 			}},
 			dynamicText(cx, func() string {
 				if pending() {

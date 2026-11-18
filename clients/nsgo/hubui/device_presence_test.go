@@ -44,13 +44,14 @@ func TestDeviceListShowsServerPresenceWithoutConnecting(t *testing.T) {
 	if f.calls.Load() != 0 || f.reads.Load() != 1 {
 		t.Fatal("presence started a connection or duplicated its batch")
 	}
-	app.Press("id:device-demo-device")
 	app.WaitFor("id:session-sidebar", time.Second)
-	app.WaitFor("id:session-demo-chat", time.Second)
+	app.WaitFor(sessionSelector("demo-device", "codex-app", "demo-chat"), time.Second)
 	if app.Exists("id:dialog-connecting") {
 		t.Fatal("saved device navigation blocked on connection")
 	}
-	app.Press("id:connection-status-demo-device")
+	app.Press("id:device-demo-device")
+	app.Press("id:reconnect-device")
+	app.Press("id:sidebar-connection-status-demo-device")
 	app.WaitFor("text:请在被控电脑的 ReignHub 中允许此次连接", time.Second)
 	f.finish <- errors.New("被控设备离线")
 	app.WaitFor("text:被控电脑不在线", time.Second)
@@ -110,9 +111,8 @@ func TestOfflineDeviceOpensCacheAndConnectsOnceWhenPresenceReturns(t *testing.T)
 		return s.phonePages(cx)
 	}, nsgotest.Size(390, 844))
 	app.WaitFor("text:离线", time.Second)
-	app.Press("id:device-demo-device")
-	app.WaitFor("id:session-demo-chat", time.Second)
-	app.Press("id:session-demo-chat")
+	app.WaitFor(sessionSelector("demo-device", "codex-app", "demo-chat"), time.Second)
+	app.Press(sessionSelector("demo-device", "codex-app", "demo-chat"))
 	app.WaitFor("text:本地保存的完整消息", time.Second)
 	app.Find("role:button 设备离线")
 	if f.connects.Load() != 0 || app.Exists("id:connection-retrying") {

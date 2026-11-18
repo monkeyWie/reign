@@ -25,27 +25,29 @@ type pending struct {
 	route, requestID string
 }
 type Provider struct {
-	assets     *assets.Store
-	probeMu    sync.Mutex
-	probeAt    time.Time
-	probeInfo  cliDaemonInfo
-	probeErr   error
-	kind       string
-	cfg        config.Config
-	broker     *events.Broker
-	mu         sync.Mutex
-	client     *rpc.Client
-	created    map[string]*rpc.Client
-	endpoint   string
-	ipc        *appIPC
-	lastError  string
-	pending    map[string]pending
-	next       uint64
-	connectMu  sync.Mutex
-	live       *liveStream
-	projectMu  sync.Mutex
-	projectsAt time.Time
-	projects   *projectIndex
+	assets          *assets.Store
+	probeMu         sync.Mutex
+	probeAt         time.Time
+	probeInfo       cliDaemonInfo
+	probeErr        error
+	kind            string
+	cfg             config.Config
+	broker          *events.Broker
+	mu              sync.Mutex
+	client          *rpc.Client
+	created         map[string]*rpc.Client
+	endpoint        string
+	ipc             *appIPC
+	lastError       string
+	pending         map[string]pending
+	next            uint64
+	connectMu       sync.Mutex
+	live            *liveStream
+	projectMu       sync.Mutex
+	projectsAt      time.Time
+	projects        *projectIndex
+	recencies       map[string]sessionRecencyEntry
+	recencySequence uint64
 }
 
 func New(c config.Config, _ string, b *events.Broker, stores ...*assets.Store) *Provider {
@@ -104,7 +106,7 @@ func (p *Provider) Status(ctx context.Context) provider.Status {
 	p.mu.Lock()
 	c, b, last := p.client, p.ipc, p.lastError
 	p.mu.Unlock()
-	s := provider.Status{ID: "codex-app", Name: "Codex App", State: "unavailable", Installed: app != "", Running: len(instances) > 0, InstallPath: app, Instances: instances, LastError: last, Capabilities: provider.Capabilities{Streaming: true, History: true, Create: true, Send: true, Steer: true, Interrupt: true, Approvals: true, Desktop: true, ImageInput: true, FileInput: true}}
+	s := provider.Status{ID: "codex-app", Name: "Codex App", State: "unavailable", Installed: app != "", Running: len(instances) > 0, InstallPath: app, Instances: instances, LastError: last, Capabilities: provider.Capabilities{SessionRemoval: "archive", Streaming: true, History: true, Create: true, Send: true, Steer: true, Interrupt: true, Approvals: true, Desktop: true, ImageInput: true, FileInput: true}}
 	if appErr != nil {
 		s.LastError = appErr.Error()
 	}
@@ -116,16 +118,16 @@ func (p *Provider) Status(ctx context.Context) provider.Status {
 		s.Detail = system.DesktopUnsupportedReason
 		return s
 	}
-	s.Detail = "请先打开 Codex App，再启用本地 IPC 接入"
+	s.Detail = "打开 Codex App 后自动连接"
 	if s.Running {
 		s.State = "detected"
-		s.Detail = "可通过本地 IPC 接入，无需重启 Codex App"
+		s.Detail = "正在连接"
 	}
 	if b != nil {
 		ipc := b.client()
 		if s.Running && ipc != nil && ipc.Alive() && c != nil && c.Alive() {
 			s.State = "connected"
-			s.Detail = "已通过本地 IPC 接入"
+			s.Detail = "已就绪"
 			s.Endpoint = "ipc"
 			s.DesktopClients = 1
 		}
@@ -147,10 +149,12 @@ type thread struct {
 	Model                  string
 	ProjectID              string `json:"projectId"`
 	UpdatedAt              int64  `json:"updatedAt"`
+	CreatedAt              int64  `json:"createdAt"`
 	Source                 json.RawMessage
 	Originator             string
 	Status                 struct {
-		Type string `json:"type"`
+		Type        string   `json:"type"`
+		ActiveFlags []string `json:"activeFlags"`
 	}
 	Turns []json.RawMessage
 }
@@ -170,7 +174,11 @@ func (t thread) session() provider.Session {
 	if len(preview) > 240 {
 		preview = append(preview[:240], '…')
 	}
-	return provider.Session{ID: t.ID, ProviderID: "codex", Title: title, Preview: string(preview), CWD: t.Cwd, UpdatedAt: t.UpdatedAt, Status: t.Status.Type, Source: string(t.Source), SourceKind: t.sourceKind(), Originator: t.Originator, Model: t.Model}
+	status := t.Status.Type
+	if status == "active" && len(t.Status.ActiveFlags) > 0 {
+		status = "waiting"
+	}
+	return provider.Session{ID: t.ID, ProviderID: "codex", Title: title, Preview: string(preview), CWD: t.Cwd, UpdatedAt: provider.TimestampMillis(t.UpdatedAt), CreatedAt: provider.TimestampMillis(t.CreatedAt), Status: status, Source: string(t.Source), SourceKind: t.sourceKind(), Originator: t.Originator, Model: t.Model}
 }
 func (p *Provider) Sessions(ctx context.Context, cursor string) (provider.SessionPage, error) {
 	params := map[string]any{"limit": 50, "sortKey": "updated_at", "sortDirection": "desc", "sourceKinds": []string{"cli", "vscode", "appServer", "subAgent", "unknown"}, "modelProviders": []string{}}
@@ -192,6 +200,8 @@ func (p *Provider) Sessions(ctx context.Context, cursor string) (provider.Sessio
 			page.Sessions = append(page.Sessions, s)
 		}
 	}
+	p.enrichSessionActivity(ctx, page.Sessions)
+	p.enrichSessionRecency(ctx, page.Sessions)
 	return page, nil
 }
 func (p *Provider) TurnStatus(ctx context.Context, session, turn string) (provider.Turn, error) {
@@ -246,6 +256,7 @@ func (p *Provider) Transcript(ctx context.Context, id, cursor string) (provider.
 		normalized := normalizeTurn(turns.Data[i])
 		p.attachments(ctx, id, metadata.Thread.Cwd, &normalized, turns.Data[i])
 		out.Turns = append(out.Turns, normalized)
+		out.Session.RecencyAt = max(out.Session.RecencyAt, provider.ConversationRecency([]provider.Turn{normalized}))
 		if err := provider.EmitTranscriptTurn(ctx, out, normalized); err != nil {
 			return provider.Transcript{}, err
 		}
@@ -262,12 +273,15 @@ func (p *Provider) Transcript(ctx context.Context, id, cursor string) (provider.
 }
 func normalizeTurn(raw json.RawMessage) provider.Turn {
 	var t struct {
-		ID, Status             string
-		Items                  []json.RawMessage
-		StartedAt, CompletedAt *int64
+		ID, Status                 string
+		Items                      []json.RawMessage
+		StartedAt, CompletedAt     *int64
+		StartedAtMS, CompletedAtMS *int64
+		DurationMS                 *int64
 	}
 	_ = json.Unmarshal(raw, &t)
-	out := provider.Turn{ID: t.ID, Status: t.Status, Items: []provider.Item{}}
+	out := provider.Turn{ID: t.ID, Status: t.Status, DurationMS: turnDuration(t.DurationMS, t.StartedAt, t.CompletedAt), Items: []provider.Item{}}
+	out.RecencyAt = recordedTurnRecency(t.Status, t.StartedAt, t.CompletedAt, t.StartedAtMS, t.CompletedAtMS, t.DurationMS)
 	for _, raw := range t.Items {
 		var i struct {
 			ID, Type, Text, Phase, Status string

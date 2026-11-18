@@ -18,3 +18,5 @@ func isolateProcess(cmd *exec.Cmd) {
 		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 	}
 }
+
+func validateExecutable(string) error { return nil }

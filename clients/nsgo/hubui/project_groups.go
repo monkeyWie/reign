@@ -3,7 +3,7 @@ package hubui
 import "strings"
 
 func agentFamily(id string) string {
-	if strings.HasPrefix(id, "codex-") {
+	if id == "codex-app" || id == "codex-cli" {
 		return "codex"
 	}
 	return id

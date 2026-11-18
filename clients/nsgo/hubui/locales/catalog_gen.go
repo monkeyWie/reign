@@ -43,8 +43,13 @@ func For(cx *core.Scope) Messages {
 // its method, for the TSX declarations of the messages
 // (tsx.RegisterMessages).
 var Parameters = map[string][]string{
-	"UploadFailed": {"error_"},
-	"SecondsAgo":   {"seconds"},
+	"UploadFailed":            {"error_"},
+	"SecondsAgo":              {"seconds"},
+	"FilterMatches":           {"count"},
+	"WorkedFor":               {"duration"},
+	"WorkSeconds":             {"seconds"},
+	"WorkMinutesSeconds":      {"minutes", "seconds"},
+	"WorkHoursMinutesSeconds": {"hours", "minutes", "seconds"},
 }
 
 // Translation is a language's messages another package supplies:
@@ -52,9 +57,14 @@ var Parameters = map[string][]string{
 // of the others; a key or a field left out leaves the message to the
 // catalog.
 type Translation struct {
-	Texts        map[string]string
-	UploadFailed func(error_ string) string
-	SecondsAgo   func(seconds int) string
+	Texts                   map[string]string
+	UploadFailed            func(error_ string) string
+	SecondsAgo              func(seconds int) string
+	FilterMatches           func(count string) string
+	WorkedFor               func(duration string) string
+	WorkSeconds             func(seconds int) string
+	WorkMinutesSeconds      func(minutes int, seconds int) string
+	WorkHoursMinutesSeconds func(hours int, minutes int, seconds int) string
 }
 
 var supplied = map[string]Translation{}
@@ -69,13 +79,97 @@ const (
 	textRequestLatencyHint
 	textUploadRate
 	textDownloadRate
-	textRequestFailures
-	textRequestFailuresHint
 	textConnectionTime
 	textCurrentChannel
 	textLastData
 	textPendingRequests
 	textRateHint
+	textLocalDevice
+	textLocalExecution
+	textAddDevice
+	textSessions
+	textSidebarEmpty
+	textSessionsLoading
+	textSessionsUnavailable
+	textViewDetails
+	textInstallAgent
+	textConfigureAgent
+	textOpenAgentApp
+	textAgentConnecting
+	textSavingAgent
+	textAgentSwitchHint
+	textAgentSetupHint
+	textAgentSetupGuide
+	textHideSidebar
+	textShowSidebar
+	textNewSession
+	textSessionGrouping
+	textGroupByProject
+	textGroupByDevice
+	textGroupByAgent
+	textPinnedSessions
+	textRecentSessions
+	textNoRecentSessions
+	textNoProjectSessions
+	textAllSessionsPinned
+	textSessionCompletedUnread
+	textAllSessions
+	textPinSession
+	textUnpinSession
+	textUnnamedSession
+	textSessionWaiting
+	textSessionRunning
+	textSessionOffline
+	textExecutionDevice
+	textExecutionDirectory
+	textNoCreateAgent
+	textConnectAndSelectAgent
+	textDeviceJoinsDirectory
+	textLocalManagement
+	textSessionFilters
+	textCloseFilters
+	textFilterAll
+	textFilterDevices
+	textFilterAgents
+	textFilterProjects
+	textFilterHint
+	textClearFilters
+	textNoFilterMatches
+	textProjects
+	textWorkDetails
+	textWorkedUnderSecond
+	textRemoveSession
+	textCancelRemoval
+	textSessionRemoved
+	textRemovalArchiveHint
+	textRemovalDetachHint
+	textRemovalDeleteHint
+	textRemovalUnsupported
+	textRemovalBusy
+	textRemovalOffline
+	textRemovalUncertain
+	textJumpToLatest
+	textHomeConnectionHint
+	textYourDeviceID
+	textDeviceNotRegistered
+	textAccessManagement
+	textLocalAgents
+	textManageAgents
+	textDetectingAgents
+	textNoLocalAgents
+	textAgentEnabled
+	textAgentNotEnabled
+	textAgentNotInstalled
+	textAgentUnsupported
+	textAuthorizedControllers
+	textNoAuthorizedControllers
+	textWorkspaceHome
+	textCopyDeviceID
+	textDeviceQRCode
+	textConfigureService
+	textEnableAgent
+	textSessionInformation
+	textWorkingDirectory
 	numTexts
 )
 
@@ -90,13 +184,97 @@ var keyOfText = [numTexts]string{
 	"requestLatencyHint",
 	"uploadRate",
 	"downloadRate",
-	"requestFailures",
-	"requestFailuresHint",
 	"connectionTime",
 	"currentChannel",
 	"lastData",
 	"pendingRequests",
 	"rateHint",
+	"localDevice",
+	"localExecution",
+	"addDevice",
+	"sessions",
+	"sidebarEmpty",
+	"sessionsLoading",
+	"sessionsUnavailable",
+	"viewDetails",
+	"installAgent",
+	"configureAgent",
+	"openAgentApp",
+	"agentConnecting",
+	"savingAgent",
+	"agentSwitchHint",
+	"agentSetupHint",
+	"agentSetupGuide",
+	"hideSidebar",
+	"showSidebar",
+	"newSession",
+	"sessionGrouping",
+	"groupByProject",
+	"groupByDevice",
+	"groupByAgent",
+	"pinnedSessions",
+	"recentSessions",
+	"noRecentSessions",
+	"noProjectSessions",
+	"allSessionsPinned",
+	"sessionCompletedUnread",
+	"allSessions",
+	"pinSession",
+	"unpinSession",
+	"unnamedSession",
+	"sessionWaiting",
+	"sessionRunning",
+	"sessionOffline",
+	"executionDevice",
+	"executionDirectory",
+	"noCreateAgent",
+	"connectAndSelectAgent",
+	"deviceJoinsDirectory",
+	"localManagement",
+	"sessionFilters",
+	"closeFilters",
+	"filterAll",
+	"filterDevices",
+	"filterAgents",
+	"filterProjects",
+	"filterHint",
+	"clearFilters",
+	"noFilterMatches",
+	"projects",
+	"workDetails",
+	"workedUnderSecond",
+	"removeSession",
+	"cancelRemoval",
+	"sessionRemoved",
+	"removalArchiveHint",
+	"removalDetachHint",
+	"removalDeleteHint",
+	"removalUnsupported",
+	"removalBusy",
+	"removalOffline",
+	"removalUncertain",
+	"jumpToLatest",
+	"homeConnectionHint",
+	"yourDeviceID",
+	"deviceNotRegistered",
+	"accessManagement",
+	"localAgents",
+	"manageAgents",
+	"detectingAgents",
+	"noLocalAgents",
+	"agentEnabled",
+	"agentNotEnabled",
+	"agentNotInstalled",
+	"agentUnsupported",
+	"authorizedControllers",
+	"noAuthorizedControllers",
+	"workspaceHome",
+	"copyDeviceID",
+	"deviceQRCode",
+	"configureService",
+	"enableAgent",
+	"sessionInformation",
+	"workingDirectory",
 }
 
 // textsEn are the messages without arguments in en.
@@ -105,17 +283,101 @@ var textsEn = i18n.NewTexts(""+
 	"Queued for upload"+
 	"Retry upload"+
 	"Remove attachment"+
-	"Request response"+
+	"Response latency"+
 	"Last successful RPC, including host processing and queueing; not network RTT. No extra probes are sent."+
 	"Upload"+
 	"Download"+
-	"Request failures"+
-	"Failure rate of the latest 24 completed requests. Watches and cancelled requests are excluded; this is not packet loss."+
 	"Connected for"+
 	"Active channel"+
 	"Last received data"+
 	"Awaiting response"+
-	"RPC frame bytes averaged over five seconds; excludes encryption, socket headers and retransmissions.",
+	"RPC frame bytes averaged over five seconds; excludes encryption, socket headers and retransmissions."+
+	"This device"+
+	"Local"+
+	"Add device"+
+	"Sessions"+
+	"Your sessions will appear here"+
+	"Loading sessions…"+
+	"Sessions are temporarily unavailable"+
+	"View details"+
+	"Install"+
+	"Set up"+
+	"Open the app"+
+	"Connecting…"+
+	"Saving"+
+	"Use this Agent in ReignHub"+
+	"Finish installation and sign-in in the Agent, then check its settings here."+
+	"Setup guide"+
+	"Hide sidebar"+
+	"Show sidebar"+
+	"New session"+
+	"Group sessions"+
+	"By project"+
+	"Device → project"+
+	"Device → Agent → project"+
+	"Pinned"+
+	"Recent"+
+	"No recent sessions"+
+	"No sessions yet"+
+	"All sessions are pinned"+
+	"Completed · unread"+
+	"All sessions"+
+	"Pin session"+
+	"Unpin session"+
+	"Untitled session"+
+	"Waiting for input"+
+	"Running"+
+	"Device offline · status pending sync"+
+	"Execution device"+
+	"Working directory (absolute path on execution device)"+
+	"No Agent on this device can create sessions. Enable one on that device first."+
+	"Connect a device and select a ready Agent first."+
+	"Sessions join the shared list when connected."+
+	"This device and remote access"+
+	"Filter and group"+
+	"Close filters"+
+	"All"+
+	"Devices"+
+	"Agents"+
+	"Projects"+
+	"Select multiple options; no selection includes all."+
+	"Clear filters"+
+	"No matching sessions. Try clearing the filters."+
+	"Projects"+
+	"Work details"+
+	"Worked for less than a second"+
+	"Remove session"+
+	"Cancel"+
+	"Session removed"+
+	"This Agent will archive the session. Its history remains available in the Agent."+
+	"Remove this session from ReignHub on its execution device. The Agent's original history is retained."+
+	"This Agent will delete the session. This action cannot be undone."+
+	"This Agent does not support removing sessions yet."+
+	"Finish or stop the current task before removing this session."+
+	"Reconnect the execution device before removing this session."+
+	"Removal outcome is unconfirmed. Refresh the directory to check; do not submit again."+
+	"Jump to latest"+
+	"Use this device ID or QR code to connect remotely. Manage your local Agents here."+
+	"Your device ID"+
+	"Not registered yet"+
+	"Access management"+
+	"Local Agents"+
+	"Manage Agents"+
+	"Detecting local Agents…"+
+	"No Agents found. Open Agent settings to add one."+
+	"Enabled"+
+	"Not enabled"+
+	"Not installed"+
+	"Unavailable on this platform"+
+	"Authorized controllers"+
+	"No authorized controllers yet."+
+	"Home"+
+	"Copy ID"+
+	"Device QR code"+
+	"Configure service"+
+	"Enable"+
+	"Session information"+
+	"Working directory",
 	[]uint16{
 		6,
 		17,
@@ -125,13 +387,97 @@ var textsEn = i18n.NewTexts(""+
 		103,
 		6,
 		8,
-		16,
-		119,
 		13,
 		14,
 		18,
 		17,
 		100,
+		11,
+		5,
+		10,
+		8,
+		30,
+		19,
+		36,
+		12,
+		7,
+		6,
+		12,
+		13,
+		6,
+		26,
+		75,
+		11,
+		12,
+		12,
+		11,
+		14,
+		10,
+		18,
+		28,
+		6,
+		6,
+		18,
+		15,
+		23,
+		19,
+		12,
+		11,
+		13,
+		16,
+		17,
+		7,
+		37,
+		16,
+		53,
+		77,
+		48,
+		45,
+		29,
+		16,
+		13,
+		3,
+		7,
+		6,
+		8,
+		51,
+		13,
+		47,
+		8,
+		12,
+		29,
+		14,
+		6,
+		15,
+		80,
+		100,
+		65,
+		50,
+		61,
+		60,
+		84,
+		14,
+		81,
+		14,
+		18,
+		17,
+		12,
+		13,
+		25,
+		48,
+		7,
+		11,
+		13,
+		28,
+		22,
+		30,
+		4,
+		7,
+		14,
+		17,
+		6,
+		19,
+		17,
 	})
 
 // textsZhHans are the messages without arguments in zh-Hans.
@@ -140,17 +486,101 @@ var textsZhHans = i18n.NewTexts(""+
 	"等待上传"+
 	"重试上传"+
 	"移除附件"+
-	"请求响应"+
+	"响应延迟"+
 	"最近一次成功请求的耗时，包含设备处理和排队，并非纯网络延迟；不会额外发送探测请求。"+
 	"上传速率"+
 	"下载速率"+
-	"请求失败率"+
-	"最近 24 次已完成请求的失败比例，不含实时订阅和取消的请求；不是丢包率。"+
 	"连接时长"+
 	"当前通道"+
 	"最近接收数据"+
 	"等待响应"+
-	"最近五秒的 RPC 分片平均速率，不含加密、网络头和重传开销。",
+	"最近五秒的 RPC 分片平均速率，不含加密、网络头和重传开销。"+
+	"本机"+
+	"本地"+
+	"添加设备"+
+	"会话"+
+	"会话会显示在这里"+
+	"正在加载会话…"+
+	"暂时无法获取会话"+
+	"查看详情"+
+	"去安装"+
+	"去配置"+
+	"请打开应用"+
+	"连接中…"+
+	"正在保存"+
+	"在 ReignHub 中使用此 Agent"+
+	"先在 Agent 中完成安装和登录，再检查此处的配置。"+
+	"配置指南"+
+	"收起侧边栏"+
+	"展开侧边栏"+
+	"新建会话"+
+	"会话分组"+
+	"按项目聚合"+
+	"设备 → 项目"+
+	"设备 → Agent → 项目"+
+	"置顶"+
+	"最近"+
+	"暂无最近会话"+
+	"暂无会话"+
+	"会话均已置顶"+
+	"已完成 · 未读"+
+	"全部会话"+
+	"置顶会话"+
+	"取消置顶"+
+	"未命名会话"+
+	"等待处理"+
+	"正在执行"+
+	"设备离线 · 状态待同步"+
+	"执行设备"+
+	"工作目录（执行设备上的绝对路径）"+
+	"此设备暂无可新建会话的 Agent，请先在该设备上启用。"+
+	"请先连接设备并选择已就绪的 Agent"+
+	"连接后，会话会自动加入统一列表。"+
+	"本机与远程访问"+
+	"筛选与分组"+
+	"关闭筛选"+
+	"全部"+
+	"设备"+
+	"Agent"+
+	"项目"+
+	"支持多选，不选则包含全部。"+
+	"清除筛选"+
+	"没有匹配的会话，可以清除筛选后重试。"+
+	"项目"+
+	"处理过程"+
+	"已处理不到 1 秒"+
+	"移除会话"+
+	"取消"+
+	"会话已移除"+
+	"此 Agent 会将会话归档，原始历史仍保留在 Agent 中。"+
+	"从执行设备上的 ReignHub 会话目录移除，Agent 中的原始历史仍保留。"+
+	"此 Agent 将删除会话，删除后无法恢复。"+
+	"此 Agent 暂不支持移除会话。"+
+	"请先结束或停止当前任务，再移除此会话。"+
+	"请先重新连接执行设备，再移除此会话。"+
+	"移除结果尚未确认，请刷新目录核实，勿重复提交。"+
+	"回到最新"+
+	"通过设备 ID 或二维码远程连接这台电脑，也可以直接使用本机 Agent。"+
+	"你的设备 ID"+
+	"尚未登记"+
+	"访问授权管理"+
+	"本机 Agent"+
+	"管理 Agent"+
+	"正在检测本机 Agent…"+
+	"暂无本机 Agent，可在 Agent 设置中添加。"+
+	"已启用"+
+	"未启用"+
+	"未安装"+
+	"当前平台不支持"+
+	"已授权的控制端"+
+	"暂无已授权的控制端"+
+	"首页"+
+	"复制 ID"+
+	"设备二维码"+
+	"配置服务"+
+	"启用"+
+	"会话信息"+
+	"工作目录",
 	[]uint16{
 		6,
 		12,
@@ -160,13 +590,97 @@ var textsZhHans = i18n.NewTexts(""+
 		123,
 		12,
 		12,
-		15,
-		103,
 		12,
 		12,
 		18,
 		12,
 		83,
+		6,
+		6,
+		12,
+		6,
+		24,
+		21,
+		24,
+		12,
+		9,
+		9,
+		15,
+		12,
+		12,
+		31,
+		67,
+		12,
+		15,
+		15,
+		12,
+		12,
+		15,
+		17,
+		27,
+		6,
+		6,
+		18,
+		12,
+		18,
+		19,
+		12,
+		12,
+		12,
+		15,
+		12,
+		12,
+		31,
+		12,
+		48,
+		72,
+		45,
+		48,
+		21,
+		15,
+		12,
+		6,
+		6,
+		5,
+		6,
+		39,
+		12,
+		54,
+		6,
+		12,
+		21,
+		12,
+		6,
+		15,
+		68,
+		88,
+		52,
+		37,
+		57,
+		54,
+		69,
+		12,
+		91,
+		15,
+		12,
+		18,
+		12,
+		12,
+		27,
+		52,
+		9,
+		9,
+		9,
+		21,
+		21,
+		27,
+		6,
+		9,
+		15,
+		12,
+		6,
+		12,
+		12,
 	})
 
 // texts returns the messages without arguments in lang, nil for a
@@ -228,6 +742,21 @@ func Supply(lang string, t Translation) {
 	}
 	if t.SecondsAgo != nil {
 		s.SecondsAgo = t.SecondsAgo
+	}
+	if t.FilterMatches != nil {
+		s.FilterMatches = t.FilterMatches
+	}
+	if t.WorkedFor != nil {
+		s.WorkedFor = t.WorkedFor
+	}
+	if t.WorkSeconds != nil {
+		s.WorkSeconds = t.WorkSeconds
+	}
+	if t.WorkMinutesSeconds != nil {
+		s.WorkMinutesSeconds = t.WorkMinutesSeconds
+	}
+	if t.WorkHoursMinutesSeconds != nil {
+		s.WorkHoursMinutesSeconds = t.WorkHoursMinutesSeconds
 	}
 	supplied[lang] = s
 	Catalog.Add(lang)
@@ -294,7 +823,7 @@ func (msgs Messages) UploadFailed(error_ string) string {
 	}
 }
 
-// RequestLatency says "Request response"
+// RequestLatency says "Response latency"
 // in the language the app shows under cx.
 func RequestLatency(cx *core.Scope) string { return For(cx).RequestLatency() }
 
@@ -321,20 +850,6 @@ func DownloadRate(cx *core.Scope) string { return For(cx).DownloadRate() }
 
 // DownloadRate is the package's DownloadRate in the language of msgs.
 func (msgs Messages) DownloadRate() string { return msgs.text(textDownloadRate) }
-
-// RequestFailures says "Request failures"
-// in the language the app shows under cx.
-func RequestFailures(cx *core.Scope) string { return For(cx).RequestFailures() }
-
-// RequestFailures is the package's RequestFailures in the language of msgs.
-func (msgs Messages) RequestFailures() string { return msgs.text(textRequestFailures) }
-
-// RequestFailuresHint says "Failure rate of the latest 24 completed requests. Watches and cancelled requests are excluded; this is not packet loss."
-// in the language the app shows under cx.
-func RequestFailuresHint(cx *core.Scope) string { return For(cx).RequestFailuresHint() }
-
-// RequestFailuresHint is the package's RequestFailuresHint in the language of msgs.
-func (msgs Messages) RequestFailuresHint() string { return msgs.text(textRequestFailuresHint) }
 
 // ConnectionTime says "Connected for"
 // in the language the app shows under cx.
@@ -392,3 +907,719 @@ func (msgs Messages) SecondsAgo(seconds int) string {
 		}
 	}
 }
+
+// LocalDevice says "This device"
+// in the language the app shows under cx.
+func LocalDevice(cx *core.Scope) string { return For(cx).LocalDevice() }
+
+// LocalDevice is the package's LocalDevice in the language of msgs.
+func (msgs Messages) LocalDevice() string { return msgs.text(textLocalDevice) }
+
+// LocalExecution says "Local"
+// in the language the app shows under cx.
+func LocalExecution(cx *core.Scope) string { return For(cx).LocalExecution() }
+
+// LocalExecution is the package's LocalExecution in the language of msgs.
+func (msgs Messages) LocalExecution() string { return msgs.text(textLocalExecution) }
+
+// AddDevice says "Add device"
+// in the language the app shows under cx.
+func AddDevice(cx *core.Scope) string { return For(cx).AddDevice() }
+
+// AddDevice is the package's AddDevice in the language of msgs.
+func (msgs Messages) AddDevice() string { return msgs.text(textAddDevice) }
+
+// Sessions says "Sessions"
+// in the language the app shows under cx.
+func Sessions(cx *core.Scope) string { return For(cx).Sessions() }
+
+// Sessions is the package's Sessions in the language of msgs.
+func (msgs Messages) Sessions() string { return msgs.text(textSessions) }
+
+// SidebarEmpty says "Your sessions will appear here"
+// in the language the app shows under cx.
+func SidebarEmpty(cx *core.Scope) string { return For(cx).SidebarEmpty() }
+
+// SidebarEmpty is the package's SidebarEmpty in the language of msgs.
+func (msgs Messages) SidebarEmpty() string { return msgs.text(textSidebarEmpty) }
+
+// SessionsLoading says "Loading sessions…"
+// in the language the app shows under cx.
+func SessionsLoading(cx *core.Scope) string { return For(cx).SessionsLoading() }
+
+// SessionsLoading is the package's SessionsLoading in the language of msgs.
+func (msgs Messages) SessionsLoading() string { return msgs.text(textSessionsLoading) }
+
+// SessionsUnavailable says "Sessions are temporarily unavailable"
+// in the language the app shows under cx.
+func SessionsUnavailable(cx *core.Scope) string { return For(cx).SessionsUnavailable() }
+
+// SessionsUnavailable is the package's SessionsUnavailable in the language of msgs.
+func (msgs Messages) SessionsUnavailable() string { return msgs.text(textSessionsUnavailable) }
+
+// ViewDetails says "View details"
+// in the language the app shows under cx.
+func ViewDetails(cx *core.Scope) string { return For(cx).ViewDetails() }
+
+// ViewDetails is the package's ViewDetails in the language of msgs.
+func (msgs Messages) ViewDetails() string { return msgs.text(textViewDetails) }
+
+// InstallAgent says "Install"
+// in the language the app shows under cx.
+func InstallAgent(cx *core.Scope) string { return For(cx).InstallAgent() }
+
+// InstallAgent is the package's InstallAgent in the language of msgs.
+func (msgs Messages) InstallAgent() string { return msgs.text(textInstallAgent) }
+
+// ConfigureAgent says "Set up"
+// in the language the app shows under cx.
+func ConfigureAgent(cx *core.Scope) string { return For(cx).ConfigureAgent() }
+
+// ConfigureAgent is the package's ConfigureAgent in the language of msgs.
+func (msgs Messages) ConfigureAgent() string { return msgs.text(textConfigureAgent) }
+
+// OpenAgentApp says "Open the app"
+// in the language the app shows under cx.
+func OpenAgentApp(cx *core.Scope) string { return For(cx).OpenAgentApp() }
+
+// OpenAgentApp is the package's OpenAgentApp in the language of msgs.
+func (msgs Messages) OpenAgentApp() string { return msgs.text(textOpenAgentApp) }
+
+// AgentConnecting says "Connecting…"
+// in the language the app shows under cx.
+func AgentConnecting(cx *core.Scope) string { return For(cx).AgentConnecting() }
+
+// AgentConnecting is the package's AgentConnecting in the language of msgs.
+func (msgs Messages) AgentConnecting() string { return msgs.text(textAgentConnecting) }
+
+// SavingAgent says "Saving"
+// in the language the app shows under cx.
+func SavingAgent(cx *core.Scope) string { return For(cx).SavingAgent() }
+
+// SavingAgent is the package's SavingAgent in the language of msgs.
+func (msgs Messages) SavingAgent() string { return msgs.text(textSavingAgent) }
+
+// AgentSwitchHint says "Use this Agent in ReignHub"
+// in the language the app shows under cx.
+func AgentSwitchHint(cx *core.Scope) string { return For(cx).AgentSwitchHint() }
+
+// AgentSwitchHint is the package's AgentSwitchHint in the language of msgs.
+func (msgs Messages) AgentSwitchHint() string { return msgs.text(textAgentSwitchHint) }
+
+// AgentSetupHint says "Finish installation and sign-in in the Agent, then check its settings here."
+// in the language the app shows under cx.
+func AgentSetupHint(cx *core.Scope) string { return For(cx).AgentSetupHint() }
+
+// AgentSetupHint is the package's AgentSetupHint in the language of msgs.
+func (msgs Messages) AgentSetupHint() string { return msgs.text(textAgentSetupHint) }
+
+// AgentSetupGuide says "Setup guide"
+// in the language the app shows under cx.
+func AgentSetupGuide(cx *core.Scope) string { return For(cx).AgentSetupGuide() }
+
+// AgentSetupGuide is the package's AgentSetupGuide in the language of msgs.
+func (msgs Messages) AgentSetupGuide() string { return msgs.text(textAgentSetupGuide) }
+
+// HideSidebar says "Hide sidebar"
+// in the language the app shows under cx.
+func HideSidebar(cx *core.Scope) string { return For(cx).HideSidebar() }
+
+// HideSidebar is the package's HideSidebar in the language of msgs.
+func (msgs Messages) HideSidebar() string { return msgs.text(textHideSidebar) }
+
+// ShowSidebar says "Show sidebar"
+// in the language the app shows under cx.
+func ShowSidebar(cx *core.Scope) string { return For(cx).ShowSidebar() }
+
+// ShowSidebar is the package's ShowSidebar in the language of msgs.
+func (msgs Messages) ShowSidebar() string { return msgs.text(textShowSidebar) }
+
+// NewSession says "New session"
+// in the language the app shows under cx.
+func NewSession(cx *core.Scope) string { return For(cx).NewSession() }
+
+// NewSession is the package's NewSession in the language of msgs.
+func (msgs Messages) NewSession() string { return msgs.text(textNewSession) }
+
+// SessionGrouping says "Group sessions"
+// in the language the app shows under cx.
+func SessionGrouping(cx *core.Scope) string { return For(cx).SessionGrouping() }
+
+// SessionGrouping is the package's SessionGrouping in the language of msgs.
+func (msgs Messages) SessionGrouping() string { return msgs.text(textSessionGrouping) }
+
+// GroupByProject says "By project"
+// in the language the app shows under cx.
+func GroupByProject(cx *core.Scope) string { return For(cx).GroupByProject() }
+
+// GroupByProject is the package's GroupByProject in the language of msgs.
+func (msgs Messages) GroupByProject() string { return msgs.text(textGroupByProject) }
+
+// GroupByDevice says "Device → project"
+// in the language the app shows under cx.
+func GroupByDevice(cx *core.Scope) string { return For(cx).GroupByDevice() }
+
+// GroupByDevice is the package's GroupByDevice in the language of msgs.
+func (msgs Messages) GroupByDevice() string { return msgs.text(textGroupByDevice) }
+
+// GroupByAgent says "Device → Agent → project"
+// in the language the app shows under cx.
+func GroupByAgent(cx *core.Scope) string { return For(cx).GroupByAgent() }
+
+// GroupByAgent is the package's GroupByAgent in the language of msgs.
+func (msgs Messages) GroupByAgent() string { return msgs.text(textGroupByAgent) }
+
+// PinnedSessions says "Pinned"
+// in the language the app shows under cx.
+func PinnedSessions(cx *core.Scope) string { return For(cx).PinnedSessions() }
+
+// PinnedSessions is the package's PinnedSessions in the language of msgs.
+func (msgs Messages) PinnedSessions() string { return msgs.text(textPinnedSessions) }
+
+// RecentSessions says "Recent"
+// in the language the app shows under cx.
+func RecentSessions(cx *core.Scope) string { return For(cx).RecentSessions() }
+
+// RecentSessions is the package's RecentSessions in the language of msgs.
+func (msgs Messages) RecentSessions() string { return msgs.text(textRecentSessions) }
+
+// NoRecentSessions says "No recent sessions"
+// in the language the app shows under cx.
+func NoRecentSessions(cx *core.Scope) string { return For(cx).NoRecentSessions() }
+
+// NoRecentSessions is the package's NoRecentSessions in the language of msgs.
+func (msgs Messages) NoRecentSessions() string { return msgs.text(textNoRecentSessions) }
+
+// NoProjectSessions says "No sessions yet"
+// in the language the app shows under cx.
+func NoProjectSessions(cx *core.Scope) string { return For(cx).NoProjectSessions() }
+
+// NoProjectSessions is the package's NoProjectSessions in the language of msgs.
+func (msgs Messages) NoProjectSessions() string { return msgs.text(textNoProjectSessions) }
+
+// AllSessionsPinned says "All sessions are pinned"
+// in the language the app shows under cx.
+func AllSessionsPinned(cx *core.Scope) string { return For(cx).AllSessionsPinned() }
+
+// AllSessionsPinned is the package's AllSessionsPinned in the language of msgs.
+func (msgs Messages) AllSessionsPinned() string { return msgs.text(textAllSessionsPinned) }
+
+// SessionCompletedUnread says "Completed · unread"
+// in the language the app shows under cx.
+func SessionCompletedUnread(cx *core.Scope) string { return For(cx).SessionCompletedUnread() }
+
+// SessionCompletedUnread is the package's SessionCompletedUnread in the language of msgs.
+func (msgs Messages) SessionCompletedUnread() string { return msgs.text(textSessionCompletedUnread) }
+
+// AllSessions says "All sessions"
+// in the language the app shows under cx.
+func AllSessions(cx *core.Scope) string { return For(cx).AllSessions() }
+
+// AllSessions is the package's AllSessions in the language of msgs.
+func (msgs Messages) AllSessions() string { return msgs.text(textAllSessions) }
+
+// PinSession says "Pin session"
+// in the language the app shows under cx.
+func PinSession(cx *core.Scope) string { return For(cx).PinSession() }
+
+// PinSession is the package's PinSession in the language of msgs.
+func (msgs Messages) PinSession() string { return msgs.text(textPinSession) }
+
+// UnpinSession says "Unpin session"
+// in the language the app shows under cx.
+func UnpinSession(cx *core.Scope) string { return For(cx).UnpinSession() }
+
+// UnpinSession is the package's UnpinSession in the language of msgs.
+func (msgs Messages) UnpinSession() string { return msgs.text(textUnpinSession) }
+
+// UnnamedSession says "Untitled session"
+// in the language the app shows under cx.
+func UnnamedSession(cx *core.Scope) string { return For(cx).UnnamedSession() }
+
+// UnnamedSession is the package's UnnamedSession in the language of msgs.
+func (msgs Messages) UnnamedSession() string { return msgs.text(textUnnamedSession) }
+
+// SessionWaiting says "Waiting for input"
+// in the language the app shows under cx.
+func SessionWaiting(cx *core.Scope) string { return For(cx).SessionWaiting() }
+
+// SessionWaiting is the package's SessionWaiting in the language of msgs.
+func (msgs Messages) SessionWaiting() string { return msgs.text(textSessionWaiting) }
+
+// SessionRunning says "Running"
+// in the language the app shows under cx.
+func SessionRunning(cx *core.Scope) string { return For(cx).SessionRunning() }
+
+// SessionRunning is the package's SessionRunning in the language of msgs.
+func (msgs Messages) SessionRunning() string { return msgs.text(textSessionRunning) }
+
+// SessionOffline says "Device offline · status pending sync"
+// in the language the app shows under cx.
+func SessionOffline(cx *core.Scope) string { return For(cx).SessionOffline() }
+
+// SessionOffline is the package's SessionOffline in the language of msgs.
+func (msgs Messages) SessionOffline() string { return msgs.text(textSessionOffline) }
+
+// ExecutionDevice says "Execution device"
+// in the language the app shows under cx.
+func ExecutionDevice(cx *core.Scope) string { return For(cx).ExecutionDevice() }
+
+// ExecutionDevice is the package's ExecutionDevice in the language of msgs.
+func (msgs Messages) ExecutionDevice() string { return msgs.text(textExecutionDevice) }
+
+// ExecutionDirectory says "Working directory (absolute path on execution device)"
+// in the language the app shows under cx.
+func ExecutionDirectory(cx *core.Scope) string { return For(cx).ExecutionDirectory() }
+
+// ExecutionDirectory is the package's ExecutionDirectory in the language of msgs.
+func (msgs Messages) ExecutionDirectory() string { return msgs.text(textExecutionDirectory) }
+
+// NoCreateAgent says "No Agent on this device can create sessions. Enable one on that device first."
+// in the language the app shows under cx.
+func NoCreateAgent(cx *core.Scope) string { return For(cx).NoCreateAgent() }
+
+// NoCreateAgent is the package's NoCreateAgent in the language of msgs.
+func (msgs Messages) NoCreateAgent() string { return msgs.text(textNoCreateAgent) }
+
+// ConnectAndSelectAgent says "Connect a device and select a ready Agent first."
+// in the language the app shows under cx.
+func ConnectAndSelectAgent(cx *core.Scope) string { return For(cx).ConnectAndSelectAgent() }
+
+// ConnectAndSelectAgent is the package's ConnectAndSelectAgent in the language of msgs.
+func (msgs Messages) ConnectAndSelectAgent() string { return msgs.text(textConnectAndSelectAgent) }
+
+// DeviceJoinsDirectory says "Sessions join the shared list when connected."
+// in the language the app shows under cx.
+func DeviceJoinsDirectory(cx *core.Scope) string { return For(cx).DeviceJoinsDirectory() }
+
+// DeviceJoinsDirectory is the package's DeviceJoinsDirectory in the language of msgs.
+func (msgs Messages) DeviceJoinsDirectory() string { return msgs.text(textDeviceJoinsDirectory) }
+
+// LocalManagement says "This device and remote access"
+// in the language the app shows under cx.
+func LocalManagement(cx *core.Scope) string { return For(cx).LocalManagement() }
+
+// LocalManagement is the package's LocalManagement in the language of msgs.
+func (msgs Messages) LocalManagement() string { return msgs.text(textLocalManagement) }
+
+// SessionFilters says "Filter and group"
+// in the language the app shows under cx.
+func SessionFilters(cx *core.Scope) string { return For(cx).SessionFilters() }
+
+// SessionFilters is the package's SessionFilters in the language of msgs.
+func (msgs Messages) SessionFilters() string { return msgs.text(textSessionFilters) }
+
+// CloseFilters says "Close filters"
+// in the language the app shows under cx.
+func CloseFilters(cx *core.Scope) string { return For(cx).CloseFilters() }
+
+// CloseFilters is the package's CloseFilters in the language of msgs.
+func (msgs Messages) CloseFilters() string { return msgs.text(textCloseFilters) }
+
+// FilterAll says "All"
+// in the language the app shows under cx.
+func FilterAll(cx *core.Scope) string { return For(cx).FilterAll() }
+
+// FilterAll is the package's FilterAll in the language of msgs.
+func (msgs Messages) FilterAll() string { return msgs.text(textFilterAll) }
+
+// FilterDevices says "Devices"
+// in the language the app shows under cx.
+func FilterDevices(cx *core.Scope) string { return For(cx).FilterDevices() }
+
+// FilterDevices is the package's FilterDevices in the language of msgs.
+func (msgs Messages) FilterDevices() string { return msgs.text(textFilterDevices) }
+
+// FilterAgents says "Agents"
+// in the language the app shows under cx.
+func FilterAgents(cx *core.Scope) string { return For(cx).FilterAgents() }
+
+// FilterAgents is the package's FilterAgents in the language of msgs.
+func (msgs Messages) FilterAgents() string { return msgs.text(textFilterAgents) }
+
+// FilterProjects says "Projects"
+// in the language the app shows under cx.
+func FilterProjects(cx *core.Scope) string { return For(cx).FilterProjects() }
+
+// FilterProjects is the package's FilterProjects in the language of msgs.
+func (msgs Messages) FilterProjects() string { return msgs.text(textFilterProjects) }
+
+// FilterHint says "Select multiple options; no selection includes all."
+// in the language the app shows under cx.
+func FilterHint(cx *core.Scope) string { return For(cx).FilterHint() }
+
+// FilterHint is the package's FilterHint in the language of msgs.
+func (msgs Messages) FilterHint() string { return msgs.text(textFilterHint) }
+
+// ClearFilters says "Clear filters"
+// in the language the app shows under cx.
+func ClearFilters(cx *core.Scope) string { return For(cx).ClearFilters() }
+
+// ClearFilters is the package's ClearFilters in the language of msgs.
+func (msgs Messages) ClearFilters() string { return msgs.text(textClearFilters) }
+
+// NoFilterMatches says "No matching sessions. Try clearing the filters."
+// in the language the app shows under cx.
+func NoFilterMatches(cx *core.Scope) string { return For(cx).NoFilterMatches() }
+
+// NoFilterMatches is the package's NoFilterMatches in the language of msgs.
+func (msgs Messages) NoFilterMatches() string { return msgs.text(textNoFilterMatches) }
+
+// FilterMatches says "{count} sessions"
+// in the language the app shows under cx.
+func FilterMatches(cx *core.Scope, count string) string { return For(cx).FilterMatches(count) }
+
+// FilterMatches is the package's FilterMatches in the language of msgs.
+func (msgs Messages) FilterMatches(count string) string {
+	if i18n.IsPseudo(msgs.lang) {
+		return i18n.Pseudo(msgs.lang, Messages{lang: Source, mark: true}.FilterMatches(count))
+	}
+	for lang := msgs.lang; ; lang = i18n.Parent(lang) {
+		if f := supplied[lang].FilterMatches; f != nil {
+			return f(count)
+		}
+		switch lang {
+		case "", "en":
+			return msgs.arg(count) + " sessions"
+		case "zh-Hans":
+			return count + " 个会话"
+		}
+	}
+}
+
+// Projects says "Projects"
+// in the language the app shows under cx.
+func Projects(cx *core.Scope) string { return For(cx).Projects() }
+
+// Projects is the package's Projects in the language of msgs.
+func (msgs Messages) Projects() string { return msgs.text(textProjects) }
+
+// WorkDetails says "Work details"
+// in the language the app shows under cx.
+func WorkDetails(cx *core.Scope) string { return For(cx).WorkDetails() }
+
+// WorkDetails is the package's WorkDetails in the language of msgs.
+func (msgs Messages) WorkDetails() string { return msgs.text(textWorkDetails) }
+
+// WorkedFor says "Worked for {duration}"
+// in the language the app shows under cx.
+func WorkedFor(cx *core.Scope, duration string) string { return For(cx).WorkedFor(duration) }
+
+// WorkedFor is the package's WorkedFor in the language of msgs.
+func (msgs Messages) WorkedFor(duration string) string {
+	if i18n.IsPseudo(msgs.lang) {
+		return i18n.Pseudo(msgs.lang, Messages{lang: Source, mark: true}.WorkedFor(duration))
+	}
+	for lang := msgs.lang; ; lang = i18n.Parent(lang) {
+		if f := supplied[lang].WorkedFor; f != nil {
+			return f(duration)
+		}
+		switch lang {
+		case "", "en":
+			return "Worked for " + msgs.arg(duration)
+		case "zh-Hans":
+			return "已处理 " + duration
+		}
+	}
+}
+
+// WorkedUnderSecond says "Worked for less than a second"
+// in the language the app shows under cx.
+func WorkedUnderSecond(cx *core.Scope) string { return For(cx).WorkedUnderSecond() }
+
+// WorkedUnderSecond is the package's WorkedUnderSecond in the language of msgs.
+func (msgs Messages) WorkedUnderSecond() string { return msgs.text(textWorkedUnderSecond) }
+
+// WorkSeconds says "{seconds, number, integer}s"
+// in the language the app shows under cx.
+func WorkSeconds(cx *core.Scope, seconds int) string { return For(cx).WorkSeconds(seconds) }
+
+// WorkSeconds is the package's WorkSeconds in the language of msgs.
+func (msgs Messages) WorkSeconds(seconds int) string {
+	if i18n.IsPseudo(msgs.lang) {
+		return i18n.Pseudo(msgs.lang, Messages{lang: Source, mark: true}.WorkSeconds(seconds))
+	}
+	for lang := msgs.lang; ; lang = i18n.Parent(lang) {
+		if f := supplied[lang].WorkSeconds; f != nil {
+			return f(seconds)
+		}
+		switch lang {
+		case "", "en":
+			return msgs.arg(i18n.FormatInteger("en", float64(seconds))) + "s"
+		case "zh-Hans":
+			return i18n.FormatInteger("zh-Hans", float64(seconds)) + " 秒"
+		}
+	}
+}
+
+// WorkMinutesSeconds says "{minutes, number, integer}m {seconds, number, integer}s"
+// in the language the app shows under cx.
+func WorkMinutesSeconds(cx *core.Scope, minutes int, seconds int) string {
+	return For(cx).WorkMinutesSeconds(minutes, seconds)
+}
+
+// WorkMinutesSeconds is the package's WorkMinutesSeconds in the language of msgs.
+func (msgs Messages) WorkMinutesSeconds(minutes int, seconds int) string {
+	if i18n.IsPseudo(msgs.lang) {
+		return i18n.Pseudo(msgs.lang, Messages{lang: Source, mark: true}.WorkMinutesSeconds(minutes, seconds))
+	}
+	for lang := msgs.lang; ; lang = i18n.Parent(lang) {
+		if f := supplied[lang].WorkMinutesSeconds; f != nil {
+			return f(minutes, seconds)
+		}
+		switch lang {
+		case "", "en":
+			return msgs.arg(i18n.FormatInteger("en", float64(minutes))) + "m " + msgs.arg(i18n.FormatInteger("en", float64(seconds))) + "s"
+		case "zh-Hans":
+			return i18n.FormatInteger("zh-Hans", float64(minutes)) + " 分 " + i18n.FormatInteger("zh-Hans", float64(seconds)) + " 秒"
+		}
+	}
+}
+
+// WorkHoursMinutesSeconds says "{hours, number, integer}h {minutes, number, integer}m {seconds, number, integer}s"
+// in the language the app shows under cx.
+func WorkHoursMinutesSeconds(cx *core.Scope, hours int, minutes int, seconds int) string {
+	return For(cx).WorkHoursMinutesSeconds(hours, minutes, seconds)
+}
+
+// WorkHoursMinutesSeconds is the package's WorkHoursMinutesSeconds in the language of msgs.
+func (msgs Messages) WorkHoursMinutesSeconds(hours int, minutes int, seconds int) string {
+	if i18n.IsPseudo(msgs.lang) {
+		return i18n.Pseudo(msgs.lang, Messages{lang: Source, mark: true}.WorkHoursMinutesSeconds(hours, minutes, seconds))
+	}
+	for lang := msgs.lang; ; lang = i18n.Parent(lang) {
+		if f := supplied[lang].WorkHoursMinutesSeconds; f != nil {
+			return f(hours, minutes, seconds)
+		}
+		switch lang {
+		case "", "en":
+			return msgs.arg(i18n.FormatInteger("en", float64(hours))) + "h " + msgs.arg(i18n.FormatInteger("en", float64(minutes))) + "m " + msgs.arg(i18n.FormatInteger("en", float64(seconds))) + "s"
+		case "zh-Hans":
+			return i18n.FormatInteger("zh-Hans", float64(hours)) + " 小时 " + i18n.FormatInteger("zh-Hans", float64(minutes)) + " 分 " + i18n.FormatInteger("zh-Hans", float64(seconds)) + " 秒"
+		}
+	}
+}
+
+// RemoveSession says "Remove session"
+// in the language the app shows under cx.
+func RemoveSession(cx *core.Scope) string { return For(cx).RemoveSession() }
+
+// RemoveSession is the package's RemoveSession in the language of msgs.
+func (msgs Messages) RemoveSession() string { return msgs.text(textRemoveSession) }
+
+// CancelRemoval says "Cancel"
+// in the language the app shows under cx.
+func CancelRemoval(cx *core.Scope) string { return For(cx).CancelRemoval() }
+
+// CancelRemoval is the package's CancelRemoval in the language of msgs.
+func (msgs Messages) CancelRemoval() string { return msgs.text(textCancelRemoval) }
+
+// SessionRemoved says "Session removed"
+// in the language the app shows under cx.
+func SessionRemoved(cx *core.Scope) string { return For(cx).SessionRemoved() }
+
+// SessionRemoved is the package's SessionRemoved in the language of msgs.
+func (msgs Messages) SessionRemoved() string { return msgs.text(textSessionRemoved) }
+
+// RemovalArchiveHint says "This Agent will archive the session. Its history remains available in the Agent."
+// in the language the app shows under cx.
+func RemovalArchiveHint(cx *core.Scope) string { return For(cx).RemovalArchiveHint() }
+
+// RemovalArchiveHint is the package's RemovalArchiveHint in the language of msgs.
+func (msgs Messages) RemovalArchiveHint() string { return msgs.text(textRemovalArchiveHint) }
+
+// RemovalDetachHint says "Remove this session from ReignHub on its execution device. The Agent's original history is retained."
+// in the language the app shows under cx.
+func RemovalDetachHint(cx *core.Scope) string { return For(cx).RemovalDetachHint() }
+
+// RemovalDetachHint is the package's RemovalDetachHint in the language of msgs.
+func (msgs Messages) RemovalDetachHint() string { return msgs.text(textRemovalDetachHint) }
+
+// RemovalDeleteHint says "This Agent will delete the session. This action cannot be undone."
+// in the language the app shows under cx.
+func RemovalDeleteHint(cx *core.Scope) string { return For(cx).RemovalDeleteHint() }
+
+// RemovalDeleteHint is the package's RemovalDeleteHint in the language of msgs.
+func (msgs Messages) RemovalDeleteHint() string { return msgs.text(textRemovalDeleteHint) }
+
+// RemovalUnsupported says "This Agent does not support removing sessions yet."
+// in the language the app shows under cx.
+func RemovalUnsupported(cx *core.Scope) string { return For(cx).RemovalUnsupported() }
+
+// RemovalUnsupported is the package's RemovalUnsupported in the language of msgs.
+func (msgs Messages) RemovalUnsupported() string { return msgs.text(textRemovalUnsupported) }
+
+// RemovalBusy says "Finish or stop the current task before removing this session."
+// in the language the app shows under cx.
+func RemovalBusy(cx *core.Scope) string { return For(cx).RemovalBusy() }
+
+// RemovalBusy is the package's RemovalBusy in the language of msgs.
+func (msgs Messages) RemovalBusy() string { return msgs.text(textRemovalBusy) }
+
+// RemovalOffline says "Reconnect the execution device before removing this session."
+// in the language the app shows under cx.
+func RemovalOffline(cx *core.Scope) string { return For(cx).RemovalOffline() }
+
+// RemovalOffline is the package's RemovalOffline in the language of msgs.
+func (msgs Messages) RemovalOffline() string { return msgs.text(textRemovalOffline) }
+
+// RemovalUncertain says "Removal outcome is unconfirmed. Refresh the directory to check; do not submit again."
+// in the language the app shows under cx.
+func RemovalUncertain(cx *core.Scope) string { return For(cx).RemovalUncertain() }
+
+// RemovalUncertain is the package's RemovalUncertain in the language of msgs.
+func (msgs Messages) RemovalUncertain() string { return msgs.text(textRemovalUncertain) }
+
+// JumpToLatest says "Jump to latest"
+// in the language the app shows under cx.
+func JumpToLatest(cx *core.Scope) string { return For(cx).JumpToLatest() }
+
+// JumpToLatest is the package's JumpToLatest in the language of msgs.
+func (msgs Messages) JumpToLatest() string { return msgs.text(textJumpToLatest) }
+
+// HomeConnectionHint says "Use this device ID or QR code to connect remotely. Manage your local Agents here."
+// in the language the app shows under cx.
+func HomeConnectionHint(cx *core.Scope) string { return For(cx).HomeConnectionHint() }
+
+// HomeConnectionHint is the package's HomeConnectionHint in the language of msgs.
+func (msgs Messages) HomeConnectionHint() string { return msgs.text(textHomeConnectionHint) }
+
+// YourDeviceID says "Your device ID"
+// in the language the app shows under cx.
+func YourDeviceID(cx *core.Scope) string { return For(cx).YourDeviceID() }
+
+// YourDeviceID is the package's YourDeviceID in the language of msgs.
+func (msgs Messages) YourDeviceID() string { return msgs.text(textYourDeviceID) }
+
+// DeviceNotRegistered says "Not registered yet"
+// in the language the app shows under cx.
+func DeviceNotRegistered(cx *core.Scope) string { return For(cx).DeviceNotRegistered() }
+
+// DeviceNotRegistered is the package's DeviceNotRegistered in the language of msgs.
+func (msgs Messages) DeviceNotRegistered() string { return msgs.text(textDeviceNotRegistered) }
+
+// AccessManagement says "Access management"
+// in the language the app shows under cx.
+func AccessManagement(cx *core.Scope) string { return For(cx).AccessManagement() }
+
+// AccessManagement is the package's AccessManagement in the language of msgs.
+func (msgs Messages) AccessManagement() string { return msgs.text(textAccessManagement) }
+
+// LocalAgents says "Local Agents"
+// in the language the app shows under cx.
+func LocalAgents(cx *core.Scope) string { return For(cx).LocalAgents() }
+
+// LocalAgents is the package's LocalAgents in the language of msgs.
+func (msgs Messages) LocalAgents() string { return msgs.text(textLocalAgents) }
+
+// ManageAgents says "Manage Agents"
+// in the language the app shows under cx.
+func ManageAgents(cx *core.Scope) string { return For(cx).ManageAgents() }
+
+// ManageAgents is the package's ManageAgents in the language of msgs.
+func (msgs Messages) ManageAgents() string { return msgs.text(textManageAgents) }
+
+// DetectingAgents says "Detecting local Agents…"
+// in the language the app shows under cx.
+func DetectingAgents(cx *core.Scope) string { return For(cx).DetectingAgents() }
+
+// DetectingAgents is the package's DetectingAgents in the language of msgs.
+func (msgs Messages) DetectingAgents() string { return msgs.text(textDetectingAgents) }
+
+// NoLocalAgents says "No Agents found. Open Agent settings to add one."
+// in the language the app shows under cx.
+func NoLocalAgents(cx *core.Scope) string { return For(cx).NoLocalAgents() }
+
+// NoLocalAgents is the package's NoLocalAgents in the language of msgs.
+func (msgs Messages) NoLocalAgents() string { return msgs.text(textNoLocalAgents) }
+
+// AgentEnabled says "Enabled"
+// in the language the app shows under cx.
+func AgentEnabled(cx *core.Scope) string { return For(cx).AgentEnabled() }
+
+// AgentEnabled is the package's AgentEnabled in the language of msgs.
+func (msgs Messages) AgentEnabled() string { return msgs.text(textAgentEnabled) }
+
+// AgentNotEnabled says "Not enabled"
+// in the language the app shows under cx.
+func AgentNotEnabled(cx *core.Scope) string { return For(cx).AgentNotEnabled() }
+
+// AgentNotEnabled is the package's AgentNotEnabled in the language of msgs.
+func (msgs Messages) AgentNotEnabled() string { return msgs.text(textAgentNotEnabled) }
+
+// AgentNotInstalled says "Not installed"
+// in the language the app shows under cx.
+func AgentNotInstalled(cx *core.Scope) string { return For(cx).AgentNotInstalled() }
+
+// AgentNotInstalled is the package's AgentNotInstalled in the language of msgs.
+func (msgs Messages) AgentNotInstalled() string { return msgs.text(textAgentNotInstalled) }
+
+// AgentUnsupported says "Unavailable on this platform"
+// in the language the app shows under cx.
+func AgentUnsupported(cx *core.Scope) string { return For(cx).AgentUnsupported() }
+
+// AgentUnsupported is the package's AgentUnsupported in the language of msgs.
+func (msgs Messages) AgentUnsupported() string { return msgs.text(textAgentUnsupported) }
+
+// AuthorizedControllers says "Authorized controllers"
+// in the language the app shows under cx.
+func AuthorizedControllers(cx *core.Scope) string { return For(cx).AuthorizedControllers() }
+
+// AuthorizedControllers is the package's AuthorizedControllers in the language of msgs.
+func (msgs Messages) AuthorizedControllers() string { return msgs.text(textAuthorizedControllers) }
+
+// NoAuthorizedControllers says "No authorized controllers yet."
+// in the language the app shows under cx.
+func NoAuthorizedControllers(cx *core.Scope) string { return For(cx).NoAuthorizedControllers() }
+
+// NoAuthorizedControllers is the package's NoAuthorizedControllers in the language of msgs.
+func (msgs Messages) NoAuthorizedControllers() string { return msgs.text(textNoAuthorizedControllers) }
+
+// WorkspaceHome says "Home"
+// in the language the app shows under cx.
+func WorkspaceHome(cx *core.Scope) string { return For(cx).WorkspaceHome() }
+
+// WorkspaceHome is the package's WorkspaceHome in the language of msgs.
+func (msgs Messages) WorkspaceHome() string { return msgs.text(textWorkspaceHome) }
+
+// CopyDeviceID says "Copy ID"
+// in the language the app shows under cx.
+func CopyDeviceID(cx *core.Scope) string { return For(cx).CopyDeviceID() }
+
+// CopyDeviceID is the package's CopyDeviceID in the language of msgs.
+func (msgs Messages) CopyDeviceID() string { return msgs.text(textCopyDeviceID) }
+
+// DeviceQRCode says "Device QR code"
+// in the language the app shows under cx.
+func DeviceQRCode(cx *core.Scope) string { return For(cx).DeviceQRCode() }
+
+// DeviceQRCode is the package's DeviceQRCode in the language of msgs.
+func (msgs Messages) DeviceQRCode() string { return msgs.text(textDeviceQRCode) }
+
+// ConfigureService says "Configure service"
+// in the language the app shows under cx.
+func ConfigureService(cx *core.Scope) string { return For(cx).ConfigureService() }
+
+// ConfigureService is the package's ConfigureService in the language of msgs.
+func (msgs Messages) ConfigureService() string { return msgs.text(textConfigureService) }
+
+// EnableAgent says "Enable"
+// in the language the app shows under cx.
+func EnableAgent(cx *core.Scope) string { return For(cx).EnableAgent() }
+
+// EnableAgent is the package's EnableAgent in the language of msgs.
+func (msgs Messages) EnableAgent() string { return msgs.text(textEnableAgent) }
+
+// SessionInformation says "Session information"
+// in the language the app shows under cx.
+func SessionInformation(cx *core.Scope) string { return For(cx).SessionInformation() }
+
+// SessionInformation is the package's SessionInformation in the language of msgs.
+func (msgs Messages) SessionInformation() string { return msgs.text(textSessionInformation) }
+
+// WorkingDirectory says "Working directory"
+// in the language the app shows under cx.
+func WorkingDirectory(cx *core.Scope) string { return For(cx).WorkingDirectory() }
+
+// WorkingDirectory is the package's WorkingDirectory in the language of msgs.
+func (msgs Messages) WorkingDirectory() string { return msgs.text(textWorkingDirectory) }

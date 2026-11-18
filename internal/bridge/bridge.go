@@ -208,6 +208,13 @@ func CallContext(parent context.Context, raw string) string {
 		if err != nil {
 			return answer(nil, err)
 		}
+		// The controller sees the local runtime as an ordinary environment.
+		// Attaching it needs neither a service identity nor a network connection.
+		name := "本机"
+		if c, err := config.Load(dir); err == nil && c.DeviceName != "" {
+			name = c.DeviceName
+		}
+		h.SetLocal(embedded, name)
 		if in.Method == "host.bootstrap" {
 			out = map[string]any{"ready": true, "pid": os.Getpid(), "transport": "embedded"}
 		} else {

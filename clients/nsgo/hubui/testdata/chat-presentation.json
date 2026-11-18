@@ -1,6 +1,6 @@
 [
   {
-    "name": "completed turn shows only the conversation",
+    "name": "completed turn folds work before the final answer",
     "transcript": {
       "session": {"id":"session","providerId":"codex-app","status":"idle"},
       "turns": [{"id":"done","status":"completed","items":[
@@ -12,7 +12,7 @@
         {"id":"final","role":"assistant","type":"agentMessage","phase":"final_answer","text":"All done"}
       ]}]
     },
-    "ids": ["done|u","done|comment","done|final"], "roles": ["user","assistant","assistant"], "live": [false,false,false], "thinking": false
+    "ids": ["done|u","done|work|done|comment","done|final"], "roles": ["user","work","assistant"], "live": [false,false,false], "thinking": false
   },
   {
     "name": "active mixed text and tool groups keep source order",

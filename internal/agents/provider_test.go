@@ -220,6 +220,16 @@ func TestACPSubprocessLifecycle(t *testing.T) {
 	}
 	cancelRequest()
 	eventually(t, func() bool { return len(p.Approvals()) == 1 })
+	started, _ := p.Transcript(ctx, s.ID, "")
+	if started.Session.RecencyAt <= 0 {
+		t.Fatal("submission did not record recency")
+	}
+	title, update := "Renamed during streaming", time.Now().Add(time.Hour).Format(time.RFC3339Nano)
+	p.metadata(s.ID, &title, &update)
+	progress, _ := p.Transcript(ctx, s.ID, "")
+	if progress.Session.RecencyAt != started.Session.RecencyAt {
+		t.Fatal("metadata/progress changed conversation recency")
+	}
 	a := p.Approvals()[0]
 	if err = p.Decide(ctx, a.ID, provider.Decision{Decision: "invented"}); err == nil {
 		t.Fatal("accepted an option the Agent did not offer")
@@ -231,6 +241,9 @@ func TestACPSubprocessLifecycle(t *testing.T) {
 	transcript, err := p.Transcript(ctx, s.ID, "")
 	if err != nil {
 		t.Fatal(err)
+	}
+	if transcript.Session.RecencyAt < started.Session.RecencyAt || transcript.Session.RecencyAt != transcript.Turns[len(transcript.Turns)-1].RecencyAt {
+		t.Fatal("completion boundary is missing from directory/history")
 	}
 	raw, _ := json.Marshal(transcript)
 	if strings.Contains(string(raw), "private reasoning") || strings.Contains(string(raw), "secret raw output") {

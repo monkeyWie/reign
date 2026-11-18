@@ -33,6 +33,8 @@ func (s *State) refreshDevicePresence() {
 			}
 			if err == nil {
 				s.applyDevicePresence(objects(v))
+			} else {
+				s.autoReconnect()
 			}
 			s.changed()
 		})
@@ -116,11 +118,15 @@ func (s *State) devicePresenceIndicator(cx *core.Scope, d func() Object) core.No
 // Navigation is local. Connection setup runs behind the status indicator and
 // must never gate reading cached sessions or messages.
 func (s *State) openDevice(id string) {
+	s.selectDevice(id)
+	s.connectSavedDevice(id)
+}
+
+func (s *State) connectSavedDevice(id string) {
 	for _, d := range s.devices {
 		if str(d, "id") != id {
 			continue
 		}
-		s.selectDevice(id)
 		if flag(d, "connected") || s.connection(id).reconnecting {
 			return
 		}

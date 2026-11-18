@@ -3,7 +3,6 @@ package hubui
 import (
 	"fmt"
 	"regexp"
-	"sort"
 	"strings"
 	"unicode/utf16"
 
@@ -12,87 +11,16 @@ import (
 
 type Directory struct {
 	Key, Path, Title string
-	Sessions         []Object
 }
 type Message struct {
 	ID, Role, Text, Turn    string
 	Delivery, DeliveryError string
 	Live                    bool
 	Timestamp               int64
+	DurationMS              *int64
 	Attachments             []Object
 	Tools                   []Object
-}
-
-func directories(sessions []Object) []Directory {
-	unique := map[string]Object{}
-	preferred := func(s Object) bool {
-		return str(s, "providerId") == "codex-app" && str(s, "sourceKind") == "app" || str(s, "providerId") == "codex-cli" && str(s, "sourceKind") == "cli"
-	}
-	for _, s := range sessions {
-		p := str(s, "providerId")
-		if !visibleSession(s) || str(s, "sourceKind") == "vscode" {
-			continue
-		}
-		family := agentFamily(p)
-		key := family + "|" + str(s, "id")
-		old := unique[key]
-		if old == nil || preferred(s) && !preferred(old) || preferred(s) == preferred(old) && number(s, "updatedAt") > number(old, "updatedAt") {
-			unique[key] = s
-		}
-	}
-	ordered := make([]Object, 0, len(unique))
-	for _, session := range unique {
-		ordered = append(ordered, session)
-	}
-	sort.Slice(ordered, func(i, j int) bool {
-		if a, b := number(ordered[i], "updatedAt"), number(ordered[j], "updatedAt"); a != b {
-			return a > b
-		}
-		return str(ordered[i], "providerId")+"|"+str(ordered[i], "id") < str(ordered[j], "providerId")+"|"+str(ordered[j], "id")
-	})
-	groups := map[string]*Directory{}
-	titled := map[string]bool{}
-	for _, s := range ordered {
-		directory := projectDirectory(s)
-		group := groups[directory.Key]
-		if group == nil {
-			group = &directory
-			groups[directory.Key] = group
-		}
-		if group.Path == "" && directory.Path != "" {
-			group.Path = directory.Path
-		}
-		if str(object(s["project"]), "name") != "" && !titled[directory.Key] {
-			group.Title = directory.Title
-			titled[directory.Key] = true
-		}
-		group.Sessions = append(group.Sessions, s)
-	}
-	out := []Directory{}
-	for _, group := range groups {
-		items := group.Sessions
-		sort.Slice(items, func(i, j int) bool {
-			a, b := number(items[i], "updatedAt"), number(items[j], "updatedAt")
-			if a != b {
-				return a > b
-			}
-			return str(items[i], "providerId")+str(items[i], "id") < str(items[j], "providerId")+str(items[j], "id")
-		})
-		// Keep an executable directory independently of the normalized group key.
-		if group.Path == "" {
-			group.Path = str(items[0], "cwd")
-		}
-		out = append(out, *group)
-	}
-
-	sort.Slice(out, func(i, j int) bool {
-		a, b := number(out[i].Sessions[0], "updatedAt"), number(out[j].Sessions[0], "updatedAt")
-		if a != b {
-			return a > b
-		}
-		return out[i].Key < out[j].Key
-	})
-	return out
+	Details                 []Message
 }
 
 func activeTurn(t Object) Object {
@@ -150,16 +78,45 @@ func messages(t Object) []Message {
 	for _, turn := range objects(t["turns"]) {
 		id := str(turn, "id")
 		live := id != "" && id == active
+		// Only fold explicit process messages after a terminal turn has a
+		// visible answer. Unknown phases and incomplete history remain readable.
+		fold := false
+		switch str(turn, "status") {
+		case "completed", "failed", "interrupted":
+			for _, item := range objects(turn["items"]) {
+				if str(item, "role") == "assistant" && str(item, "phase") != "commentary" && (strings.TrimSpace(str(item, "text")) != "" || len(objects(item["attachments"])) > 0) {
+					fold = true
+					break
+				}
+			}
+		}
+		var details []Message
+		workRow := -1
+		flushDetails := func() {
+			if len(details) > 0 {
+				if workRow < 0 {
+					workRow = len(out)
+					out = append(out, Message{ID: id + "|work|" + details[0].ID, Role: "work", Turn: id})
+				}
+				out[workRow].Details = append(out[workRow].Details, details...)
+				details = nil
+			}
+		}
 		tools := []Object{}
 		flush := func() {
 			if len(tools) > 0 {
-				out = append(out, Message{ID: id + "|tools|" + str(tools[0], "id"), Role: "activity", Turn: id, Live: live, Tools: tools})
+				m := Message{ID: id + "|tools|" + str(tools[0], "id"), Role: "activity", Turn: id, Live: live, Tools: tools}
+				if fold {
+					details = append(details, m)
+				} else {
+					out = append(out, m)
+				}
 				tools = nil
 			}
 		}
 		for _, item := range objects(turn["items"]) {
 			role := str(item, "role")
-			if visibleTool(item) && live {
+			if visibleTool(item) && (live || fold) {
 				tools = append(tools, item)
 				continue
 			}
@@ -172,9 +129,21 @@ func messages(t Object) []Message {
 				continue
 			}
 			flush()
-			out = append(out, Message{ID: id + "|" + str(item, "id"), Role: role, Text: body, Turn: id, Live: live && role == "assistant", Timestamp: number(item, "timestampMs"), Attachments: attachments})
+			m := Message{ID: id + "|" + str(item, "id"), Role: role, Text: body, Turn: id, Live: live && role == "assistant", Timestamp: number(item, "timestampMs"), Attachments: attachments}
+			if fold && role == "assistant" && str(item, "phase") == "commentary" {
+				details = append(details, m)
+				continue
+			}
+			// One disclosure belongs to the turn. Steers remain visible in
+			// order without acquiring their own process summary underneath.
+			flushDetails()
+			out = append(out, m)
 		}
 		flush()
+		flushDetails()
+		if workRow >= 0 && turn["durationMs"] != nil && number(turn, "durationMs") >= 0 {
+			out[workRow].DurationMS = new(number(turn, "durationMs"))
+		}
 	}
 	return out
 }
@@ -340,6 +309,7 @@ func applyEvents(source Object, events []Object) (Object, bool) {
 	// Copy only the paths changed by this batch. Serializing the entire history
 	// for every live delta blocks the UI loop on large conversations.
 	out := copyObject(source)
+	recency := number(object(source["session"]), "recencyAt")
 	turns := append([]Object(nil), objects(source["turns"])...)
 	indices := make(map[string]int, len(turns))
 	for i, turn := range turns {
@@ -373,6 +343,11 @@ func applyEvents(source Object, events []Object) (Object, bool) {
 		if kind == "turn" {
 			if !terminal || str(e, "status") != "inProgress" {
 				turn["status"] = e["status"]
+				turn["recencyAt"] = max(number(turn, "recencyAt"), number(e, "recencyAt"))
+				recency = max(recency, number(turn, "recencyAt"))
+				if e["durationMs"] != nil && number(e, "durationMs") >= 0 {
+					turn["durationMs"] = e["durationMs"]
+				}
 			}
 			if str(e, "status") != "inProgress" {
 				reset = true
@@ -394,13 +369,17 @@ func applyEvents(source Object, events []Object) (Object, bool) {
 		next := copyObject(old)
 		switch kind {
 		case "item":
+			if terminal && str(object(e["item"]), "status") == "inProgress" {
+				continue
+			}
 			for k, v := range object(e["item"]) {
 				next[k] = v
 			}
-			if strings.HasPrefix(str(old, "text"), str(next, "text")) {
+			partial := str(next, "status") == "" || str(next, "status") == "inProgress"
+			if !terminal && partial && str(old, "phase") == str(next, "phase") && strings.HasPrefix(str(old, "text"), str(next, "text")) {
 				next["text"] = old["text"]
 			}
-			if terminal || str(old, "status") == "completed" && str(next, "status") == "inProgress" {
+			if str(old, "status") == "completed" && str(next, "status") == "inProgress" {
 				next["status"] = old["status"]
 			}
 		case "summary":
@@ -433,6 +412,9 @@ func applyEvents(source Object, events []Object) (Object, bool) {
 		default:
 			continue
 		}
+		if str(next, "role") == "user" && str(next, "status") != "failed" && str(next, "status") != "rejected" {
+			recency = max(recency, number(next, "timestampMs"))
+		}
 		if index < 0 {
 			items = append(items, next)
 		} else {
@@ -441,5 +423,10 @@ func applyEvents(source Object, events []Object) (Object, bool) {
 		turn["items"] = items
 	}
 	out["turns"] = turns
+	if recency > number(object(source["session"]), "recencyAt") {
+		summary := copyObject(object(source["session"]))
+		summary["recencyAt"] = recency
+		out["session"] = summary
+	}
 	return out, reset
 }

@@ -303,12 +303,12 @@ func (s *State) uploadPreviews(cx *core.Scope) core.Node {
 				progress.TestID = "upload-progress-" + u.Name
 				bar := ui.Progress{TestID: "upload-bar-" + u.Name, Label: messages.Upload(), Value: value, Style: core.Style{FlexGrow: 1, MinWidth: core.Pt(24)}}
 				queued := core.Show{When: func() bool { s.read(); return u.Status == "queued" }, Then: func(cx *core.Scope) core.Node {
-					return core.View{Label: messages.UploadQueued(), Tooltip: label(cx, messages.UploadQueued(), 12, false), Children: []core.Node{glyph(cx, lucide.Clock, 12)}}
+					return core.View{Label: messages.UploadQueued(), Tooltip: tooltipCard(cx, label(cx, messages.UploadQueued(), 12, false)), Children: []core.Node{glyph(cx, lucide.Clock, 12)}}
 				}}
 				retry := core.Show{When: func() bool { s.read(); return u.Status == "failed" }, Then: func(cx *core.Scope) core.Node {
 					v := button(cx, "retry-upload-"+u.Name, "", lucide.RotateCcw, "ghost", func() { s.upload(u) }).(core.View)
 					v.Label = messages.RetryUpload()
-					v.Tooltip = dynamicText(cx, func() string { s.read(); return messages.UploadFailed(u.Error) }, 12, false)
+					v.Tooltip = tooltipCard(cx, dynamicText(cx, func() string { s.read(); return messages.UploadFailed(u.Error) }, 12, false))
 					return v
 				}}
 				return core.View{Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 4}, Children: []core.Node{bar, progress, queued, retry}}
@@ -467,10 +467,8 @@ func (s *State) attachmentCard(cx *core.Scope, a Object, preview func(), content
 	if name == "" {
 		name = "附件"
 	}
-	download := labelledIconButton(cx, "download-"+str(a, "id"), "下载 "+name, lucide.Download, func() { s.download(cx, a) }).(core.View)
-	download.Style.Position, download.Style.Right, download.Style.Bottom = core.Absolute, core.Pt(6), core.Pt(6)
 	caption := singleLine(cx, func() string { return name }, 12, false)
-	captionView := core.View{TestID: "attachment-name-" + str(a, "id"), Tooltip: label(cx, name, 12, false), Style: core.Style{FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0)}, Children: []core.Node{caption}}
+	captionView := core.View{TestID: "attachment-name-" + str(a, "id"), Tooltip: tooltipCard(cx, label(cx, name, 12, false)), Style: core.Style{FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0)}, Children: []core.Node{caption}}
 	footer := []core.Node{}
 	if str(a, "kind") != "image" {
 		footer = append(footer, glyph(cx, lucide.FileText, 18))
@@ -483,9 +481,43 @@ func (s *State) attachmentCard(cx *core.Scope, a Object, preview func(), content
 		body.OnPress = func(core.PressEvent) { preview() }
 		body.StyleFunc = func() core.Style { return pressStyle(cx) }
 	}
-	return core.View{TestID: "attachment-" + str(a, "id"), Style: core.Style{MinWidth: core.Pt(0), Width: core.Pct(100), AlignSelf: core.AlignStart, CornerRadius: 10, Overflow: core.Hidden, BorderWidth: 1}, StyleFunc: func() core.Style {
+	card := core.View{TestID: "attachment-" + str(a, "id"), Style: core.Style{MinWidth: core.Pt(0), Width: core.Pct(100), AlignSelf: core.AlignStart, CornerRadius: 10, Overflow: core.Hidden, BorderWidth: 1}, StyleFunc: func() core.Style {
 		return core.Style{BorderColor: palette(cx).border, Background: palette(cx).muted}
-	}, Children: []core.Node{body, download}}
+	}, Children: []core.Node{body}}
+	return s.attachmentActions(cx, a, card, false)
+}
+
+// Download and preview have independent hit targets. Touch uses the same
+// context menu as desktop secondary-click instead of relying on hidden icons.
+func (s *State) attachmentActions(cx *core.Scope, a Object, card core.View, thumbnail bool) core.Node {
+	id, name := str(a, "id"), str(a, "name")
+	if name == "" {
+		name = "附件"
+	}
+	download := func() { s.download(cx, a) }
+	card.Style.Group = "attachment"
+	if thumbnail {
+		// Contrast belongs to the image surface, not a filled tile on the icon.
+		card.Children = append(card.Children, core.View{PointerEvents: core.PointerEventsNone,
+			Style: core.Style{Position: core.Absolute, Left: core.Pt(0), Right: core.Pt(0), Bottom: core.Pt(0), Height: core.Pt(42)},
+			StyleFunc: func() core.Style {
+				st := contextualAffordance(cx, "attachment", false)
+				st.PointerEvents = core.PointerEventsNone
+				if st.GroupStyle != nil {
+					st.GroupStyle.Hover.PointerEvents = core.PointerEventsNone
+				}
+				c := palette(cx).background
+				st.Gradients = []core.Gradient{core.LinearGradient(180, c.Faded(0), c.Faded(.96))}
+				return st
+			}})
+	}
+	card.Children = append(card.Children, core.View{TestID: "attachment-actions-" + id,
+		Style:     core.Style{Position: core.Absolute, Right: core.Pt(choose(thumbnail, core.Points(2), core.Points(6))), Bottom: core.Pt(choose(thumbnail, core.Points(2), core.Points(9)))},
+		StyleFunc: func() core.Style { return contextualAffordance(cx, "attachment", false) },
+		Children:  []core.Node{contextualIconButton(cx, "download-"+id, "下载 "+name, lucide.Download, download)}})
+	return ui.ContextMenu{TestID: "attachment-menu-" + id,
+		Style:   core.Style{Width: card.Style.Width, Height: card.Style.Height, MinWidth: core.Pt(0), AlignSelf: core.AlignStart},
+		Trigger: card, Children: []core.Node{ui.MenuItem{TestID: "attachment-download-action", Text: "下载", Icon: lucide.Download, OnSelect: download}}}
 }
 
 func (s *State) previewAttachment(message Message, a Object) {
@@ -567,13 +599,11 @@ func (s *State) userImageGallery(cx *core.Scope, get func() Message) core.Node {
 				s.loadImage(meta, thumb)
 				key := s.key() + "|" + str(meta, "id") + fmt.Sprint("|", thumb)
 				name := str(meta, "name")
-				preview := core.View{TestID: "image-" + str(meta, "id"), Role: core.RoleButton, Label: "预览图片 " + name, Tooltip: label(cx, name, 12, false), Style: core.Style{Width: core.Pct(100), Height: core.Pct(100)}, StyleFunc: func() core.Style { return pressStyle(cx) }, OnPress: func(core.PressEvent) { s.previewAttachment(get(), a()) }, Children: []core.Node{
+				preview := core.View{TestID: "image-" + str(meta, "id"), Role: core.RoleButton, Label: "预览图片 " + name, Tooltip: tooltipCard(cx, label(cx, name, 12, false)), Style: core.Style{Width: core.Pct(100), Height: core.Pct(100)}, StyleFunc: func() core.Style { return pressStyle(cx) }, OnPress: func(core.PressEvent) { s.previewAttachment(get(), a()) }, Children: []core.Node{
 					core.Image{Label: name, SourceFunc: func() core.ImageSource { s.read(); return core.ImageSource{Data: s.images[key]} }, ResizeMode: core.Cover, Style: core.Style{Width: core.Pct(100), Height: core.Pct(100)}},
 				}}
-				download := labelledIconButton(cx, "download-"+str(meta, "id"), "下载 "+name, lucide.Download, func() { s.download(cx, a()) }).(core.View)
-				download.Style.Position, download.Style.Right, download.Style.Bottom = core.Absolute, core.Pt(2), core.Pt(2)
-				download.StyleFunc = func() core.Style { return core.Style{Background: palette(cx).background, Opacity: core.Alpha(.9)} }
-				return core.View{TestID: "attachment-" + str(meta, "id"), Style: core.Style{Width: core.Pt(88), MaxWidth: core.Pct(100), Height: core.Pt(88), CornerRadius: 10, Overflow: core.Hidden, BorderWidth: 1}, StyleFunc: func() core.Style { return core.Style{BorderColor: palette(cx).border, Background: palette(cx).muted} }, Children: []core.Node{preview, download}}
+				card := core.View{TestID: "attachment-" + str(meta, "id"), Style: core.Style{Width: core.Pt(88), MaxWidth: core.Pct(100), Height: core.Pt(88), CornerRadius: 10, Overflow: core.Hidden, BorderWidth: 1}, StyleFunc: func() core.Style { return core.Style{BorderColor: palette(cx).border, Background: palette(cx).muted} }, Children: []core.Node{preview}}
+				return s.attachmentActions(cx, meta, card, true)
 			}),
 		}}
 	}}

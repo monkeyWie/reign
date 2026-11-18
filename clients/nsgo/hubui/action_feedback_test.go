@@ -329,7 +329,7 @@ func TestApprovalFeedbackPreventsConflictsWithoutBlockingOtherApprovals(t *testi
 func TestTouchRowsShowPressFeedbackAndIconNames(t *testing.T) {
 	app := nsgotest.Start(t, func(cx *core.Scope) core.Node { return RootWithAPI(cx, newDemoAPI(), true) }, nsgotest.Size(390, 844), nsgotest.Environment(core.Environment{OS: core.OSAndroid, Idiom: core.IdiomPhone}))
 	app.WaitFor("id:device-demo-device", time.Second)
-	for _, id := range []string{"device-demo-device", "session-demo-chat"} {
+	for _, id := range []string{"device-demo-device", sessionRowID("all", Object{"deviceId": "demo-device", "providerId": "codex-app", "id": "demo-chat"})} {
 		app.WaitFor("id:"+id, time.Second)
 		style := app.Find("id:" + id).Style
 		app.PressDown("id:" + id)
@@ -338,6 +338,9 @@ func TestTouchRowsShowPressFeedbackAndIconNames(t *testing.T) {
 		}
 		app.PressUp("id:" + id)
 		app.Press("id:" + id)
+		if id == "device-demo-device" {
+			app.Press("id:dialog-device-close")
+		}
 	}
 	for _, id := range []string{"back-sessions", "attachment-cache", "attach-files"} {
 		if app.Find("id:"+id).Props.Label == "" {

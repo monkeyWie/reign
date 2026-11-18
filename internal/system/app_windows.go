@@ -2,16 +2,13 @@ package system
 
 import (
 	"context"
-	"encoding/json"
 	"encoding/xml"
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/monkeyWie/reignhub/internal/provider"
@@ -52,31 +49,26 @@ func FindAppContext(ctx context.Context, configured string) (string, error) {
 
 func installedCodexPackages(ctx context.Context) ([]string, error) {
 	codexPackages.Lock()
-	defer codexPackages.Unlock()
 	ttl := 15 * time.Second
 	if len(codexPackages.roots) == 0 || codexPackages.err != nil {
 		ttl = 2 * time.Second
 	}
 	if !codexPackages.at.IsZero() && time.Since(codexPackages.at) < ttl {
-		return codexPackages.roots, codexPackages.err
+		roots, err := codexPackages.roots, codexPackages.err
+		codexPackages.Unlock()
+		return roots, err
 	}
-	ctx, cancel := context.WithTimeout(ctx, 4*time.Second)
-	defer cancel()
-	// The exact package name avoids matching ChatGPT or unrelated executables.
-	// No user input is interpolated into the PowerShell program.
-	script := `$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false); ConvertTo-Json -Compress -InputObject @(Get-AppxPackage -Name OpenAI.Codex | Select-Object -ExpandProperty InstallLocation)`
-	powershell := filepath.Join(os.Getenv("SystemRoot"), "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
-	cmd := exec.CommandContext(ctx, powershell, "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script)
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-	out, err := cmd.Output()
-	var roots []string
-	if err == nil {
-		err = json.Unmarshal(out, &roots)
+	codexPackages.Unlock()
+	roots, err := registeredPackageRoots(ctx, "OpenAI.Codex")
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
 	}
 	if err != nil {
 		err = fmt.Errorf("查询 Codex Windows 应用包失败：%w", err)
 	}
+	codexPackages.Lock()
 	codexPackages.roots, codexPackages.err, codexPackages.at = roots, err, time.Now()
+	codexPackages.Unlock()
 	return roots, err
 }
 

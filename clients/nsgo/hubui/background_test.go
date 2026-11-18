@@ -76,9 +76,8 @@ func TestAndroidTaskCompletesAfterSwitchingChats(t *testing.T) {
 	app := nsgotest.Start(t, func(cx *core.Scope) core.Node { return RootWithAPI(cx, f, true) }, nsgotest.Size(390, 844), nsgotest.Environment(core.Environment{OS: core.OSAndroid}), nsgotest.Host(host))
 	openDemoChatTask := func() {
 		app.WaitFor("id:device-demo-device", time.Second)
-		app.Press("id:device-demo-device")
-		app.WaitFor("id:session-demo-chat", time.Second)
-		app.Press("id:session-demo-chat")
+		app.WaitFor(sessionSelector("demo-device", "codex-app", "demo-chat"), time.Second)
+		app.Press(sessionSelector("demo-device", "codex-app", "demo-chat"))
 		app.WaitFor("text:任务输出", time.Second)
 	}
 	openDemoChatTask()
@@ -93,7 +92,7 @@ func TestAndroidTaskCompletesAfterSwitchingChats(t *testing.T) {
 	app.WaitUntil(time.Second, func() bool { return status() == "inProgress" })
 	before := f.stateReads.Load()
 	app.Press("id:back-sessions")
-	app.Press("id:session-demo-cli")
+	app.Press(sessionSelector("demo-device", "codex-cli", "demo-cli"))
 	app.WaitUntil(time.Second, func() bool { return f.stateReads.Load() > before })
 	historyReads := f.monitorReads.Load()
 	for range 3 {

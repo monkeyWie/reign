@@ -17,8 +17,8 @@ type Config struct {
 	UIPath     string `json:"uiPath,omitempty"`
 	ServiceURL string `json:"serviceUrl,omitempty"`
 	DeviceName string `json:"deviceName,omitempty"`
-	// ManagedAgents remembers explicit backend setup; it is not an access permission.
-	ManagedAgents map[string]bool  `json:"managedAgents,omitempty"`
+	// AgentEnabled is a local integration preference. Missing entries default on.
+	AgentEnabled  map[string]bool  `json:"agentEnabled,omitempty"`
 	Agents        map[string]Agent `json:"agents,omitempty"`
 	DataDir       string           `json:"-"`
 	Listen        string           `json:"listen"`
@@ -33,6 +33,13 @@ type Config struct {
 	RelayToken    string           `json:"relayToken,omitempty"`
 	HostID        string           `json:"hostId,omitempty"`
 	STUN          []string         `json:"stun,omitempty"`
+}
+
+func (c Config) AgentIsEnabled(id string) bool {
+	if enabled, ok := c.AgentEnabled[id]; ok {
+		return enabled
+	}
+	return !c.Agents[id].Disabled
 }
 
 // Agent launch settings are local configuration. Remote peers cannot supply

@@ -59,9 +59,10 @@ func stateTurns(state map[string]any) ([]map[string]any, bool, error) {
 			continue
 		}
 		seen[id] = true
-		t := map[string]any{"id": id, "status": entity["status"], "items": entity["items"]}
+		t := map[string]any{"id": id, "status": entity["status"], "items": entity["items"], "durationMs": entity["durationMs"]}
 		if ms, ok := ipcTimestamp(entity["turnStartedAtMs"]); ok {
 			t["startedAt"] = ms / 1000
+			t["startedAtMs"] = ms
 		}
 		indices[id] = len(turns)
 		turns = append(turns, t)
@@ -81,6 +82,7 @@ func stateTurns(state map[string]any) ([]map[string]any, bool, error) {
 		copy["id"] = id
 		if ms, ok := ipcTimestamp(t["turnStartedAtMs"]); ok {
 			copy["startedAt"] = ms / 1000
+			copy["startedAtMs"] = ms
 		}
 		if index, exists := indices[id]; exists {
 			old := turns[index]
@@ -108,11 +110,14 @@ func stateThread(s map[string]any) thread {
 	var t thread
 	_ = json.Unmarshal(rawJSON(map[string]any{"id": s["id"], "name": s["title"], "cwd": s["cwd"], "model": s["latestModel"], "source": s["source"], "originator": s["originator"]}), &t)
 	if ms, ok := ipcTimestamp(s["updatedAt"]); ok {
-		t.UpdatedAt = ms / 1000
+		t.UpdatedAt = ms
+	}
+	if ms, ok := ipcTimestamp(s["createdAt"]); ok {
+		t.CreatedAt = ms
 	}
 	t.Status.Type = "idle"
-	if st := stringValue(object(s["threadRuntimeStatus"])["type"]); st != "" {
-		t.Status.Type = st
+	if runtime := object(s["threadRuntimeStatus"]); stringValue(runtime["type"]) != "" {
+		_ = json.Unmarshal(rawJSON(runtime), &t.Status)
 	}
 	return t
 }
@@ -160,8 +165,9 @@ func (p *Provider) observeIPCState(id, owner string, oldRaw, newRaw json.RawMess
 		for _, v := range turns {
 			t := normalizeTurn(rawJSON(v))
 			old, known := oldTurns[t.ID]
-			if !known || old.Status != t.Status {
-				log.Publish(provider.StreamEvent{Kind: "turn", SessionID: id, TurnID: t.ID, Status: t.Status})
+			turnChanged := !known || old.Status != t.Status || !reflect.DeepEqual(old.DurationMS, t.DurationMS) || old.RecencyAt != t.RecencyAt
+			if turnChanged && t.Status == "inProgress" {
+				log.Publish(provider.StreamEvent{Kind: "turn", SessionID: id, TurnID: t.ID, Status: t.Status, DurationMS: t.DurationMS, RecencyAt: t.RecencyAt})
 			}
 			items := map[string]provider.Item{}
 			oldOrder := []string{}
@@ -193,7 +199,7 @@ func (p *Provider) observeIPCState(id, owner string, oldRaw, newRaw json.RawMess
 					continue
 				}
 				event := provider.StreamEvent{Kind: "item", SessionID: id, TurnID: t.ID, ItemID: i.ID, Item: &i}
-				if exists && i.Role == "assistant" && prev.Type == i.Type && prev.Phase == i.Phase && strings.HasPrefix(i.Text, prev.Text) && len(i.Text) > len(prev.Text) {
+				if t.Status == "inProgress" && exists && i.Role == "assistant" && prev.Type == i.Type && prev.Phase == i.Phase && strings.HasPrefix(i.Text, prev.Text) && len(i.Text) > len(prev.Text) {
 					event.Kind = "text"
 					event.Item = nil
 					event.Delta = strings.TrimPrefix(i.Text, prev.Text)
@@ -207,6 +213,11 @@ func (p *Provider) observeIPCState(id, owner string, oldRaw, newRaw json.RawMess
 			// with its server representation instead of duplicating the bubble.
 			if refresh || len(newOrder) < len(oldOrder) || !reflect.DeepEqual(oldOrder, newOrder[:min(len(oldOrder), len(newOrder))]) {
 				log.Publish(provider.StreamEvent{Kind: "snapshot", SessionID: id})
+			}
+			// Deliver the authoritative final items before marking the turn
+			// terminal; controllers intentionally ignore late streaming deltas.
+			if turnChanged && t.Status != "inProgress" {
+				log.Publish(provider.StreamEvent{Kind: "turn", SessionID: id, TurnID: t.ID, Status: t.Status, DurationMS: t.DurationMS, RecencyAt: t.RecencyAt})
 			}
 		}
 	}
@@ -370,6 +381,7 @@ func (p *Provider) ipcTranscript(ctx context.Context, id, cursor string) (provid
 		normalized := normalizeTurn(raw)
 		p.attachments(ctx, id, out.Session.CWD, &normalized, raw)
 		out.Turns = append(out.Turns, normalized)
+		out.Session.RecencyAt = max(out.Session.RecencyAt, provider.ConversationRecency([]provider.Turn{normalized}))
 		if err = provider.EmitTranscriptTurn(ctx, out, normalized); err != nil {
 			return out, true, err
 		}

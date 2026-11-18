@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/monkeyWie/reignhub/internal/provider"
 	"github.com/monkeyWie/reignhub/internal/rpc"
+	"github.com/monkeyWie/reignhub/internal/system"
 	"os/exec"
 	"time"
 )
@@ -20,7 +21,9 @@ func readCLIDaemon(ctx context.Context, path string) (cliDaemonInfo, error) {
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 	var info cliDaemonInfo
-	b, err := exec.CommandContext(ctx, path, "app-server", "daemon", "version").Output()
+	cmd := exec.CommandContext(ctx, path, "app-server", "daemon", "version")
+	system.HideConsole(cmd)
+	b, err := cmd.Output()
 	if err != nil {
 		return info, err
 	}
@@ -40,14 +43,23 @@ func (p *Provider) discoverCLI(ctx context.Context, path string) (cliDaemonInfo,
 	return p.probeInfo, p.probeErr
 }
 
-// AutoConnect only attaches an already running shared daemon. In particular,
-// seeing an installed CLI never starts a new daemon or resumes a session.
+// AutoConnect prepares the running App integration or attaches an existing
+// shared CLI daemon. It never launches the official App, starts a CLI daemon,
+// resumes a session or submits model work.
 func (p *Provider) AutoConnect(ctx context.Context) error {
 	if p.kind != "cli" {
-		if !p.cfg.ManagedAgents["codex-app"] && p.appBridge() == nil {
+		s := p.Status(ctx)
+		if s.Ready() || !s.Installed || !s.Running || s.State == "unsupported" {
 			return nil
 		}
-		return p.Start(ctx)
+		err := p.Start(ctx)
+		p.mu.Lock()
+		p.lastError = ""
+		if err != nil {
+			p.lastError = err.Error()
+		}
+		p.mu.Unlock()
+		return err
 	}
 	s := p.cliStatus(ctx)
 	if s.Ready() || !s.Running {
@@ -87,7 +99,9 @@ func (p *Provider) startCLI(ctx context.Context, launch bool) error {
 		if !launch {
 			return fmt.Errorf("CLI 共享后台未运行")
 		}
-		if err := exec.CommandContext(ctx, path, "app-server", "daemon", "start").Run(); err != nil {
+		cmd := exec.CommandContext(ctx, path, "app-server", "daemon", "start")
+		system.HideConsole(cmd)
+		if err := cmd.Run(); err != nil {
 			return fmt.Errorf("启动 CLI 共享后台失败：%w", err)
 		}
 		v, e = readCLIDaemon(ctx, path)
@@ -120,7 +134,7 @@ func (p *Provider) cliStatus(ctx context.Context) provider.Status {
 	alive := p.client != nil && p.client.Alive()
 	endpoint, lastError := p.endpoint, p.lastError
 	p.mu.Unlock()
-	s := provider.Status{ID: "codex-cli", Name: "Codex CLI", State: "unavailable", Installed: path != "", InstallPath: path, Instances: []provider.Instance{}, LastError: lastError, Capabilities: provider.Capabilities{Streaming: true, History: true, Create: true, Send: true, Steer: true, Interrupt: true, Approvals: true, ImageInput: true, FileInput: true}}
+	s := provider.Status{ID: "codex-cli", Name: "Codex CLI", State: "unavailable", Installed: path != "", InstallPath: path, Instances: []provider.Instance{}, LastError: lastError, Capabilities: provider.Capabilities{SessionRemoval: "archive", Streaming: true, History: true, Create: true, Send: true, Steer: true, Interrupt: true, Approvals: true, ImageInput: true, FileInput: true}}
 	if path == "" {
 		s.Detail = "未安装 Codex CLI"
 		return s

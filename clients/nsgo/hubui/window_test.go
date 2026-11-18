@@ -69,6 +69,16 @@ func TestDesktopWindowFrame(t *testing.T) {
 			if globalBounds(app.Find("id:agenthub")).Origin.Y != 0 {
 				t.Fatal("full screen retains title bar gap")
 			}
+			app.Resize(1000, 800)
+			app.Press("id:toggle-sidebar")
+			if !app.Exists("id:workspace-toolbar") {
+				t.Fatal("full-screen sidebar restore control is missing")
+			}
+			app.SetEnvironment(core.Environment{OS: os, Idiom: core.IdiomDesktop, TitleBar: insets})
+			app.Press("id:toggle-sidebar")
+			if globalBounds(app.Find("id:sidebar-container")).Size.Width != 300 {
+				t.Fatal("could not restore sidebar after leaving full screen")
+			}
 		})
 	}
 }

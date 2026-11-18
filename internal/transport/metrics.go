@@ -1,8 +1,6 @@
 package transport
 
 import (
-	"context"
-	"errors"
 	"sync"
 	"time"
 )
@@ -21,8 +19,6 @@ type Meter struct {
 	pending                                                        int
 	buckets                                                        [5]trafficBucket
 	response                                                       time.Duration
-	outcomes                                                       [24]bool
-	outcomeCount, outcomeNext                                      int
 }
 
 func (m *Meter) Connected() { m.mu.Lock(); m.started = time.Now(); m.mu.Unlock() }
@@ -53,8 +49,8 @@ func (m *Meter) Received(n int) { m.traffic(n, true) }
 func (m *Meter) Progress()      { m.mu.Lock(); m.lastProgress = time.Now(); m.mu.Unlock() }
 
 // Watch waits for a change by design, so its latency is not a network sample.
-// Cancelled navigation reads do not count as failures. Request latency includes
-// host processing and queueing and must never be labelled network RTT.
+// Only successful requests update latency. It includes host processing and
+// queueing and must never be labelled network RTT.
 func (m *Meter) Begin(method string) func(error) {
 	if method == "watch" {
 		return func(error) {}
@@ -67,16 +63,10 @@ func (m *Meter) Begin(method string) func(error) {
 		m.mu.Lock()
 		defer m.mu.Unlock()
 		m.pending--
-		if errors.Is(err, context.Canceled) {
-			return
-		}
 		if err == nil {
 			m.response = time.Since(started)
 			m.lastResponse = time.Now()
 		}
-		m.outcomes[m.outcomeNext] = err != nil
-		m.outcomeNext = (m.outcomeNext + 1) % len(m.outcomes)
-		m.outcomeCount = min(m.outcomeCount+1, len(m.outcomes))
 	}
 }
 func (m *Meter) Snapshot() map[string]any {
@@ -90,12 +80,6 @@ func (m *Meter) Snapshot() map[string]any {
 			received += b.received
 		}
 	}
-	failures := 0
-	for n := 0; n < m.outcomeCount; n++ {
-		if m.outcomes[n] {
-			failures++
-		}
-	}
 	age := func(at time.Time) int64 {
 		if at.IsZero() {
 			return -1
@@ -106,10 +90,7 @@ func (m *Meter) Snapshot() map[string]any {
 	if !m.firstTraffic.IsZero() {
 		span = min(span, max(.001, now.Sub(m.firstTraffic).Seconds()))
 	}
-	result := map[string]any{"sentBytes": m.sent, "receivedBytes": m.received, "uploadBps": float64(sent) / span, "downloadBps": float64(received) / span, "pendingRequests": m.pending, "lastReceiveMs": age(m.lastReceive), "lastProgressMs": age(m.lastProgress), "lastResponseMs": age(m.lastResponse), "requestSamples": m.outcomeCount, "connectedMs": age(m.started)}
-	if m.outcomeCount > 0 {
-		result["requestFailurePercent"] = 100 * float64(failures) / float64(m.outcomeCount)
-	}
+	result := map[string]any{"sentBytes": m.sent, "receivedBytes": m.received, "uploadBps": float64(sent) / span, "downloadBps": float64(received) / span, "pendingRequests": m.pending, "lastReceiveMs": age(m.lastReceive), "lastProgressMs": age(m.lastProgress), "lastResponseMs": age(m.lastResponse), "connectedMs": age(m.started)}
 	if !m.lastResponse.IsZero() {
 		result["responseMs"] = m.response.Milliseconds()
 	}

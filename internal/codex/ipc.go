@@ -34,12 +34,13 @@ var ipcVersions = map[string]int{
 }
 
 type followedThread struct {
-	owner    string
-	version  int
-	revision int64
-	state    json.RawMessage
-	err      error
-	changed  chan struct{}
+	directory bool
+	owner     string
+	version   int
+	revision  int64
+	state     json.RawMessage
+	err       error
+	changed   chan struct{}
 }
 type ownedSend struct {
 	result      json.RawMessage
@@ -69,16 +70,17 @@ type ownedThread struct {
 	sends        map[string]*ownedSend
 }
 type appIPC struct {
-	p        *Provider
-	home     string
-	mu       sync.Mutex
-	conn     *codexipc.Client
-	followed map[string]*followedThread
-	owned    map[string]*ownedThread
-	ctx      context.Context
-	cancel   context.CancelFunc
-	done     chan struct{}
-	dirty    chan string
+	p          *Provider
+	home       string
+	mu         sync.Mutex
+	conn       *codexipc.Client
+	connectErr error
+	followed   map[string]*followedThread
+	owned      map[string]*ownedThread
+	ctx        context.Context
+	cancel     context.CancelFunc
+	done       chan struct{}
+	dirty      chan string
 }
 
 func newAppIPC(p *Provider) *appIPC {
@@ -86,8 +88,12 @@ func newAppIPC(p *Provider) *appIPC {
 	return &appIPC{p: p, home: codexProjectHome(), followed: map[string]*followedThread{}, owned: map[string]*ownedThread{}, ctx: ctx, cancel: cancel, done: make(chan struct{}), dirty: make(chan string, 128)}
 }
 func (b *appIPC) client() *codexipc.Client { b.mu.Lock(); defer b.mu.Unlock(); return b.conn }
+func (b *appIPC) connectionError() error   { b.mu.Lock(); defer b.mu.Unlock(); return b.connectErr }
 func (b *appIPC) connect(ctx context.Context) error {
 	c, err := codexipc.Dial(ctx, codexipc.Endpoint(b.home), b)
+	b.mu.Lock()
+	b.connectErr = err
+	b.mu.Unlock()
 	if err != nil {
 		return err
 	}
@@ -213,6 +219,9 @@ func (b *appIPC) broadcast(ctx context.Context, method string, params any, targe
 	return c.Broadcast(ctx, method, ipcVersions[method], params, targets)
 }
 func (b *appIPC) follow(ctx context.Context, id string) (string, error) {
+	return b.followFor(ctx, id, false)
+}
+func (b *appIPC) followFor(ctx context.Context, id string, directory bool) (string, error) {
 	if b.owns(id) {
 		return "", nil
 	}
@@ -239,8 +248,11 @@ func (b *appIPC) follow(ctx context.Context, id string) (string, error) {
 			b.mu.Unlock()
 			return "", errors.New("同时跟随的 Codex 会话过多")
 		}
-		f = &followedThread{changed: make(chan struct{})}
+		f = &followedThread{changed: make(chan struct{}), directory: directory}
 		b.followed[id] = f
+	}
+	if !directory {
+		f.directory = false
 	}
 	if f.owner != response.HandledBy {
 		f.owner = response.HandledBy
