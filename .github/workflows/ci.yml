@@ -70,15 +70,16 @@ jobs:
       - name: Vet and test with race detection
         env:
           MODULE: ${{ matrix.module }}
+          TEST_TIMEOUT: ${{ matrix.module == 'nsgo' && '10m' || '5m' }}
           GDK_BACKEND: x11
           GSK_RENDERER: cairo
         run: |
           if [ "$MODULE" = nsgo ]; then cd clients/nsgo; fi
           go vet ./...
           if [ "$RUNNER_OS" = Linux ]; then
-            xvfb-run -a go test -race -timeout 5m -coverprofile=coverage.out ./...
+            xvfb-run -a go test -race -timeout "$TEST_TIMEOUT" -coverprofile=coverage.out ./...
           else
-            go test -race -timeout 5m -coverprofile=coverage.out ./...
+            go test -race -timeout "$TEST_TIMEOUT" -coverprofile=coverage.out ./...
           fi
       - name: Upload coverage
         if: always()

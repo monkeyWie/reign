@@ -22,6 +22,13 @@ GOWORK=off go test ./...
 
 Use targeted race checks for concurrency changes, such as `GOWORK=off go test -race ./internal/device ./internal/host` at root. UI checks such as `GOWORK=off go test ./hubui` run from `clients/nsgo`. Linux native tests require suitable graphics/display support; CI uses Xvfb. Cross-compilation is not target-platform execution.
 
+CI race and coverage runs allow 10 minutes per NSGo package and 5 minutes per
+core package. The UI package includes repeated session-switching and layout
+regressions that can exceed five minutes together on Intel macOS runners.
+Keep individual interaction waits bounded; the package budget does not replace
+their responsiveness assertions. Inspect the active test and stack before
+attributing a timeout to suite size rather than a stalled operation.
+
 Browser interaction tests run from `clients/nsgo` with an available browser:
 
 ```sh
