@@ -150,7 +150,7 @@ func TestLargeProgressiveHistoryKeepsNavigationResponsive(t *testing.T) {
 	app.WaitFor(sessionSelector("demo-device", "codex-app", "demo-chat"), time.Second)
 	app.Press(sessionSelector("demo-device", "codex-app", "demo-chat"))
 	app.WaitFor("id:chat-input", time.Second)
-	app.Back()
+	pressWorkspaceBack(t, app)
 	app.WaitFor("id:session-sidebar", time.Second)
 	app.Screenshot("large-history-navigation-responsive")
 }

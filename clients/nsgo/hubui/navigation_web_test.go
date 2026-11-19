@@ -23,6 +23,12 @@ func startBrowserNavigation(t *testing.T, width, height core.Points) *nsgotest.A
 }
 
 // Exercise real browser history, not App.Back (which bypasses popstate).
+func pressWorkspaceBack(t *testing.T, app *nsgotest.App) {
+	t.Helper()
+	// App.Back is Escape on Web, which intentionally stays in a focused editor.
+	pressBrowserBack(t, app)
+}
+
 func pressBrowserBack(t *testing.T, app *nsgotest.App) {
 	t.Helper()
 	win := js.Global().Get("window")

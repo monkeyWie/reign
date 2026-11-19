@@ -44,9 +44,9 @@ func testMobileDeviceAndScanner(t *testing.T, os core.OS, scan bool) {
 	app.WaitFor(sessionSelector("second", "codex-app", "demo-chat"), time.Second)
 	app.Press(sessionSelector("second", "codex-app", "demo-chat"))
 	app.WaitFor("id:chat-input", time.Second)
-	app.Back()
+	pressWorkspaceBack(t, app)
 	app.Find("id:session-sidebar")
-	app.Back()
+	pressWorkspaceBack(t, app)
 	app.Find("id:session-sidebar")
 	app.WaitFor(sessionSelector("demo-device", "codex-app", "demo-chat"), time.Second)
 	if !scan {
@@ -67,7 +67,7 @@ func testMobileDeviceAndScanner(t *testing.T, os core.OS, scan bool) {
 	}
 	app.Press("id:dialog-cancel")
 	app.Press("id:scan-qr")
-	app.Back()
+	pressWorkspaceBack(t, app)
 	if app.Exists("id:dialog-scan") {
 		t.Fatal("system back did not dismiss camera")
 	}
