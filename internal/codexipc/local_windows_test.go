@@ -192,6 +192,51 @@ func TestWindowsDeniedPipeMetadataAndRecovery(t *testing.T) {
 	if !errors.Is(err, windows.ERROR_ACCESS_DENIED) || !errors.As(err, &original) {
 		t.Fatalf("expected original access denial: %v", err)
 	}
+	// The diagnostic has connected and closed a metadata-only client. A
+	// single-instance server must disconnect that finished client before accepting
+	// another one, just as a listener's accept loop does. Closing the client handle
+	// alone does not reset the server's pipe instance to its listening state.
+	event, err := windows.CreateEvent(nil, 1, 0, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer windows.CloseHandle(event)
+	overlap := windows.Overlapped{HEvent: event}
+	connecting := false
+	defer func() {
+		if connecting {
+			windows.CancelIoEx(h, &overlap)
+			var n uint32
+			windows.GetOverlappedResult(h, &overlap, &n, true)
+		}
+	}()
+	finishConnect := func() {
+		t.Helper()
+		if connecting {
+			var n uint32
+			if err := windows.GetOverlappedResult(h, &overlap, &n, false); err != nil {
+				t.Fatalf("fixture client did not connect: %v", err)
+			}
+			connecting = false
+		}
+	}
+	rearm := func() {
+		t.Helper()
+		finishConnect()
+		if err := windows.DisconnectNamedPipe(h); err != nil {
+			t.Fatalf("rearm fixture pipe: %v", err)
+		}
+		if err := windows.ResetEvent(event); err != nil {
+			t.Fatal(err)
+		}
+		overlap = windows.Overlapped{HEvent: event}
+		if err := windows.ConnectNamedPipe(h, &overlap); errors.Is(err, windows.ERROR_IO_PENDING) {
+			connecting = true
+		} else if err != nil {
+			t.Fatalf("listen on fixture pipe: %v", err)
+		}
+	}
+	rearm()
 	pid, err := pipeServerProcessID(ctx, path)
 	if err != nil || pid != uint32(os.Getpid()) {
 		t.Fatalf("metadata lookup on denied pipe: PID %d, error %v", pid, err)
@@ -200,6 +245,7 @@ func TestWindowsDeniedPipeMetadataAndRecovery(t *testing.T) {
 	if err != nil || processes[pid].name == "" {
 		t.Fatalf("snapshot missing fixture server PID %d: %v", pid, err)
 	}
+	rearm()
 	// A fresh dial must recover on the same single-instance fixture, with no
 	// cached denial or diagnostic handle holding the instance open.
 	setFixtureACL("D:P(A;;0x00100083;;;" + user.User.Sid.String() + ")")
@@ -209,15 +255,7 @@ func TestWindowsDeniedPipeMetadataAndRecovery(t *testing.T) {
 	}
 	defer client.Close()
 	client.SetDeadline(time.Now().Add(3 * time.Second))
-	event, err := windows.CreateEvent(nil, 1, 0, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer windows.CloseHandle(event)
-	overlap := windows.Overlapped{HEvent: event}
-	if err := windows.ConnectNamedPipe(h, &overlap); err != nil && !errors.Is(err, windows.ERROR_PIPE_CONNECTED) {
-		t.Fatal(err)
-	}
+	finishConnect()
 	server, err := winio.NewOpenFile(h)
 	if err != nil {
 		t.Fatal(err)
