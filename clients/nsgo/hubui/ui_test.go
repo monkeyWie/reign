@@ -106,17 +106,24 @@ func TestDeviceCopyFeedback(t *testing.T) {
 		t.Fatal("copy button did not show confirmation")
 	}
 	app.Screenshot("device-copy-feedback")
-	app.WaitUntil(3*time.Second, func() bool {
-		return app.Find("id:copy-device-id").Props.Label == "复制 ID" && !app.Exists("id:notice")
-	})
+	app.FastForward(2 * time.Second)
+	if app.Find("id:copy-device-id").Props.Label != "复制 ID" || app.Exists("id:notice") {
+		t.Fatal("copy confirmation did not expire")
+	}
 	app.Press("id:copy-device-id")
 	if app.Find("id:copy-device-id").Props.Label != "已复制" {
 		t.Fatal("copy button did not show confirmation")
 	}
+	app.FastForward(time.Second)
 	app.Press("id:copy-device-id")
-	app.WaitUntil(3*time.Second, func() bool {
-		return app.Find("id:copy-device-id").Props.Label == "复制 ID" && !app.Exists("id:notice")
-	})
+	app.FastForward(time.Second)
+	if app.Find("id:copy-device-id").Props.Label != "已复制" {
+		t.Fatal("previous copy timer cleared the replacement confirmation")
+	}
+	app.FastForward(time.Second)
+	if app.Find("id:copy-device-id").Props.Label != "复制 ID" || app.Exists("id:notice") {
+		t.Fatal("replacement copy confirmation did not expire")
+	}
 }
 
 func TestLiveStatusAndEditorStability(t *testing.T) {

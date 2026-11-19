@@ -186,6 +186,10 @@ Every clickable control, including icon buttons, list actions, toolbar controls 
 
 Use the controller's shared [action controls](../../clients/nsgo/hubui/actions.go) and the website/account [Button](../../packages/account-ui/src/ui.tsx) instead of duplicating pending-state handling. Async button handlers return their operation promise so feedback covers the full request and follow-up refresh. Custom clickable rows also need pressed and focus states; selected appearance does not replace press feedback. Use resource IDs as list keys when actions can remove or reorder rows.
 
+Copy confirmations last two seconds on the scoped UI clock. Repeating a copy
+restarts that lifetime; the old timer must not clear the replacement confirmation,
+and disposing the workspace cancels its pending timer.
+
 ## Dialogs and notification layers
 
 Modal dialogs place an accessible X close control at the top right, reachable in normal, pending, failed and expired states. Keep the footer to at most two decision buttons by default; extra actions need a specific workflow reason. Do not add a third footer button merely to make the dialog dismissible. Informational or expired dialogs may have no footer actions. Use the shared dialog header; custom modal layouts follow the same placement.

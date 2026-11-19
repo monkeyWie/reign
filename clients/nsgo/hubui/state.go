@@ -54,6 +54,7 @@ type State struct {
 	failure                                                 *sessionOperationError
 	copiedValue                                             string
 	copyVersion                                             uint64
+	copyTimer                                               func() bool
 	ready, polling, narrowChat, dark                        bool
 	manualRefresh                                           bool
 	actions                                                 map[string]bool
@@ -708,15 +709,22 @@ func (s *State) copy(value string) {
 		return
 	}
 	s.cx.SetClipboard(value)
+	if s.copyTimer != nil {
+		s.copyTimer()
+		s.copyTimer = nil
+	}
 	s.copiedValue = value
 	s.copyVersion++
 	version := s.copyVersion
 	s.changed()
-	time.AfterFunc(2*time.Second, func() {
-		s.cx.Post(func() {
-			if s.ctx.Err() != nil || s.copyVersion != version {
-				return
-			}
+	// Bind the timer to the workspace, not the button's event scope: the
+	// confirmation replaces that button as soon as its label/icon changes.
+	s.cx.Post(func() {
+		if s.ctx.Err() != nil || s.copyVersion != version {
+			return
+		}
+		s.copyTimer = s.cx.AfterFunc(2*time.Second, func() {
+			s.copyTimer = nil
 			s.copiedValue = ""
 			s.changed()
 		})

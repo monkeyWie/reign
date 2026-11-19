@@ -45,7 +45,7 @@ jobs:
         os: [ubuntu-24.04, macos-15-intel]
         module: [core, nsgo]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 25
+    timeout-minutes: ${{ matrix.module == 'nsgo' && matrix.os == 'macos-15-intel' && 40 || 25 }}
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-go@v7.0.0
@@ -70,7 +70,7 @@ jobs:
       - name: Vet and test with race detection
         env:
           MODULE: ${{ matrix.module }}
-          TEST_TIMEOUT: ${{ matrix.module == 'nsgo' && '10m' || '5m' }}
+          TEST_TIMEOUT: ${{ matrix.module == 'nsgo' && (matrix.os == 'macos-15-intel' && '20m' || '10m') || '5m' }}
           GDK_BACKEND: x11
           GSK_RENDERER: cairo
         run: |
