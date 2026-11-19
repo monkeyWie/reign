@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -70,6 +71,8 @@ func TestTranscriptAttachmentsAndSourceLifetime(t *testing.T) {
 func TestSourceLocationLinksExportActualFileInline(t *testing.T) {
 	cwd := t.TempDir()
 	readme := filepath.Join(cwd, "README.md")
+	// File URLs use forward slashes and an empty authority, including on Windows.
+	readmeURL := url.URL{Scheme: "file", Path: "/" + strings.TrimPrefix(filepath.ToSlash(readme), "/")}
 	if err := os.WriteFile(readme, []byte("# Example\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +84,7 @@ func TestSourceLocationLinksExportActualFileInline(t *testing.T) {
 		{"relative line", "README.md:3", 1},
 		{"absolute line", readme + ":3", 1},
 		{"line and column", readme + ":3:5", 1},
-		{"file URL line", "file://" + readme + ":3", 1},
+		{"file URL line", readmeURL.String() + ":3", 1},
 		{"line anchor", "README.md#L3", 1},
 		{"line range", "README.md#L3-L8", 1},
 		{"line column range", "README.md#L3C2-L8C5", 1},
