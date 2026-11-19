@@ -24,7 +24,7 @@ func (s *State) manageDevice(id string) {
 }
 func (s *State) sidebarDevices(cx *core.Scope) core.Node {
 	return core.View{Style: core.Style{Padding: core.Symmetric(10, 12), Gap: 4}, Children: []core.Node{
-		row(s.brand(cx, 18, true), spacer(), labelledIconButton(cx, "connect-device", locales.For(s.cx).AddDevice(), lucide.Plus, func() { s.scanned = nil; s.dialog.Set("connect") })),
+		row(s.brand(cx, 18, true), spacer(), sidebarIconButton(cx, "connect-device", locales.For(s.cx).AddDevice(), lucide.Plus, func() { s.scanned = nil; s.dialog.Set("connect") })),
 		core.Scroll{TestID: "sidebar-devices", Style: core.Style{MaxHeight: core.Pt(148), MinHeight: core.Pt(0)}, Children: []core.Node{
 			core.Each(func() []Object { s.read(); return s.devices }, func(d Object) string { return str(d, "id") }, func(cx *core.Scope, d func() Object, _ func() int) core.Node {
 				id := str(d(), "id")
@@ -45,10 +45,13 @@ func (s *State) sidebarDevices(cx *core.Scope) core.Node {
 						dynamicText(cx, func() string {
 							s.read()
 							if flag(d(), "local") {
-								return locales.For(s.cx).LocalExecution()
+								return ""
 							}
 							if s.connectionRecovering(id) {
 								return "连接中"
+							}
+							if flag(d(), "connected") {
+								return ""
 							}
 							return s.deviceListStatus(d())
 						}, 11, true),
@@ -67,11 +70,7 @@ func (s *State) directory(cx *core.Scope) core.Node {
 	brake := &listTouchBrake{enabled: !isWeb() && cx.Env().OS() == core.OSAndroid}
 	return core.View{TestID: "session-sidebar", Style: fill, StyleFunc: func() core.Style { c := palette(cx); return core.Style{Background: c.sidebar, Color: c.foreground} }, Children: []core.Node{
 		s.sidebarDevices(cx),
-		core.View{Style: core.Style{Padding: core.Symmetric(6, 14), Gap: 9}, Children: []core.Node{
-			row(label(cx, locales.For(s.cx).Sessions(), 18, false), spacer(), s.sessionFiltersButton(cx), s.refreshSessionsButton(cx), labelledIconButton(cx, "new-session", locales.For(s.cx).NewSession(), lucide.SquarePen, func() { s.createDirectory = ""; s.dialog.Set("create") })),
-		}},
 		s.emptyCatalogue(cx),
-		s.sessionFilterFeedback(cx),
 		brake.wrap(core.List{TestID: "session-list", Style: fill, Count: func() int { return len(rows.Get()) }, Key: func(i int) any { return rows.Get()[i].ID }, EstimatedSize: 62, Row: func(cx *core.Scope, r core.ListRow) core.Node {
 			item := func() directoryRow {
 				v := rows.Get()
@@ -85,6 +84,9 @@ func (s *State) directory(cx *core.Scope) core.Node {
 			return core.Dynamic(func(cx *core.Scope) core.Node {
 				key.Get()
 				data := core.Untracked(cx, item)
+				if data.Kind == "filters" {
+					return s.sessionFilterFeedback(cx, data.Section)
+				}
 				if data.Kind == "empty" {
 					return core.View{TestID: data.ID, Style: core.Style{Padding: core.Symmetric(8, 14)}, Children: []core.Node{label(cx, data.Title, 12, true)}}
 				}
@@ -94,13 +96,12 @@ func (s *State) directory(cx *core.Scope) core.Node {
 				return s.sessionRow(cx, item, brake)
 			})
 		}}),
-		core.View{Style: core.Style{Padding: core.Symmetric(8, 10)}, Children: []core.Node{row(
-			button(cx, "server-settings", "设置", lucide.Settings, "ghost", func() { s.openSettings("general") }),
-			labelledIconButton(cx, "account-menu", "账号与设备同步", lucide.User, func() { s.dialog.Set("account") }), spacer(),
+		core.View{TestID: "sidebar-footer", Style: core.Style{Padding: core.Symmetric(8, 12)}, Children: []core.Node{row(
+			s.sidebarMenu(cx), spacer(),
 			core.Show{When: func() bool { return isMobile(cx) }, Then: func(cx *core.Scope) core.Node {
-				return labelledIconButton(cx, "scan-qr", "扫描二维码", lucide.ScanLine, func() { s.scan(cx) })
+				return sidebarIconButton(cx, "scan-qr", "扫描二维码", lucide.ScanLine, func() { s.scan(cx) })
 			}},
-			labelledIconButton(cx, "theme-toggle", "切换主题", lucide.SunMoon, s.toggleTheme),
+			sidebarIconButton(cx, "new-session", locales.For(cx).NewSession(), lucide.SquarePen, func() { s.createDirectory = ""; s.dialog.Set("create") }),
 		)}},
 	}}
 }
@@ -112,11 +113,11 @@ func (s *State) treeHeader(cx *core.Scope, item func() directoryRow, brake *list
 		key = data.ID
 	}
 	if data.Kind == "section" {
-		return core.View{TestID: data.ID, Role: core.RoleButton, LabelFunc: func() string { return item().Title }, Expanded: func() bool { s.read(); return !s.collapsed[key] },
+		trigger := core.View{TestID: data.ID, Role: core.RoleButton, LabelFunc: func() string { return item().Title }, Expanded: func() bool { s.read(); return !s.collapsed[key] },
 			OnPress: func(core.PressEvent) {
 				brake.action(func() { s.collapsed[key] = !s.collapsed[key]; s.saveSidebarPreferences() })()
 			},
-			Style:     core.Style{Group: "directory-section", Direction: core.Row, AlignItems: core.AlignCenter, Gap: 6, Padding: core.Symmetric(9, 14), Margin: core.Edges{Top: 8}, CornerRadius: 7, MinHeight: core.Pt(38)},
+			Style:     core.Style{Direction: core.Row, AlignItems: core.AlignCenter, FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0), Gap: 6, Padding: core.Symmetric(9, 6), CornerRadius: 7, MinHeight: core.Pt(38)},
 			StyleFunc: func() core.Style { return pressStyle(cx) }, Children: []core.Node{
 				singleLine(cx, func() string { return item().Title }, 13, true),
 				core.Icon{TestID: data.ID + "-disclosure", SVGFunc: func() *core.SVG {
@@ -134,6 +135,11 @@ func (s *State) treeHeader(cx *core.Scope, item func() directoryRow, brake *list
 						return contextualAffordance(cx, "directory-section", true)
 					}},
 			}}
+		children := []core.Node{trigger}
+		if data.Section != "pinned" {
+			children = append(children, s.sessionFiltersButton(cx, data.Section))
+		}
+		return core.View{Style: core.Style{Group: "directory-section", Direction: core.Row, AlignItems: core.AlignCenter, Margin: core.Edges{Top: 8, Left: 8, Right: 12}}, Children: children}
 	}
 	menuOpen, tipOpen := core.NewSignal(cx, false), core.NewSignal(cx, false)
 	tip := tooltipCard(cx, s.groupInfo(cx, item))

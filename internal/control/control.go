@@ -284,8 +284,30 @@ func (d *Dispatcher) dispatch(ctx context.Context, r Request) (any, error) {
 	case "interrupt":
 		return nil, p.Interrupt(ctx, r.Session, r.Turn)
 	case "approvals":
-		return p.Approvals(), nil
+		approvals := p.Approvals()
+		if r.Session == "" {
+			return approvals, nil
+		}
+		filtered := []provider.Approval{}
+		for _, a := range approvals {
+			if a.SessionID == r.Session {
+				filtered = append(filtered, a)
+			}
+		}
+		return filtered, nil
 	case "decide":
+		if r.Session != "" {
+			found := false
+			for _, a := range p.Approvals() {
+				if a.ID == r.Approval && a.SessionID == r.Session {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return nil, fmt.Errorf("请求已处理、已过期或不属于此会话")
+			}
+		}
 		return nil, p.Decide(ctx, r.Approval, r.Decision)
 	case "connectDesktop":
 		return nil, p.ConnectDesktop(ctx, r.Expected, r.ConfirmRestart)

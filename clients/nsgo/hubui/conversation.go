@@ -251,7 +251,9 @@ func (s *State) message(cx *core.Scope, get func() Message) core.Node {
 		case textview.PartCodeBlockScroll:
 			return core.Style{Background: c.code, Padding: core.All(18)}
 		case textview.PartCode:
-			return core.Style{Color: c.accent, Background: c.code, CornerRadius: 4}
+			return core.Style{Color: c.brand, Background: c.code, CornerRadius: 4}
+		case textview.PartLink, textview.PartFootnoteReference:
+			return core.Style{Color: c.brand, TextDecorationColor: c.brand.Faded(.5)}
 		}
 		return core.Style{}
 	}}
@@ -474,6 +476,9 @@ func (s *State) composer(cx *core.Scope) core.Node {
 	}}}}
 }
 func (s *State) approvalCard(cx *core.Scope, a Object) core.Node {
+	if len(objects(a["questions"])) > 0 {
+		return s.questionCard(cx, a)
+	}
 	params := object(a["params"])
 	options := objects(params["options"])
 	buttons := []core.Node{}

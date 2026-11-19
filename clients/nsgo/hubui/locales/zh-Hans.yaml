@@ -57,7 +57,7 @@ connectAndSelectAgent: "请先连接设备并选择已就绪的 Agent"
 deviceJoinsDirectory: "连接后，会话会自动加入统一列表。"
 localManagement: "本机与远程访问"
 
-sessionFilters: "筛选与分组"
+sessionFilters: "筛选会话"
 closeFilters: "关闭筛选"
 filterAll: "全部"
 filterDevices: "设备"

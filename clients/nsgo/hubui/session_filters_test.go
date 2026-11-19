@@ -31,8 +31,8 @@ func TestSessionHoverContextMenuAndFilters(t *testing.T) {
 		s = sidebarInteractionFixture(cx)
 		return core.View{Style: fill, Children: []core.Node{core.View{Style: core.Style{Height: core.Pct(100)}, StyleFunc: func() core.Style { return core.Style{Width: core.Pt(min(390, cx.Env().Window().Width))} }, Children: []core.Node{s.directory(cx)}}}}
 	}, nsgotest.Size(800, 1000), nsgotest.Environment(core.Environment{Locale: "zh-CN", Idiom: core.IdiomDesktop, OS: core.OSMacOS}))
-	local := "id:" + sessionRowID("recent", s.sessions[0])
-	remote := "id:" + sessionRowID("recent", s.sessions[1])
+	local := "id:" + sessionRowID("all", s.sessions[0])
+	remote := "id:" + sessionRowID("all", s.sessions[1])
 	if nsgotest.Target() != "macos" {
 		app.Hover(local)
 		app.Advance(450 * time.Millisecond)
@@ -46,19 +46,21 @@ func TestSessionHoverContextMenuAndFilters(t *testing.T) {
 	app.Screenshot("sidebar-context-menu")
 	app.Press("id:session-pin-action")
 	app.WaitFor("id:"+sessionRowID("pinned", s.sessions[0]), time.Second)
+	app.WaitUntil(time.Second, func() bool { return !app.Exists("id:session-pin-action") })
 	if s.selected != nil {
 		t.Fatal("context action opened a conversation")
 	}
 	app.RightClick("id:" + sessionRowID("pinned", s.sessions[0]))
 	app.WaitFor("role:menuitem 取消置顶", time.Second)
 	app.Press("id:session-pin-action")
+	app.WaitUntil(time.Second, func() bool { return !app.Exists("id:session-pin-action") })
 	if s.pinned[sessionIdentity(s.sessions[0])] != 0 {
 		t.Fatal("unpin did not remove the pin")
 	}
 	if app.Exists("id:session-grouping") {
 		t.Fatal("grouping is still permanently visible")
 	}
-	app.Press("id:session-filters")
+	openSectionFilters(app, "all")
 	app.WaitFor("id:session-filter-panel", time.Second)
 	app.Screenshot("sidebar-filters-light")
 	app.Press("id:" + sessionFilterID("device", "remote"))
@@ -66,7 +68,7 @@ func TestSessionHoverContextMenuAndFilters(t *testing.T) {
 		t.Fatal("device filter did not update sections")
 	}
 	app.Press("id:" + sessionFilterID("agent", "codex-app"))
-	app.WaitFor("id:session-filter-empty", time.Second)
+	app.WaitFor("id:all-filter-empty", time.Second)
 	if app.Exists(remote) {
 		t.Fatal("filters did not intersect")
 	}
@@ -80,12 +82,12 @@ func TestSessionHoverContextMenuAndFilters(t *testing.T) {
 		t.Fatal("shared repository filter did not span devices")
 	}
 	app.Press("id:close-session-filters")
-	app.Press("id:clear-session-filters")
-	app.Press("id:theme-toggle")
+	app.Press("id:clear-all-filters")
+	sidebarMenuAction(app, "theme-toggle")
 
 	for _, size := range []core.Size{{Width: 320, Height: 640}, {Width: 390, Height: 844}} {
 		app.Resize(size.Width, size.Height)
-		app.Press("id:session-filters")
+		openSectionFilters(app, "all")
 		app.WaitFor("id:session-filter-panel", time.Second)
 		bounds := globalBounds(app.Find("id:session-filter-panel"))
 		if bounds.Origin.X < 0 || bounds.Origin.X+bounds.Size.Width > size.Width+.5 || bounds.Origin.Y < 0 || bounds.Origin.Y+bounds.Size.Height > size.Height+.5 {
@@ -102,7 +104,7 @@ func TestSessionContextMenuLongPress(t *testing.T) {
 	}
 	var s *State
 	app := nsgotest.Start(t, func(cx *core.Scope) core.Node { s = sidebarInteractionFixture(cx); return s.directory(cx) }, nsgotest.Size(390, 844), nsgotest.Environment(core.Environment{Locale: "zh-CN", Idiom: core.IdiomPhone, OS: core.OSAndroid}))
-	local := "id:" + sessionRowID("recent", s.sessions[0])
+	local := "id:" + sessionRowID("all", s.sessions[0])
 	app.LongPress(local)
 	app.WaitFor("id:session-pin-action", time.Second)
 	app.Press("id:session-pin-action")
@@ -140,8 +142,8 @@ func TestSessionFilterIdentityAndMembership(t *testing.T) {
 				counts[row.Section] = row.Count
 			}
 		}
-		if counts["all"] != 0 || counts["pinned"] != 1 || counts["recent"] != 0 {
-			t.Fatal("filter not applied consistently to all sections", counts)
+		if counts["all"] != 0 || counts["pinned"] != 1 || counts["recent"] != 4 {
+			t.Fatal("project filter affected pins or recent sessions", counts)
 		}
 		return core.View{}
 	})

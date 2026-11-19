@@ -15,7 +15,7 @@ func TestSettingsThemePreservesWorkspace(t *testing.T) {
 	}
 	openDemoChat(t, app)
 	app.Type("id:chat-input", "设置切换不丢草稿")
-	app.Press("id:server-settings")
+	sidebarMenuAction(app, "server-settings")
 	app.Find("id:appearance-settings")
 	app.Press("id:appearance-select")
 	app.Press("role:option 明亮")
@@ -28,9 +28,9 @@ func TestSettingsThemePreservesWorkspace(t *testing.T) {
 		t.Fatalf("theme lost draft: %q", text)
 	}
 	app.Screenshot("workspace-new-dark")
-	app.Press("id:theme-toggle")
+	sidebarMenuAction(app, "theme-toggle")
 	app.Screenshot("workspace-new-light")
-	app.Press("id:server-settings")
+	sidebarMenuAction(app, "server-settings")
 	app.Press("id:settings-nav-agents")
 	app.WaitFor("id:agent-settings-list", 3*time.Second)
 	app.Press("id:add-agent")
@@ -47,8 +47,8 @@ func TestSettingsThemePreservesWorkspace(t *testing.T) {
 }
 func TestSettingsNarrowNavigationAndSearch(t *testing.T) {
 	app := startDemo(t, 390, 844)
-	app.WaitFor("id:server-settings", 3*time.Second)
-	app.Press("id:server-settings")
+	app.WaitFor("id:sidebar-menu", 3*time.Second)
+	sidebarMenuAction(app, "server-settings")
 	app.Type("id:settings-search", "Agent")
 	app.Find("id:settings-nav-agents")
 	if app.Exists("id:settings-nav-general") {

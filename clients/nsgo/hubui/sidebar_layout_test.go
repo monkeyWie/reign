@@ -91,7 +91,7 @@ func TestSidebarTogglePreservesWorkspace(t *testing.T) {
 	if app.Find("id:session-list").ID != sidebar || globalBounds(app.Find("id:conversation")) != before {
 		t.Fatal("restore remounted the directory or changed its width")
 	}
-	app.Press("id:theme-toggle")
+	sidebarMenuAction(app, "theme-toggle")
 	app.Screenshot("sidebar-toggle-expanded-dark")
 	app.Press("id:toggle-sidebar")
 	app.Resize(649, 820)
@@ -116,7 +116,7 @@ func TestLocalManagementFlatSurface(t *testing.T) {
 	app.WaitFor("id:device-code", time.Second)
 	app.Screenshot("local-management-flat-light")
 	app.Press("id:dialog-local-close")
-	app.Press("id:theme-toggle")
+	sidebarMenuAction(app, "theme-toggle")
 	app.Press("id:device-local")
 	app.Screenshot("local-management-flat-dark")
 	app.Resize(390, 844)

@@ -503,25 +503,7 @@ func (p *Provider) sendInput(ctx context.Context, id string, input []any, model 
 		}
 		var state map[string]any
 		_ = json.Unmarshal(raw, &state)
-		request := map[string]any{"threadId": id, "turnTrigger": "composer", "clientUserMessageId": uuid.NewString(), "input": input, "cwd": state["cwd"], "model": nil, "effort": nil, "collaborationMode": state["latestCollaborationMode"], "useAppServerPermissionDefault": true}
-		// Preserve owner policy. Never supply a second profile-based permissions field.
-		for _, source := range []string{"currentPermissions", "latestThreadSettings"} {
-			if settings, ok := state[source].(map[string]any); ok {
-				for _, key := range []string{"approvalPolicy", "approvalsReviewer", "sandboxPolicy"} {
-					if v, ok := settings[key]; ok {
-						request[key] = v
-					}
-				}
-			}
-		}
-		if model != "" {
-			request["model"] = model
-			if cm := object(state["latestCollaborationMode"]); cm != nil {
-				if settings := object(cm["settings"]); settings != nil {
-					settings["model"] = model
-				}
-			}
-		}
+		request := ipcTurnStart(state, id, input, model)
 		_, err = b.request(ctx, "thread-follower-start-turn", map[string]any{"conversationId": id, "turnStart": map[string]any{"request": request, "context": map[string]any{"useAppServerPermissionDefault": true}}}, owner)
 		return ipcWriteError("thread-follower-start-turn", err)
 	}
@@ -559,11 +541,7 @@ func (p *Provider) steerInput(ctx context.Context, id, turn string, input []any)
 		if len(turns) == 0 || turns[len(turns)-1]["status"] != "inProgress" {
 			return p.sendInput(ctx, id, input, "")
 		}
-		messageID := uuid.NewString()
-		// The App uses this composer snapshot for workspace lookup and for
-		// restoring a rejected steer. It is required even with a client ID.
-		restore := ipcRestoreMessage(state, input, messageID)
-		_, err = b.request(ctx, "thread-follower-steer-turn", map[string]any{"conversationId": id, "input": input, "clientUserMessageId": messageID, "restoreMessage": restore, "attachments": []any{}}, owner)
+		_, err = b.request(ctx, "thread-follower-steer-turn", ipcSteerParams(state, id, input), owner)
 		return ipcWriteError("thread-follower-steer-turn", err)
 	}
 	return c.Call(ctx, "turn/steer", map[string]any{"threadId": id, "expectedTurnId": turn, "input": input}, nil)
@@ -614,4 +592,33 @@ func ipcRestoreMessage(state map[string]any, input []any, id string) map[string]
 		roots = append(roots, cwd)
 	}
 	return map[string]any{"id": id, "text": prompt, "cwd": state["cwd"], "createdAt": time.Now().UnixMilli(), "context": map[string]any{"prompt": prompt, "addedFiles": []any{}, "fileAttachments": []any{}, "imageAttachments": []any{}, "ideContext": nil, "workspaceRoots": roots, "collaborationMode": state["latestCollaborationMode"], "turnTrigger": "composer"}}
+}
+
+func ipcTurnStart(state map[string]any, id string, input []any, model string) map[string]any {
+	request := map[string]any{"threadId": id, "turnTrigger": "composer", "clientUserMessageId": uuid.NewString(), "input": input, "cwd": state["cwd"], "model": nil, "effort": nil, "collaborationMode": state["latestCollaborationMode"], "useAppServerPermissionDefault": true}
+	// Preserve owner policy. Never supply a second profile-based permissions field.
+	for _, source := range []string{"currentPermissions", "latestThreadSettings"} {
+		if settings, ok := state[source].(map[string]any); ok {
+			for _, key := range []string{"approvalPolicy", "approvalsReviewer", "sandboxPolicy"} {
+				if v, ok := settings[key]; ok {
+					request[key] = v
+				}
+			}
+		}
+	}
+	if model != "" {
+		request["model"] = model
+		if cm := object(state["latestCollaborationMode"]); cm != nil {
+			if settings := object(cm["settings"]); settings != nil {
+				settings["model"] = model
+			}
+		}
+	}
+	return request
+}
+
+func ipcSteerParams(state map[string]any, id string, input []any) map[string]any {
+	messageID := uuid.NewString()
+	// The App restores a rejected steer from this composer snapshot.
+	return map[string]any{"conversationId": id, "input": input, "clientUserMessageId": messageID, "restoreMessage": ipcRestoreMessage(state, input, messageID), "attachments": []any{}}
 }

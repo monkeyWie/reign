@@ -69,14 +69,14 @@ func TestAllEnvironmentsLoadWithoutSelectionAndKeepRoutes(t *testing.T) {
 	app.WaitFor("text:消息来自 remote", time.Second)
 	app.Type("id:chat-input", "remote draft")
 	input := app.Find("id:chat-input").ID
-	app.Press("id:session-filters")
+	openSectionFilters(app, "all")
 	app.Press("id:session-grouping")
 	app.Press("role:option 设备 → Agent → 项目")
 	app.Press("id:close-session-filters")
 	if app.Find("id:chat-input").ID != input || app.Find("id:chat-input").Text != "remote draft" {
 		t.Fatal("grouping remounted conversation")
 	}
-	app.Press("id:session-filters")
+	openSectionFilters(app, "all")
 	app.Press("id:session-grouping")
 	app.Press("role:option 按项目聚合")
 	app.Press("id:close-session-filters")
@@ -167,7 +167,7 @@ func TestTreeExpansionAndCompactSidebar(t *testing.T) {
 		return s.directory(cx)
 	}, nsgotest.Size(390, 1000), nsgotest.Environment(core.Environment{Locale: "zh-CN"}))
 	app.Screenshot("unified-sidebar-projects-light")
-	app.Press("id:session-filters")
+	openSectionFilters(app, "all")
 	app.Press("id:session-grouping")
 	app.Press("role:option 设备 → Agent → 项目")
 	app.Press("id:close-session-filters")
@@ -184,13 +184,13 @@ func TestTreeExpansionAndCompactSidebar(t *testing.T) {
 	app.WaitFor(sessionSelector("local", "codex-app", "build"), time.Second)
 	for _, width := range []core.Points{320, 390} {
 		app.Resize(width, 1000)
-		for _, id := range []string{"session-sidebar", "session-filters", "connect-device", "server-settings"} {
+		for _, id := range []string{"session-sidebar", "session-filters", "connect-device", "sidebar-menu"} {
 			bounds := globalBounds(app.Find("id:" + id))
 			if bounds.Origin.X < 0 || bounds.Origin.X+bounds.Size.Width > width+.5 {
 				t.Fatal("sidebar overflows", id, width, bounds)
 			}
 		}
 	}
-	app.Press("id:theme-toggle")
+	sidebarMenuAction(app, "theme-toggle")
 	app.Screenshot("unified-sidebar-device-agent-dark")
 }

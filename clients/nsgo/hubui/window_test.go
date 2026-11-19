@@ -99,7 +99,7 @@ func TestWindowFrameAppearance(t *testing.T) {
 	app := startDemo(t, 1320, 880)
 	openDemoChat(t, app)
 	app.Screenshot("window-frame-light")
-	app.Press("id:theme-toggle")
+	sidebarMenuAction(app, "theme-toggle")
 	app.Screenshot("window-frame-dark")
 	if nsgotest.Target() == "web" && app.Exists("id:window-toolbar") {
 		t.Fatal("browser must not show desktop controls")

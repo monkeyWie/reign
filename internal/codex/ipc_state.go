@@ -227,11 +227,17 @@ func (p *Provider) syncIPCApprovals(id, owner string, state map[string]any) {
 	route := "ipc:" + id + ":" + owner
 	methods := map[string]string{"item/commandExecution/requestApproval": "thread-follower-command-approval-decision", "item/fileChange/requestApproval": "thread-follower-file-approval-decision", "item/tool/requestUserInput": "thread-follower-submit-user-input", "item/permissions/requestApproval": "thread-follower-permissions-request-approval-response", "mcpServer/elicitation/request": "thread-follower-submit-mcp-server-elicitation-response"}
 	active := map[string]bool{}
-	for _, raw := range array(state["requests"]) {
+	requests := append([]any{}, array(state["requests"])...)
+	requests = append(requests, asyncQuestionRequests(state, p.dismissedQuestions(id, owner, ""))...)
+	latestTurn := ""
+	if turns, _, err := stateTurns(state); err == nil && len(turns) > 0 {
+		latestTurn = stringValue(turns[len(turns)-1]["id"])
+	}
+	for _, raw := range requests {
 		r := object(raw)
 		method := stringValue(r["method"])
 		ipcMethod := methods[method]
-		if ipcMethod == "" {
+		if ipcMethod == "" && method != asyncQuestionMethod {
 			continue
 		}
 		requestID := rawJSON(r["requestId"])
@@ -262,6 +268,9 @@ func (p *Provider) syncIPCApprovals(id, owner string, state map[string]any) {
 			if bridge == nil {
 				return provider.ErrUnavailable
 			}
+			if method == asyncQuestionMethod {
+				return bridge.answerAsyncQuestions(ctx, id, owner, r, result)
+			}
 			v := map[string]any{"conversationId": id, "requestId": json.RawMessage(requestID)}
 			if ipcMethod == "thread-follower-submit-user-input" || ipcMethod == "thread-follower-permissions-request-approval-response" || ipcMethod == "thread-follower-submit-mcp-server-elicitation-response" {
 				v["response"] = result
@@ -274,12 +283,17 @@ func (p *Provider) syncIPCApprovals(id, owner string, state map[string]any) {
 				}
 			}
 			_, err := bridge.request(ctx, ipcMethod, v, owner)
-			return err
+			return ipcWriteError(ipcMethod, err)
 		}
 		p.addPending(rpc.Message{ID: requestID, Method: method, Params: rawJSON(params)}, reply, route)
 	}
 	p.mu.Lock()
 	for key, v := range p.pending {
+		// Async skip/submission tombstones outlive the owner's reply echo, so
+		// skipped siblings cannot reappear as a smaller form on the next patch.
+		if v.route == route && v.claimed && v.approval.Method == asyncQuestionMethod && v.approval.TurnID == latestTurn {
+			continue
+		}
 		if strings.HasPrefix(v.route, "ipc:"+id+":") && (v.route != route || !active[v.requestID]) {
 			delete(p.pending, key)
 		}

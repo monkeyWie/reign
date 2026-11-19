@@ -58,7 +58,7 @@ func TestRunningSessionsShareRotation(t *testing.T) {
 		previous = angle
 	}
 	app.Screenshot("sessions-shared-rotation-light")
-	app.Press("id:theme-toggle")
+	sidebarMenuAction(app, "theme-toggle")
 	app.Screenshot("sessions-shared-rotation-dark")
 	app.Post(func() { s.cx.Post(func() { shown.Set(false) }) })
 	app.Settle()

@@ -55,8 +55,25 @@ retaining their pipes and cancellation. Do not hide the symptom by slowing polls
 Named-pipe `Access is denied` does not mean the App is closed. The default
 `go-winio` dial requests generic read/write; generic write can include unnecessary
 server rights. Request only client communication rights, preserve the real error
-through retries, and check user / privilege alignment if denial persists. Never
-broaden the vendor pipe ACL or automatically run either App as administrator.
+through retries, and check user / privilege alignment if denial persists.
+
+Matching the desktop Apps' privilege levels is not sufficient if a different
+environment owns the pipe. In a reported Windows case, an SSH → VS Code → Node
+process chain held `codex-ipc` with write access restricted to administrators and
+SYSTEM, while both desktop Apps ran as ordinary users. Closing that environment's
+Codex instance let desktop Codex App take over the pipe and restored access.
+On access denial only, ReignHub now queries the server PID through a metadata-only
+handle and traces a bounded Toolhelp snapshot. Recognized SSH / VS Code ancestry
+adds a possible-source hint and asks the user to close the corresponding instance
+in that environment, reopen desktop Codex App and retry. `node.exe` alone is not
+source evidence. Ancestry can be stale or unavailable; diagnosis does not prove
+the ACL's cause, and unknown/failed queries retain generic permission guidance.
+
+Never terminate user processes, broaden the vendor pipe ACL or automatically run
+either App as administrator. Tests change only unique fixture pipe ACLs and verify
+denial, metadata PID lookup and successful data exchange after removing denial.
+Native Windows execution and real App integration remain separate verification
+steps; a cross-build does not establish either.
 See [Windows adapter notes](../../internal/codex/README.md),
 [console fixture](../../internal/system/console_windows_test.go) and
 [restricted-pipe fixture](../../internal/codexipc/local_windows_test.go).
@@ -113,6 +130,29 @@ independent start times. Bind them to the workspace's shared rotation value in
 rows; mounting a late row joins the current phase, and removing the last ring
 stops the animation. [The synchronization regression](../../clients/nsgo/hubui/loading_test.go)
 covers staggered starts, disposal and reduced-motion changes.
+
+## Mac exits while switching remote conversations
+
+A remote device's platform does not identify the failing process. Capture the
+controller's stderr and inspect the stack before changing transport or Provider
+retries. A reported Mac crash while switching Windows conversations was a nil
+view in NSGo's macOS `surface.apply`, handling `ItemStickyCells`.
+
+Retained scroll content can update after leaving the mounted tree. The previous
+NSGo pin could emit sticky/scroll commands for an unplaced view, and the native
+backend dereferenced the absent view. The client now pins upstream
+[`7774099b6513`](https://github.com/nsgo-dev/nsgo/commit/7774099b6513a61f33199764420d3372859cdfe6),
+which drops unplaced commands and guards missing native views. Keep the fix in
+the pinned dependency; do not patch the module cache or hide the panic with a
+global recovery handler.
+
+[Session switching regressions](../../clients/nsgo/hubui/session_switching_test.go)
+use synthetic Windows sessions and detached scroll content. The detached-content
+case reproduces the old pin's missing-view failure in the test driver; the rapid
+switching case also runs in a native Mac window. Native tests alone do not prove
+the original remote-device scenario has recovered. Never enable full render
+traces against real conversations: they include rendered text. Capture only the
+error stack needed for diagnosis.
 
 ## Recent sessions repeatedly swapping order
 

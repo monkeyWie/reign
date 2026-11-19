@@ -108,10 +108,7 @@ func TestRecentSessionsUnlimitedOrderingAndFilters(t *testing.T) {
 			if !slices.Equal(got, want) || all != wantAll {
 				t.Fatalf("Recent = %v, Projects = %d; want %v, %d", got, all, want, wantAll)
 			}
-			wantSections := []string{"all", "recent"}
-			if len(s.filters.Devices) == 0 {
-				wantSections = append([]string{"pinned"}, wantSections...)
-			}
+			wantSections := []string{"pinned", "all", "recent"}
 			if !slices.Equal(sections, wantSections) {
 				t.Fatalf("section order = %v, want %v", sections, wantSections)
 			}

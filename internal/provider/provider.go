@@ -204,6 +204,23 @@ type Approval struct {
 	Method     string          `json:"method"`
 	Params     json.RawMessage `json:"params"`
 	CreatedAt  time.Time       `json:"createdAt"`
+	Questions  []Question      `json:"questions,omitempty"`
+	AllowSkip  bool            `json:"allowSkip,omitempty"`
+}
+
+// Question is an Agent-owned prompt. Answers are keyed by its opaque ID;
+// selecting an option is a draft, never an implicit submission.
+type Question struct {
+	ID       string           `json:"id"`
+	Header   string           `json:"header,omitempty"`
+	Question string           `json:"question"`
+	IsSecret bool             `json:"isSecret,omitempty"`
+	Options  []QuestionOption `json:"options,omitempty"`
+}
+
+type QuestionOption struct {
+	Label       string `json:"label"`
+	Description string `json:"description,omitempty"`
 }
 
 type Decision struct {

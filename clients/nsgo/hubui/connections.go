@@ -144,6 +144,9 @@ func (s *State) connectionIndicator(cx *core.Scope, target func() string, namesp
 		}
 		node.Label = value[1]
 		node.Style.Padding = core.All(8)
+		if prefix == "sidebar-" {
+			node.Style.Width, node.Style.Height, node.Style.MinHeight = core.Pt(40), core.Pt(36), core.Pt(36)
+		}
 		baseStyle := node.StyleFunc
 		node.StyleFunc = func() core.Style {
 			st := baseStyle()

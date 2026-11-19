@@ -38,6 +38,7 @@ type State struct {
 	agentDefinitions                                        Object
 	host, selected, transcript, scanned                     Object
 	accountLogin, accountStatus                             Object
+	accountStatusLoading                                    bool
 	accountDevices                                          []Object
 	target, error, notice, model                            string
 	failure                                                 *sessionOperationError
@@ -46,6 +47,7 @@ type State struct {
 	ready, polling, narrowChat, dark                        bool
 	manualRefresh                                           bool
 	actions                                                 map[string]bool
+	questionDrafts                                          map[string]map[string]string
 	draft                                                   *core.Signal[string]
 	sessionWidth                                            *core.Signal[core.Points]
 	sidebarHidden                                           *core.Signal[bool]
@@ -83,7 +85,7 @@ type State struct {
 	workspaces                                              map[string]workspaceCache
 	catalogues                                              map[string]*catalogueState
 	grouping                                                string
-	filters                                                 sessionFilters
+	filters, recentFilters                                  sessionFilters
 	removedSessions                                         map[string]bool
 	removalTarget                                           Object
 	uncertainRemovals                                       map[string]bool
@@ -197,7 +199,7 @@ func (s *State) initialize() {
 			}
 		}
 		return nil, nil
-	}, func(any) { s.ready = true; s.poll() })
+	}, func(any) { s.ready = true; s.poll(); s.refreshAccountStatus() })
 	go func() {
 		tick := time.NewTicker(2 * time.Second)
 		defer tick.Stop()

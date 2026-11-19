@@ -14,5 +14,9 @@ func dialLocal(ctx context.Context, path string) (net.Conn, error) {
 	// writes. A client only needs data exchange and pipe-info access; requesting
 	// server rights can fail against a restricted DACL even for the same user.
 	const access = windows.FILE_READ_DATA | windows.FILE_WRITE_DATA | windows.FILE_READ_ATTRIBUTES | windows.SYNCHRONIZE
-	return winio.DialPipeAccess(ctx, path, access)
+	conn, err := winio.DialPipeAccess(ctx, path, access)
+	if err != nil {
+		err = diagnosePipeAccess(ctx, path, err, inspectPipeSource)
+	}
+	return conn, err
 }

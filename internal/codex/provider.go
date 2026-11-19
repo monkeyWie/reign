@@ -23,6 +23,8 @@ type pending struct {
 	approval         provider.Approval
 	reply            func(context.Context, any) error
 	route, requestID string
+	claimed          bool
+	hidden           bool
 }
 type Provider struct {
 	assets          *assets.Store
@@ -511,7 +513,9 @@ func (p *Provider) Approvals() []provider.Approval {
 	defer p.mu.Unlock()
 	out := []provider.Approval{}
 	for _, a := range p.pending {
-		out = append(out, a.approval)
+		if !a.hidden {
+			out = append(out, a.approval)
+		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
 	return out
@@ -520,9 +524,22 @@ func (p *Provider) addPending(m rpc.Message, reply func(context.Context, any) er
 	var meta struct{ ThreadID, TurnID string }
 	_ = json.Unmarshal(m.Params, &meta)
 	p.mu.Lock()
+	if strings.HasPrefix(route, "ipc:") {
+		for id, existing := range p.pending {
+			if existing.route == route && existing.requestID == string(m.ID) {
+				p.mu.Unlock()
+				return id
+			}
+		}
+	}
 	p.next++
 	id := fmt.Sprint(p.next)
 	a := provider.Approval{ID: id, ProviderID: "codex", SessionID: meta.ThreadID, TurnID: meta.TurnID, Method: m.Method, Params: m.Params, CreatedAt: time.Now()}
+	if m.Method == "item/tool/requestUserInput" || m.Method == asyncQuestionMethod {
+		var input struct{ Questions []provider.Question }
+		_ = json.Unmarshal(m.Params, &input)
+		a.Questions, a.AllowSkip = input.Questions, m.Method == asyncQuestionMethod
+	}
 	p.pending[id] = pending{approval: a, reply: reply, route: route, requestID: string(m.ID)}
 	p.mu.Unlock()
 	p.broker.Publish("codex", "approval", a)
@@ -530,11 +547,19 @@ func (p *Provider) addPending(m rpc.Message, reply func(context.Context, any) er
 }
 func (p *Provider) removePending(id string) { p.mu.Lock(); delete(p.pending, id); p.mu.Unlock() }
 func (p *Provider) Decide(ctx context.Context, id string, d provider.Decision) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	p.mu.Lock()
 	a, ok := p.pending[id]
 	p.mu.Unlock()
-	if !ok {
+	if !ok || a.claimed {
 		return errors.New("审批已处理或已过期")
+	}
+	if len(a.approval.Questions) > 0 {
+		if err := validateQuestionDecision(a.approval, d); err != nil {
+			return err
+		}
 	}
 	var result any
 	switch a.approval.Method {
@@ -543,29 +568,60 @@ func (p *Provider) Decide(ctx context.Context, id string, d provider.Decision) e
 			return errors.New("无效审批决定")
 		}
 		result = map[string]string{"decision": d.Decision}
-	case "item/tool/requestUserInput":
+	case "item/tool/requestUserInput", asyncQuestionMethod:
 		result = map[string]any{"answers": d.Answers}
 	default:
 		return fmt.Errorf("此请求须在官方 App 处理: %s", a.approval.Method)
 	}
 	// Claim once before writing: concurrent remote clients must not answer twice.
 	p.mu.Lock()
-	_, ok = p.pending[id]
+	current, ok := p.pending[id]
+	ok = ok && !current.claimed
 	if ok {
-		delete(p.pending, id)
+		current.claimed = true
+		p.pending[id] = current
 	}
 	p.mu.Unlock()
 	if !ok {
 		return errors.New("审批已处理或已过期")
 	}
+	if a.route == "service" {
+		defer p.removePending(id)
+	}
+	if a.approval.AllowSkip && d.Decision == "skip" {
+		p.hidePending(id)
+		return nil
+	}
 	if err := a.reply(ctx, result); err != nil {
+		// Keep a tombstone after an uncertain write: another snapshot must not
+		// recreate a submit button while the owner's acknowledgement is pending.
+		var uncertain interface{ OutcomeUnknown() bool }
+		if strings.HasPrefix(a.route, "ipc:") && !(errors.As(err, &uncertain) && uncertain.OutcomeUnknown()) {
+			p.mu.Lock()
+			if current, exists := p.pending[id]; exists {
+				current.claimed = false
+				p.pending[id] = current
+			}
+			p.mu.Unlock()
+		} else {
+			p.hidePending(id)
+		}
 		return err
 	}
-	p.removePending(id)
+	p.hidePending(id)
 	if b := p.appBridge(); b != nil {
 		b.markDirty(a.approval.SessionID)
 	}
 	return nil
+}
+
+func (p *Provider) hidePending(id string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if current, ok := p.pending[id]; ok {
+		current.hidden = true
+		p.pending[id] = current
+	}
 }
 func (p *Provider) observe(m rpc.Message, reply func(context.Context, any) error) {
 	defer func() {

@@ -44,9 +44,11 @@ func TestSessionRefreshFeedback(t *testing.T) {
 				s.sessions = []Object{{"id": "demo-chat", "providerId": "codex-app", "title": "Cached conversation", "cwd": "/workspace/agenthub"}}
 				return s.directory(cx)
 			}, nsgotest.Size(390, 844))
+			ensureSidebarMenu(app)
 			app.Press("id:refresh-sessions")
 			app.WaitFor("id:refresh-sessions-loading", time.Second)
 			app.WaitUntil(time.Second, func() bool { return f.syncs.Load() == 1 })
+			ensureSidebarMenu(app)
 			control := app.Find("id:refresh-sessions")
 			if !control.Props.Busy || !control.Props.Disabled || control.Props.Label == "" {
 				t.Fatal("refresh must acknowledge pending work and prevent duplicate activation")
@@ -142,6 +144,7 @@ func TestSessionRefreshBackgroundIsSilentAndManualSupersedesIt(t *testing.T) {
 	app.Post(func() { s.cx.Post(s.poll) })
 	background := next()
 	app.Settle()
+	ensureSidebarMenu(app)
 	control := app.Find("id:refresh-sessions")
 	if control.Props.Busy || control.Props.Disabled || app.Exists("id:refresh-sessions-loading") {
 		t.Fatal("background refresh animated or disabled the manual refresh control")
@@ -247,11 +250,13 @@ func TestBackFromStalledHistoryPreservesCatalogueAcrossDiscoveryFailure(t *testi
 	f.missing.Store(true)
 	app.Press("id:back-sessions")
 	app.WaitFor(sessionSelector("demo-device", "codex-app", "demo-chat"), time.Second)
+	ensureSidebarMenu(app)
 	app.Press("id:refresh-sessions")
 	app.WaitUntil(time.Second, func() bool { return !app.Exists("id:refresh-sessions-loading") })
 	app.Find(sessionSelector("demo-device", "codex-app", "demo-chat"))
 	f.missing.Store(false)
 	f.failSync.Store(true)
+	ensureSidebarMenu(app)
 	app.Press("id:refresh-sessions")
 	app.WaitUntil(time.Second, func() bool { return !app.Exists("id:refresh-sessions-loading") })
 	app.Find(sessionSelector("demo-device", "codex-app", "demo-chat"))
@@ -304,6 +309,7 @@ func TestCatalogueSkipsUnavailableHistoryProviderAndResumesWhenReady(t *testing.
 				return s.directory(cx)
 			}, nsgotest.Size(390, 844))
 			refresh := func(want int32) {
+				ensureSidebarMenu(app)
 				app.Press("id:refresh-sessions")
 				app.WaitUntil(time.Second, func() bool {
 					return f.appSyncs.Load() >= want && !app.Exists("id:refresh-sessions-loading")

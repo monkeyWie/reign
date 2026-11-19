@@ -150,3 +150,24 @@ to forward encrypted frames without understanding Agent operations.
 Subprocess fixtures exercise actual ACP JSON-RPC and Pi JSONL framing, fragmented writes, Unicode text offsets, per-session model options, exact permission choices, cancellation, native history replay, process exit, lazy discovery and persistence. Tests also verify that ending a controller request does not end an Agent prompt.
 
 Agent packages and authenticated model accounts are not installed by these tests. Each vendor's current authenticated executable still requires live integration testing in its target environment. Client-side ACP filesystem/terminal APIs, ACP v2 preview features, T3-specific checkpoints/worktrees/MCP delegation and vendor-specific SDK features are outside this implementation's advertised capabilities.
+
+## Question forms
+
+`Approval.questions` optionally carries a normalized list of opaque `id`,
+`question`, optional `header`, `isSecret` and `options` (label/description) fields.
+`allowSkip` permits dismissing or partially answering an optional form. `decide`
+uses `decision: "input"` with `answers[id].answers` containing the chosen label or
+custom text; `decision: "skip"` carries no answers. The Provider validates the
+request and translates it to its native operation. Only Providers that understand
+these semantics advertise forms; existing ACP/Pi permissions remain unchanged.
+
+The dispatcher scopes approval reads and decisions to the requested session, and
+the controller also filters incoming approvals to the selected session. Local
+and remote controllers share the same form and dispatcher. Codex's async metadata
+and synchronous requests use different native transports; see its
+[owning reference](../../internal/codex/README.md#questions-and-answers).
+
+These are encrypted endpoint payloads, not new public service APIs. Inspected
+`internal/relay/relay.go` and `packages/worker-core/src/room.ts` continue forwarding
+opaque frames and need no changes. Both host Provider and controller must be
+updated to display newly normalized question metadata.

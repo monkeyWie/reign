@@ -23,7 +23,7 @@ func TestSidebarEmptyGuidanceAndRecovery(t *testing.T) {
 		t.Fatal("repeated global empty states")
 	}
 	app.Screenshot("sidebar-first-use-light")
-	app.Press("id:theme-toggle")
+	sidebarMenuAction(app, "theme-toggle")
 	app.Screenshot("sidebar-first-use-dark")
 	app.Press("id:empty-sessions-action")
 	if s.dialog.GetUntracked() != "local" {
@@ -64,10 +64,10 @@ func TestSidebarEmptyGuidanceAndRecovery(t *testing.T) {
 		t.Fatal("empty guidance covered recovered sessions")
 	}
 	app.Post(func() { s.cx.Post(func() { s.filters.Agents = map[string]bool{"other": true}; s.filtersChanged() }) })
-	app.WaitFor("id:session-filter-empty", time.Second)
-	if app.Exists("id:session-list-placeholder") || app.Exists("id:section:recent") {
+	app.WaitFor("id:all-filter-empty", time.Second)
+	if app.Exists("id:session-list-placeholder") || !app.Exists("id:section:recent") {
 		t.Fatal("filtered result became onboarding or duplicate empty state")
 	}
-	app.Press("id:clear-session-filters")
+	app.Press("id:clear-all-filters")
 	app.WaitFor("id:section:recent", time.Second)
 }

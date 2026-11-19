@@ -88,11 +88,7 @@ func button(cx *core.Scope, id, title string, icon func() *core.SVG, variant str
 			st.Background = c.background
 		}
 		if variant == "primary" {
-			st.Background = c.accent
-			st.Color = cx.Theme().Light.AccentText
-			if cx.Dark() {
-				st.Color = cx.Theme().Dark.AccentText
-			}
+			st.Background, st.Color = c.foreground, c.background
 			st.Hover = &core.Style{Opacity: core.Alpha(.88)}
 			st.Active = &core.Style{Opacity: core.Alpha(.72)}
 		}

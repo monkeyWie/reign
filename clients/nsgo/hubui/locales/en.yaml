@@ -64,7 +64,7 @@ connectAndSelectAgent: "Connect a device and select a ready Agent first."
 deviceJoinsDirectory: "Sessions join the shared list when connected."
 localManagement: "This device and remote access"
 
-sessionFilters: "Filter and group"
+sessionFilters: "Filter sessions"
 closeFilters: "Close filters"
 filterAll: "All"
 filterDevices: "Devices"

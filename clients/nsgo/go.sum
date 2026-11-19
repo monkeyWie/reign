@@ -51,6 +51,8 @@ github.com/ncruces/go-strftime v0.1.9 h1:bY0MQC28UADQmHmaF5dgpLmImcShSi2kHU9XLdh
 github.com/ncruces/go-strftime v0.1.9/go.mod h1:Fwc5htZGVVkseilnfgOVb9mKy6w1naJmn9CehxcKcls=
 github.com/nsgo-dev/nsgo v0.0.0-20261116023208-cccb89fb85d8 h1:SZxUY2ZP8GIgx+3QWavov+NjW/NcbdnphEu1JbxZCBQ=
 github.com/nsgo-dev/nsgo v0.0.0-20261116023208-cccb89fb85d8/go.mod h1:zVeObRFp8Ei49tpmMgH1FNeIWos1fY7ta0T6w+PxrGM=
+github.com/nsgo-dev/nsgo v0.1.1-0.20261117035253-7774099b6513 h1:hjFC0yemqgeuHZjpOm3OB3sj6qfdnJN9u9OdUwv9xAo=
+github.com/nsgo-dev/nsgo v0.1.1-0.20261117035253-7774099b6513/go.mod h1:zVeObRFp8Ei49tpmMgH1FNeIWos1fY7ta0T6w+PxrGM=
 github.com/pion/datachannel v1.5.10 h1:ly0Q26K1i6ZkGf42W7D4hQYR90pZwzFOjTq5AuCKk4o=
 github.com/pion/datachannel v1.5.10/go.mod h1:p/jJfC9arb29W7WrxyKbepTU20CFgyx5oLo8Rs4Py/M=
 github.com/pion/dtls/v3 v3.0.8 h1:ZrPUrvPVDaTJDM8Vu1veatzXebLlsIWeT7Vaate/zwM=

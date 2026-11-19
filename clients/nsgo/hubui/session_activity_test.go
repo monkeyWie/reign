@@ -47,10 +47,10 @@ func TestSessionActivityIndicatorsAndCompletion(t *testing.T) {
 		}
 	}
 	checkNeutralInteraction(lightColors)
-	app.Press("id:theme-toggle")
+	sidebarMenuAction(app, "theme-toggle")
 	checkNeutralInteraction(darkColors)
 	app.Screenshot("session-running-indicator-dark")
-	app.Press("id:theme-toggle")
+	sidebarMenuAction(app, "theme-toggle")
 	checkNeutralInteraction(lightColors)
 	app.Post(func() { s.cx.Post(func() { s.notice = "Fixture update"; s.changed() }) })
 	app.Settle()
@@ -106,7 +106,7 @@ func TestSessionActivityIndicatorsAndCompletion(t *testing.T) {
 		t.Fatal("unread dot does not use the light brand attention color")
 	}
 	app.Screenshot("session-completion-dot-light")
-	app.Press("id:theme-toggle")
+	sidebarMenuAction(app, "theme-toggle")
 	if app.Find("id:unread-"+row).Style.Background != core.RGB(darkColors.brand) {
 		t.Fatal("unread dot does not follow the dark brand attention color")
 	}

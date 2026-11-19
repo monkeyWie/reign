@@ -262,22 +262,29 @@ type directoryRow struct {
 
 func (s *State) directoryRows() []directoryRow {
 	s.read()
-	sessions := s.filteredSessions()
+	sessions := s.sessionsMatching(sessionFilters{})
 	// A completely empty directory has one shared onboarding/loading/filter
 	// state. Section placeholders only explain empty subsets of existing data.
 	if len(sessions) == 0 {
 		return nil
 	}
 	rows := []directoryRow{}
-	pinned, projects := []Object{}, []Object{}
+	pinned, projects, recent := []Object{}, []Object{}, []Object{}
 	for _, ss := range sessions {
 		if s.pinned[sessionIdentity(ss)] != 0 {
 			pinned = append(pinned, ss)
-		} else {
+		}
+	}
+	for _, ss := range s.filteredSessions() {
+		if s.pinned[sessionIdentity(ss)] == 0 {
 			projects = append(projects, ss)
 		}
 	}
-	recent := append([]Object(nil), projects...)
+	for _, ss := range s.sessionsMatching(s.recentFilters) {
+		if s.pinned[sessionIdentity(ss)] == 0 {
+			recent = append(recent, ss)
+		}
+	}
 	sort.Slice(pinned, func(i, j int) bool {
 		a, b := s.pinned[sessionIdentity(pinned[i])], s.pinned[sessionIdentity(pinned[j])]
 		if a != b {
@@ -318,7 +325,10 @@ func (s *State) directoryRows() []directoryRow {
 		}
 	}
 	if !s.collapsed["section:all"] {
-		if len(projects) == 0 {
+		if s.filters.count() > 0 {
+			rows = append(rows, directoryRow{ID: "filters:all", Kind: "filters", Section: "all", Header: true})
+		}
+		if len(projects) == 0 && s.filters.count() == 0 {
 			title := locales.For(s.cx).NoProjectSessions()
 			if len(pinned) > 0 {
 				title = locales.For(s.cx).AllSessionsPinned()
@@ -329,7 +339,10 @@ func (s *State) directoryRows() []directoryRow {
 	}
 	rows = append(rows, directoryRow{ID: "section:recent", Title: locales.For(s.cx).RecentSessions(), Kind: "section", Section: "recent", Count: len(recent), Header: true})
 	if !s.collapsed["section:recent"] {
-		if len(recent) == 0 {
+		if s.recentFilters.count() > 0 {
+			rows = append(rows, directoryRow{ID: "filters:recent", Kind: "filters", Section: "recent", Header: true})
+		}
+		if len(recent) == 0 && s.recentFilters.count() == 0 {
 			title := locales.For(s.cx).NoRecentSessions()
 			if len(pinned) > 0 {
 				title = locales.For(s.cx).AllSessionsPinned()

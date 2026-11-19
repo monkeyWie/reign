@@ -8,8 +8,8 @@ import (
 )
 
 func (s *State) emptyCatalogue(cx *core.Scope) core.Node {
-	count := s.sessionFilterCount(cx)
-	return core.Show{When: func() bool { s.read(); return count.Get() == 0 && s.filters.count() == 0 }, Then: func(cx *core.Scope) core.Node {
+	count := core.NewMemo(cx, func() int { s.read(); return len(s.sessionsMatching(sessionFilters{})) })
+	return core.Show{When: func() bool { s.read(); return count.Get() == 0 }, Then: func(cx *core.Scope) core.Node {
 		mode := core.NewMemo(cx, func() string {
 			s.read()
 			for _, d := range s.devices {

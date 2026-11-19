@@ -89,6 +89,10 @@ func (p *Provider) startAppServer(ctx context.Context) error {
 func appIPCConnectionError(err error) error {
 	switch {
 	case errors.Is(err, os.ErrPermission):
+		var diagnostic interface{ ConnectionGuidance() string }
+		if errors.As(err, &diagnostic) {
+			return fmt.Errorf("%s：%w", diagnostic.ConnectionGuidance(), err)
+		}
 		return fmt.Errorf("Codex App IPC 访问被拒绝，请确认 ReignHub 与 Codex App 由同一用户以相同权限级别运行：%w", err)
 	case errors.Is(err, os.ErrNotExist):
 		return fmt.Errorf("未找到 Codex App IPC，请先打开官方 App：%w", err)

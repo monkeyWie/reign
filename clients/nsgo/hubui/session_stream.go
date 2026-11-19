@@ -342,7 +342,13 @@ func (w *sessionStream) pollApprovals() {
 		v, err := rpc(w.ctx, w.s.api, w.target, w.provider, w.session, "approvals", nil)
 		w.s.cx.Post(func() {
 			if w.current() && err == nil {
-				w.s.approvals = objects(v)
+				w.s.approvals = nil
+				for _, a := range objects(v) {
+					if str(a, "sessionId") == w.session {
+						w.s.approvals = append(w.s.approvals, a)
+					}
+				}
+				w.s.pruneQuestionDrafts()
 				w.s.changed()
 			}
 		})

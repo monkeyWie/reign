@@ -75,7 +75,7 @@ func TestHomeOverviewKeepsSidebarAndAgentFeedback(t *testing.T) {
 	sidebar := app.Find("id:session-list").ID
 	home := app.Find("id:workspace-home").ID
 	app.Screenshot("home-device-agents-light")
-	app.Press("id:theme-toggle")
+	sidebarMenuAction(app, "theme-toggle")
 	app.Screenshot("home-device-agents-dark")
 	app.Press("id:home-copy-device-id")
 	if app.Clipboard != "266556" {

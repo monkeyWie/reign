@@ -32,6 +32,43 @@ shape without connecting to a real App conversation or running a model. It is
 not evidence of a completed real App send. Reinspect upstream code when this
 check reports a changed entry or boundary.
 
+## Questions and answers
+
+The adapter exposes normalized `Approval.questions` through the existing
+session-scoped `approvals` / `decide` endpoint calls. Synchronous
+`item/tool/requestUserInput` requests retain their exact question IDs, labels,
+descriptions and secret-input hints; their answers use the native RPC response or
+`thread-follower-submit-user-input` with `response.answers`.
+
+Async questions are different: installed App code (read-only inspection on
+2026-11-19, `X7tG` / `dNnb` / `uHDr` / `Avyg` modules) attaches
+`{ title, options?: string[] }[]` to `agentMessage.questions`. IDs are serialized
+`["request_user_input_async", itemID, index]`. The adapter projects unanswered
+questions from the latest in-progress/completed turn into optional forms. An
+accepted user/steering reply resolves the matching IDs; unacknowledged steering
+does not. A newer turn expires old prompts.
+
+Async submissions serialize `[{ questionItemId, question, answer }]` inside
+`<send_user_message_question_reply>` and its closing tag. They use the captured
+owner's ordinary steer/new-turn route, with normalized text input and composer
+restore context. Recheck the owner and question set before writing. Skip dismisses
+the form in ReignHub's Provider lifetime and sends no Agent message; omitted
+answers in a partial submission are also dismissed. This dismissal is not a
+persisted Codex App preference and can reappear after a Provider restart.
+
+Claim each form once. Keep it visible while the write is in flight so polling
+does not discard a draft on rejection. Definite pre-write rejection permits an
+explicit retry; success or unknown outcome leaves a hidden tombstone until the
+request/turn disappears, preventing stale snapshots from recreating submit
+buttons. Never retry through another owner or private writer. These additions
+do not change public Go/Worker service routes: both relays carry opaque frames.
+
+`questions_test.go` covers textless discovery, exact options/answers, accepted
+echoes, skipped siblings, expiry, owner changes, cancellation, concurrent claims,
+rejection/recovery and uncertain outcomes using isolated IPC fixtures. Controller
+tests exercise multi-question selection, custom text, draft/navigation, mobile
+widths and busy/error feedback. They do not submit real Agent answers.
+
 ## Optimistic input and delivery outcomes
 
 App IPC input is stricter than app-server input. Every text input requires a
@@ -114,12 +151,39 @@ Missing or invalid timing stays unknown. Do not derive duration from receipt tim
 message timestamps or summed tool durations. Progressive history must retain the
 same metadata as a full transcript.
 
+## Windows local connection
+
 Windows uses `\\.\pipe\codex-ipc` through Microsoft's `go-winio`, with platform
 file suffixes separating it from Unix sockets. The client requests data
 read/write, read attributes and synchronize rights; generic write additionally
 requests server-instance and attribute/EA rights which a pipe DACL can reject.
-Permission denial retains its cause across retries and points to Windows user /
-privilege alignment, not an absent App. Do not change the App's ACL or elevate it.
+Only a dial returning `ERROR_ACCESS_DENIED` triggers best-effort source diagnosis
+in [diagnostic_windows.go](../codexipc/diagnostic_windows.go). It opens a temporary
+metadata handle with zero desired access (no data read/write), obtains the server
+PID with `GetNamedPipeServerProcessId`, closes the handle, then takes one Toolhelp
+process snapshot. Communication still uses `go-winio`; successful connections
+perform no diagnostic checks, and no polling or retry loop is added.
+
+Diagnosis has a 200 ms cooperative budget, at most 16,384 snapshot entries and
+32 ancestry nodes, with cycle detection and cancellation checks between native
+calls. Synchronous Win32 calls themselves cannot be interrupted by the context;
+there is no pipe wait/retry or detached diagnostic goroutine. Handles close on
+all exits. Unknown sources, query failures, snapshot limits and cancellation keep the
+original permission error and generic user / privilege guidance. Error wrapping
+preserves `errors.Is` / `errors.As`, including the original `os.PathError`.
+
+Exact, case-insensitive `sshd.exe` / `sshd-session.exe` ancestry produces an SSH
+hint; `Code.exe`, `Code - Insiders.exe`, `code-tunnel.exe` and
+`code-tunnel-insiders.exe` produce a VS Code hint. SSH takes precedence when both
+appear. `node.exe` alone proves neither. These names and parent PIDs are clues,
+not authenticated origin: processes can exit and PIDs can be reused. Guidance
+says the service **may** come from that environment, identifies the pipe server
+PID (not an ancestor PID), and asks the user to close the corresponding Codex
+instance there, reopen desktop Codex App, and retry. The Provider consumes this
+optional guidance in `appIPCConnectionError`; otherwise its existing generic
+guidance remains. No process termination, ACL changes, elevation or App restart
+is performed. This is local Provider diagnosis only; the Go/Worker public
+service contract and Worker implementation need no changes.
 
 Package discovery uses the current user's registered package names and Win32
 `GetPackagePathByFullName`, then validates the package manifest and executable.
@@ -130,6 +194,14 @@ The App integration attaches automatically when installed, running and enabled;
 it never launches or restarts the official App.
 
 Windows fixtures cover restricted named-pipe data exchange and a console-less
-child with redirected IO/cancellation. These tests require native Windows to run;
-cross-compilation and isolated protocol tests do not establish real Windows App
-interoperability or confirm the user's pipe ACL.
+child with redirected IO/cancellation. [Pipe fixtures](../codexipc/local_windows_test.go)
+also deny data access on a unique test pipe, query its actual server PID, remove
+only the fixture's denial and verify a fresh connection and data exchange.
+[Diagnostic tests](../codexipc/diagnostic_windows_test.go) cover recognized and
+unknown sources, error identity, query failure, cancellation, budget, cycles and
+depth limits; [Provider tests](runtime_windows_test.go) cover guidance rendering.
+All new platform tests use Windows-selected files and never connect to the real
+`codex-ipc` pipe. These tests require native Windows to run; cross-compilation and
+isolated protocol tests do not establish real Windows App interoperability or
+confirm the user's pipe ACL. The implementation reuses existing dependencies;
+binary size changes require build measurements.

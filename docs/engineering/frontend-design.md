@@ -33,20 +33,21 @@ Support multiple languages without assuming a fixed language set or pair. Locale
 
 ## Neutral interaction colors and selective emphasis
 
-Routine activity and interaction use neutral colors. Loading indicators, progress,
-text carets, selection, focus rings, selected controls and primary actions do not
-automatically inherit the brand color. Establish hierarchy through luminance
-contrast, typography, spacing, shape and restrained motion before adding hue.
-Use muted foreground for ordinary loading, foreground for text carets, a subtle
-neutral selection fill, and an inverse foreground on filled primary controls.
+Routine surfaces, loading indicators, text carets, focus rings, navigation
+backgrounds and ordinary primary actions use neutral colors. Establish hierarchy
+through luminance, typography, spacing, shape and restrained motion.
 
-Keep interaction emphasis and brand color as separate semantic roles. In the
-controller, NSGo's `Accent` role is neutral because shared components use it for
-ordinary interactions; `brand` / `brandText` are explicit, limited-purpose roles.
-Brand color may identify the product or call attention to a meaningful new
-result, such as a completed unread marker. Avoid spreading it across every
-active, selected or loading element. This is a neutral-first visual strategy,
-not a requirement to eliminate all color.
+Use the brand theme color where color communicates an actionable link or an
+explicit choice: message hyperlinks, inline highlights, checked checkboxes,
+selected radio options, enabled switches and selected options. Retain a shape,
+checkmark or underline as well as color. Text selection can use a translucent
+brand fill; the caret stays neutral. Completed unread markers also use the brand
+color. Avoid coloring every navigation row, spinner or toolbar icon.
+
+In the controller, NSGo `Accent` and `accentFill` express selected controls and
+links. Explicit foreground/background roles keep ordinary filled action buttons
+neutral. `brand` / `brandText` supply the same theme colors for custom controls.
+Use the centralized light/dark palette rather than hardcoded widget colors.
 
 Preserve semantic error, warning and success colors where they communicate an
 outcome or urgency, with a label or recognizable symbol. Neutral controls still
@@ -223,7 +224,9 @@ A new touch interrupts inertia immediately in both session and message lists. Wh
 ## Unified session directory
 
 The sidebar puts local/remote device controls and Add device above the session
-list. Device activation opens management; users open conversations directly.
+list, without another session-title toolbar. Align trailing device, filter,
+new-conversation and sidebar-toggle glyphs on one center line; short status text
+must not push an icon onto a different axis. Device activation opens management; users open conversations directly.
 Desktop starts with the local environment plus saved remote environments. Browser
 and mobile aggregate remote environments. Cached sessions remain readable while
 connections and live directories load independently. New conversation explicitly
@@ -239,6 +242,12 @@ management; do not fill the landing page with the controller list. Agent activat
 uses the same pending, confirmation and recovery flow as detailed settings. Missing
 registration or Agent discovery must not imply readiness. Controllers without a
 local host show the connect-device welcome instead.
+
+Keep New conversation at the sidebar footer. A single settings icon opens the
+account/settings/help panel; append the authenticated account display name when
+available. Theme and manual refresh controls belong inside that panel/settings,
+not in the resting footer. Account lookup must be bounded and optional: an
+unavailable account service cannot block local or self-hosted navigation.
 
 The top-level collapsible headings are ordered Pinned, Projects, then Recent.
 Collapsed headings always show their right-pointing arrow; expanded headings
@@ -256,8 +265,14 @@ sections rather than implying that the sessions disappeared.
 Recent contains all matching unpinned sessions across all execution states, including
 completed sessions and offline cached entries, with no row limit. It follows the
 entire Projects tree; collapsing Projects leaves Recent available immediately below
-its heading. Keep the shared list virtualized. Apply the current filters and exclude
-pins, then sort descending by `recencyAt`: the later of user-message submission
+its heading. Keep the shared list virtualized. Projects and Recent each have an
+independent filter panel on the heading's right. Reveal the trigger on pointer
+hover or keyboard focus, keep it visible while open/filtered, and show it by
+default on touch. Opening a filter must not toggle the section. Both panels
+filter devices, Agents and projects; only Projects offers grouping. Pinned has
+no filters and is unaffected by them. Counts, reset and empty results belong to
+the corresponding section; a filtered empty section retains its heading and
+controls. Exclude pins and apply Recent's filters, then sort descending by `recencyAt`: the later of user-message submission
 and successful Agent reply completion. These are fixed event times. Streaming
 text, tools, metadata edits, polling and opening a conversation never advance
 recency. Retain the newest confirmed boundary when older directory/history
@@ -304,13 +319,14 @@ Session rows identify device and Agent; tooltips include model and
 execution path in a bounded, themed card with a border and shadow. Omit unavailable
 paths from information panels; opening a context menu dismisses the hover tooltip.
 
-The filter icon opens one scrollable panel for grouping and device, Agent and
-project filters. Each dimension supports multiple selections (OR); dimensions
+Each section's filter icon opens a scrollable panel. Each dimension supports
+multiple selections (OR); dimensions
 combine with AND. An empty selection means all. Agent filters identify the
 Provider across devices; project filters share the tree's repository/directory
 identity, never the display name. Filter options come from the complete directory
-so selections remain reversible. Filters apply to Pinned, Recent and Projects, with a
-result count, empty-result feedback and Clear filters. They are temporary view
+so selections remain reversible. Projects and Recent keep independent selections,
+result counts, empty-result feedback and Clear filters; Pinned is unaffected.
+Filters are temporary view
 state; grouping, pins and expansion (except Pinned/Recent at startup) remain locally persisted. Filtering does not
 change the selected conversation or its execution route.
 
@@ -364,3 +380,16 @@ Use one overall bar and percentage, without byte sizes or extra small bars. With
 ## Review and verification
 
 Check light/dark, wide/narrow, touch/keyboard and the changed platform behavior. Exercise delayed, failed, cancelled and unchanged-result actions; verify feedback on the actual control rather than merely checking the request ran. Test breakpoint boundaries, long content, keyboard transitions, scroll anchors and idle/active scrollbar states. Supply relevant screenshots and use the [validation guide](validation.md). Native inertia and system-window behavior still need real-device checks.
+
+## Agent questions
+
+Present Agent questions as an explicit form, not a generic permission prompt or
+raw tool JSON. Options remain unselected until chosen, with custom text available;
+selection creates a draft and submission requires a separate action. Multiple
+questions use a compact step indicator and previous/next navigation. Offer Skip
+only when the Provider allows it. Use the theme color for the selected option,
+neutral surfaces and a clear busy state. Disable the affected form during its
+submission, preserve its draft after definite rejection and keep other sessions
+navigable. Drafts are scoped to device, Provider, session and request and remain
+memory-only. Resolved/expired questions disappear; uncertain writes are not
+replayed. The adapter owns vendor IDs and answer encoding.

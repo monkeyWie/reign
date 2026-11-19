@@ -148,3 +148,97 @@ func TestWindowsNamedPipeInitializationAndRequest(t *testing.T) {
 		t.Fatal(ctx.Err())
 	}
 }
+
+func TestWindowsDeniedPipeMetadataAndRecovery(t *testing.T) {
+	path := fmt.Sprintf(`\\.\pipe\reignhub-denied-fixture-%d-%d`, os.Getpid(), time.Now().UnixNano())
+	name, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, err := windows.CreateNamedPipe(name, windows.PIPE_ACCESS_DUPLEX|windows.FILE_FLAG_OVERLAPPED|windows.WRITE_DAC,
+		windows.PIPE_TYPE_BYTE|windows.PIPE_REJECT_REMOTE_CLIENTS, 1, 4096, 4096, 0, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if h != windows.InvalidHandle {
+			windows.CloseHandle(h)
+		}
+	}()
+	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	if err != nil {
+		t.Fatal(err)
+	}
+	setFixtureACL := func(sddl string) {
+		t.Helper()
+		sd, err := windows.SecurityDescriptorFromString(sddl)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := windows.SetKernelObjectSecurity(h, windows.DACL_SECURITY_INFORMATION, sd); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Explicitly deny data read/write even for elevated test runners. Change only
+	// this isolated fixture's DACL using its already-open WRITE_DAC server handle.
+	setFixtureACL("D:P(D;;0x00000003;;;WD)(A;;FA;;;" + user.User.Sid.String() + ")")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	denied, err := dialLocal(ctx, path)
+	if denied != nil {
+		denied.Close()
+	}
+	var original *os.PathError
+	if !errors.Is(err, windows.ERROR_ACCESS_DENIED) || !errors.As(err, &original) {
+		t.Fatalf("expected original access denial: %v", err)
+	}
+	pid, err := pipeServerProcessID(ctx, path)
+	if err != nil || pid != uint32(os.Getpid()) {
+		t.Fatalf("metadata lookup on denied pipe: PID %d, error %v", pid, err)
+	}
+	processes, err := snapshotPipeProcesses(ctx)
+	if err != nil || processes[pid].name == "" {
+		t.Fatalf("snapshot missing fixture server PID %d: %v", pid, err)
+	}
+	// A fresh dial must recover on the same single-instance fixture, with no
+	// cached denial or diagnostic handle holding the instance open.
+	setFixtureACL("D:P(A;;0x00100083;;;" + user.User.Sid.String() + ")")
+	client, err := dialLocal(ctx, path)
+	if err != nil {
+		t.Fatalf("fresh dial after removing fixture denial: %v", err)
+	}
+	defer client.Close()
+	client.SetDeadline(time.Now().Add(3 * time.Second))
+	event, err := windows.CreateEvent(nil, 1, 0, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer windows.CloseHandle(event)
+	overlap := windows.Overlapped{HEvent: event}
+	if err := windows.ConnectNamedPipe(h, &overlap); err != nil && !errors.Is(err, windows.ERROR_PIPE_CONNECTED) {
+		t.Fatal(err)
+	}
+	server, err := winio.NewOpenFile(h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h = windows.InvalidHandle
+	defer server.Close()
+	done := make(chan error, 1)
+	go func() { _, err := io.CopyN(server, server, 4); done <- err }()
+	if _, err := client.Write([]byte("ping")); err != nil {
+		t.Fatal(err)
+	}
+	buf := make([]byte, 4)
+	if _, err := io.ReadFull(client, buf); err != nil || string(buf) != "ping" {
+		t.Fatalf("recovered pipe exchange: %q %v", buf, err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+}

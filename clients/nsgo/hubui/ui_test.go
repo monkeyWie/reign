@@ -43,7 +43,7 @@ func TestDesktopNavigationAndDrafts(t *testing.T) {
 	app.Press(sessionSelector("demo-device", "codex-app", "demo-chat"))
 	app.WaitUntil(3*time.Second, func() bool { return app.Find("id:chat-input").Text == "未发送的草稿" })
 	app.Screenshot("desktop-conversation")
-	app.Press("id:theme-toggle")
+	sidebarMenuAction(app, "theme-toggle")
 	app.Screenshot("desktop-dark")
 	app.Press("id:model-selector")
 	app.Find("role:button GPT-5.3 Codex")

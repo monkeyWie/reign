@@ -54,7 +54,7 @@ func TestConversationToolbarDetailsPreserveWorkspace(t *testing.T) {
 		}
 	}
 	app.Press("id:conversation-details")
-	app.Press("id:theme-toggle")
+	sidebarMenuAction(app, "theme-toggle")
 	app.Press("id:conversation-details")
 	app.Screenshot("conversation-details-dark")
 	app.Press("id:attachment-cache")

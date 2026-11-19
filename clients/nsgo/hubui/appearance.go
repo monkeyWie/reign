@@ -6,7 +6,7 @@ type colorScheme struct {
 	canvas, sidebar, page, elevated, muted, selected, border, text, secondary, brand, brandText, code uint32
 }
 
-// Zinc interaction colors; the green brand color is an explicit attention role.
+// Zinc surfaces with green links, selected controls and attention markers.
 var lightColors = colorScheme{
 	canvas: 0xfafafa, sidebar: 0xfafafa, page: 0xffffff, elevated: 0xffffff,
 	muted: 0xf4f4f5, selected: 0xf4f4f5, border: 0xe4e4e7,
@@ -22,11 +22,9 @@ func schemePalette(c colorScheme, p core.Palette) core.Palette {
 	p.Background, p.Surface = core.RGB(c.page), core.RGB(c.muted)
 	p.SurfaceHover, p.SurfacePressed = core.RGB(c.selected).Faded(.7), core.RGB(c.selected)
 	p.Text, p.TextMuted, p.Border = core.RGB(c.text), core.RGB(c.secondary), core.RGB(c.border)
-	// NSGo uses Accent for ordinary inputs, selected controls and primary
-	// actions. Keep it neutral instead of spreading brand color everywhere.
-	p.Accent, p.AccentHover, p.AccentPressed = p.Text, p.Text.Faded(.85), p.Text
-	p.AccentText = p.Background
-	p.Focus, p.Selection, p.Scrollbar = p.TextMuted, p.TextMuted.Faded(.22), p.TextMuted.Faded(.35)
+	p.Accent = core.RGB(c.brand)
+	p.AccentHover, p.AccentPressed, p.AccentText = p.Accent.Faded(.85), p.Accent, core.RGB(c.brandText)
+	p.Focus, p.Selection, p.Scrollbar = p.TextMuted, p.Accent.Faded(.22), p.TextMuted.Faded(.35)
 	// Keep NSGo component roles alongside the workspace surface roles.
 	roles := map[string]core.Color{
 		"brand": core.RGB(c.brand), "brandText": core.RGB(c.brandText),
@@ -34,7 +32,7 @@ func schemePalette(c colorScheme, p core.Palette) core.Palette {
 		"field": core.RGB(c.elevated), "fieldBorder": p.Border, "inset": core.RGB(c.code), "raised": core.RGB(c.elevated), "line": p.Border, "faint": p.TextMuted,
 		"foreground": p.Text, "card": core.RGB(c.elevated), "card-foreground": p.Text,
 		"popover": core.RGB(c.elevated), "popover-foreground": p.Text,
-		"primary": p.Accent, "primary-foreground": p.AccentText,
+		"primary": p.Text, "primary-foreground": p.Background,
 		"secondary": p.Surface, "secondary-foreground": p.Text,
 		"muted": p.Surface, "muted-foreground": p.TextMuted, "accent-foreground": p.Text,
 		"input": p.Border, "ring": p.Focus,
@@ -51,7 +49,7 @@ func schemePalette(c colorScheme, p core.Palette) core.Palette {
 }
 
 // Raw inputs need explicit caret/selection colors to avoid platform blue defaults.
-// Shared ui.Input fields inherit the same neutral colors from the palette.
+// Shared ui.Input fields inherit the neutral caret and themed selection.
 func textInputStyle(cx *core.Scope) core.Style {
 	p := cx.Palette()
 	return core.Style{Color: p.Text, PlaceholderColor: p.TextMuted, CaretColor: p.Text, SelectionColor: p.Selection}

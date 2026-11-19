@@ -334,7 +334,7 @@ var textsEn = i18n.NewTexts(""+
 	"Connect a device and select a ready Agent first."+
 	"Sessions join the shared list when connected."+
 	"This device and remote access"+
-	"Filter and group"+
+	"Filter sessions"+
 	"Close filters"+
 	"All"+
 	"Devices"+
@@ -434,7 +434,7 @@ var textsEn = i18n.NewTexts(""+
 		48,
 		45,
 		29,
-		16,
+		15,
 		13,
 		3,
 		7,
@@ -537,7 +537,7 @@ var textsZhHans = i18n.NewTexts(""+
 	"请先连接设备并选择已就绪的 Agent"+
 	"连接后，会话会自动加入统一列表。"+
 	"本机与远程访问"+
-	"筛选与分组"+
+	"筛选会话"+
 	"关闭筛选"+
 	"全部"+
 	"设备"+
@@ -637,7 +637,7 @@ var textsZhHans = i18n.NewTexts(""+
 		45,
 		48,
 		21,
-		15,
+		12,
 		12,
 		6,
 		6,
@@ -1202,7 +1202,7 @@ func LocalManagement(cx *core.Scope) string { return For(cx).LocalManagement() }
 // LocalManagement is the package's LocalManagement in the language of msgs.
 func (msgs Messages) LocalManagement() string { return msgs.text(textLocalManagement) }
 
-// SessionFilters says "Filter and group"
+// SessionFilters says "Filter sessions"
 // in the language the app shows under cx.
 func SessionFilters(cx *core.Scope) string { return For(cx).SessionFilters() }
 

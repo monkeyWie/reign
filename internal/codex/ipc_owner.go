@@ -243,7 +243,7 @@ func (b *appIPC) answerOwnerApproval(ctx context.Context, id, method string, par
 	b.p.mu.Lock()
 	var reply func(context.Context, any) error
 	for token, p := range b.p.pending {
-		if p.route == "service" && p.approval.SessionID == id && p.requestID == key {
+		if !p.claimed && p.route == "service" && p.approval.SessionID == id && p.requestID == key {
 			want := map[string]string{"item/commandExecution/requestApproval": "thread-follower-command-approval-decision", "item/fileChange/requestApproval": "thread-follower-file-approval-decision", "item/tool/requestUserInput": "thread-follower-submit-user-input", "item/permissions/requestApproval": "thread-follower-permissions-request-approval-response", "mcpServer/elicitation/request": "thread-follower-submit-mcp-server-elicitation-response"}[p.approval.Method]
 			if want != method {
 				continue

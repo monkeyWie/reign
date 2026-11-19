@@ -63,7 +63,7 @@ func TestGroupInformationAndFolderDisclosure(t *testing.T) {
 		t.Fatal("secondary click collapsed the group")
 	}
 	app.Key("Escape")
-	app.Press("id:theme-toggle")
+	sidebarMenuAction(app, "theme-toggle")
 	app.RightClick(selector)
 	app.WaitFor("id:group-info-card", time.Second)
 	app.Screenshot("project-group-information-dark")
