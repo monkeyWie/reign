@@ -7,8 +7,20 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nsgo-dev/nsgo/core"
 	"github.com/nsgo-dev/nsgo/nsgotest"
 )
+
+type browserNavigationAPI struct{ *demoAPI }
+
+func (*browserNavigationAPI) CanHost() bool { return false }
+
+func startBrowserNavigation(t *testing.T, width, height core.Points) *nsgotest.App {
+	t.Helper()
+	return nsgotest.Start(t, func(cx *core.Scope) core.Node {
+		return RootWithAPI(cx, &browserNavigationAPI{newDemoAPI()}, true)
+	}, nsgotest.Size(width, height))
+}
 
 // Exercise real browser history, not App.Back (which bypasses popstate).
 func pressBrowserBack(t *testing.T, app *nsgotest.App) {
@@ -24,7 +36,7 @@ func pressBrowserBack(t *testing.T, app *nsgotest.App) {
 }
 
 func testBrowserBackStaysInCompactWorkspace(t *testing.T) {
-	app := startDemo(t, 390, 844)
+	app := startBrowserNavigation(t, 390, 844)
 	win := js.Global().Get("window")
 	url := win.Get("location").Get("href").String()
 	length := win.Get("history").Get("length").Int()
@@ -37,10 +49,13 @@ func testBrowserBackStaysInCompactWorkspace(t *testing.T) {
 	// An in-app Back must not leave an extra browser step behind.
 	app.Press("id:back-sessions")
 	pressBrowserBack(t, app)
-	app.WaitFor("id:mobile-devices", time.Second)
+	app.WaitFor("id:session-sidebar", time.Second)
 	for range 3 {
 		pressBrowserBack(t, app)
-		app.Find("id:mobile-devices")
+		app.Find("id:session-sidebar")
+		if app.Exists("id:chat-input") {
+			t.Fatal("root Back reopened the conversation")
+		}
 	}
 	if win.Get("location").Get("href").String() != url || win.Get("history").Get("length").Int() != length {
 		t.Fatal("Back left the workspace or grew its boundary history")
@@ -49,12 +64,12 @@ func testBrowserBackStaysInCompactWorkspace(t *testing.T) {
 	app.Find("id:dialog-connect")
 	pressBrowserBack(t, app)
 	app.WaitUntil(time.Second, func() bool { return !app.Exists("id:dialog-connect") })
-	app.Find("id:mobile-devices")
+	app.Find("id:session-sidebar")
 	app.Find("role:button ReignHub 官网")
 }
 
 func testBrowserBackStaysInWideWorkspace(t *testing.T) {
-	app := startDemo(t, 1320, 880)
+	app := startBrowserNavigation(t, 1320, 880)
 	openDemoChat(t, app)
 	app.Type("id:chat-input", "桌面草稿")
 	pressBrowserBack(t, app)
@@ -66,8 +81,8 @@ func testBrowserBackStaysInWideWorkspace(t *testing.T) {
 	app.WaitUntil(time.Second, func() bool { return app.Find("id:chat-input").Text == "桌面草稿" })
 	pressBrowserBack(t, app)
 	pressBrowserBack(t, app)
-	app.Find("id:local-dashboard")
+	app.Find("id:welcome-connect")
 	pressBrowserBack(t, app)
-	app.Find("id:local-dashboard")
+	app.Find("id:welcome-connect")
 	app.Find("role:button ReignHub 官网")
 }
