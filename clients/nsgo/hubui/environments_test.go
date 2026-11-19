@@ -71,15 +71,15 @@ func TestAllEnvironmentsLoadWithoutSelectionAndKeepRoutes(t *testing.T) {
 	input := app.Find("id:chat-input").ID
 	openSectionFilters(app, "all")
 	app.Press("id:session-grouping")
-	app.Press("role:option 设备 → Agent → 项目")
-	app.Press("id:close-session-filters")
+	app.Press("id:group-device-agent")
+	app.WaitUntil(time.Second, func() bool { return !app.Exists("id:session-filter-panel") })
 	if app.Find("id:chat-input").ID != input || app.Find("id:chat-input").Text != "remote draft" {
 		t.Fatal("grouping remounted conversation")
 	}
 	openSectionFilters(app, "all")
 	app.Press("id:session-grouping")
-	app.Press("role:option 按项目聚合")
-	app.Press("id:close-session-filters")
+	app.Press("id:group-project")
+	app.WaitUntil(time.Second, func() bool { return !app.Exists("id:session-filter-panel") })
 	ss := Object{"deviceId": "remote", "providerId": "codex-app", "id": "same"}
 	app.RightClick(remote)
 	app.Press("id:session-pin-action")
@@ -161,7 +161,7 @@ func TestTreeExpansionAndCompactSidebar(t *testing.T) {
 		s.sessions = []Object{
 			{"id": "build", "deviceId": "local", "providerId": "codex-app", "title": "重构会话目录与设备连接", "cwd": "/work/reign", "projectKey": "shared", "createdAt": 300, "updatedAt": 800, "status": "running"},
 			{"id": "review", "deviceId": "remote", "providerId": "claude-code", "title": "审查多设备同步与断线恢复", "cwd": "/srv/reign", "projectKey": "shared", "createdAt": 200, "updatedAt": 900, "status": "waiting"},
-			{"id": "design", "deviceId": "local", "providerId": "codex-cli", "title": "完成侧边栏交互设计", "cwd": "/work/design", "createdAt": 100, "status": "idle"},
+			{"id": "design", "deviceId": "local", "providerId": "pi", "title": "完成侧边栏交互设计", "cwd": "/work/design", "createdAt": 100, "status": "idle"},
 		}
 		s.pinned[sessionIdentity(s.sessions[2])] = 1
 		return s.directory(cx)
@@ -169,8 +169,8 @@ func TestTreeExpansionAndCompactSidebar(t *testing.T) {
 	app.Screenshot("unified-sidebar-projects-light")
 	openSectionFilters(app, "all")
 	app.Press("id:session-grouping")
-	app.Press("role:option 设备 → Agent → 项目")
-	app.Press("id:close-session-filters")
+	app.Press("id:group-device-agent")
+	app.WaitUntil(time.Second, func() bool { return !app.Exists("id:session-filter-panel") })
 	app.Press("id:section:pinned")
 	app.Press("id:section:recent")
 	app.Screenshot("unified-sidebar-device-agent-light")

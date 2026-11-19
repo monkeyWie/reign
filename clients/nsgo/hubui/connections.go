@@ -351,7 +351,7 @@ func (s *State) connectDevice(id string, automatic, pair bool) {
 
 func (s *State) observeLifecycle() {
 	cx := s.cx
-	observed := s.suspended
+	observed := s.backgrounded
 	cx.Effect(func() {
 		background := cx.Env().Lifecycle() == core.LifecycleBackground
 		if background != observed {
@@ -362,66 +362,51 @@ func (s *State) observeLifecycle() {
 	})
 }
 func (s *State) setBackground(background bool) {
+	if s.ctx.Err() != nil || background == s.backgrounded {
+		return
+	}
+	s.backgrounded = background
+	s.changed()
+	for _, d := range s.devices {
+		s.logConnection(str(d, "id"), "lifecycle", "应用生命周期变化", fmt.Sprintf("background=%t keepAlive=%t", background, s.keepAlive), "info")
+	}
 	if background {
 		s.clearRootBack()
+		// Visibility does not own synchronization on any platform. Retain
+		// subscriptions, reads, retries and cache writes while the OS lets us run.
+		return
 	}
-	wasBackground := s.backgrounded
-	s.backgrounded = background
-	if wasBackground != background {
-		for _, d := range s.devices {
-			s.logConnection(str(d, "id"), "lifecycle", "应用生命周期变化", fmt.Sprintf("background=%t keepAlive=%t", background, s.keepAlive), "info")
-		}
-	}
-	if wasBackground && !background && !s.keepAlive {
+	if !s.keepAlive {
 		// A denied/failed service start may be tried again while Android
 		// permits starting an FGS, rather than looping in the background.
 		s.nativeBackgroundState = ""
 		s.changed()
 	}
-	suspend := background && !s.keepAlive
-	foreground := wasBackground && !background
-	if (suspend == s.suspended && !foreground) || s.ctx.Err() != nil {
-		return
+	// The OS may have frozen execution or dropped a transport. Fence stale
+	// directory responses and reconcile once without replacing a healthy watch.
+	if s.directoryCancel != nil {
+		s.directoryCancel()
+		s.directoryCancel = nil
 	}
-	wasSuspended := s.suspended
-	s.suspended = suspend
-	s.changed()
-	if suspend || foreground {
-		if s.directoryCancel != nil {
-			s.directoryCancel()
-			s.directoryCancel = nil
-		}
-		s.directoryGeneration++
-		s.directoryChecking = false
-		s.cancelCatalogue()
-		s.presenceGeneration++
-		s.presencePolling = false
-		s.polling = false
-		if s.watchCancel != nil && (suspend || wasSuspended) {
-			s.watchCancel()
-			s.watchCancel = nil
-		}
-		if suspend {
-			return
-		}
-	}
-	// Reuse saved grants and fetch a fresh transcript before resuming deltas.
-	// Never replay send/steer or discard a draft when returning to the app.
+	s.directoryGeneration++
+	s.directoryChecking = false
+	s.cancelCatalogue()
+	s.presenceGeneration++
+	s.presencePolling = false
+	s.polling = false
+	// Never replay commands or discard a draft when returning to the app.
 	for id := range s.retrying {
 		delete(s.retrying, id)
 	}
 	s.refreshTimezone()
 	s.directoryChecked = time.Time{}
-	// Probe sockets after an actual suspension. With a foreground service,
-	// retain live streams and let the fresh transport snapshot detect losses.
-	for _, d := range s.devices {
-		id := str(d, "id")
-		if s.connection(id).established && flag(d, "autoReconnect") && !s.deviceOffline(id) && (wasSuspended || !flag(d, "connected")) {
-			s.reconnect(id, true)
-		}
-	}
-	if wasSuspended {
+	if s.stream == nil || !s.stream.current() {
 		s.startSessionWatch()
+	} else if !s.stream.snapshotInFlight || s.stream.baseline {
+		// A valid replay cursor alone cannot establish freshness after sleep or
+		// a missed upstream notification. Reconcile once, retaining the healthy
+		// watch and drafts. An initial read already in flight needs no duplicate.
+		s.stream.refreshSnapshot()
 	}
 	s.poll()
 }

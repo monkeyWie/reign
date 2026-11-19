@@ -12,18 +12,19 @@ import (
 // StreamEvent contains only presentation data, never raw protocol notifications.
 // Text offsets use UTF-16 code units, matching Codex events and browser strings.
 type StreamEvent struct {
-	ID         int64  `json:"id"`
-	SessionID  string `json:"sessionId"`
-	TurnID     string `json:"turnId,omitempty"`
-	ItemID     string `json:"itemId,omitempty"`
-	Kind       string `json:"kind"`
-	Status     string `json:"status,omitempty"`
-	RecencyAt  int64  `json:"recencyAt,omitempty"`
-	DurationMS *int64 `json:"durationMs,omitempty"`
-	Item       *Item  `json:"item,omitempty"`
-	Delta      string `json:"delta,omitempty"`
-	Offset     int    `json:"offset,omitempty"`
-	Summary    string `json:"summary,omitempty"`
+	ID         int64         `json:"id"`
+	SessionID  string        `json:"sessionId"`
+	TurnID     string        `json:"turnId,omitempty"`
+	ItemID     string        `json:"itemId,omitempty"`
+	Kind       string        `json:"kind"`
+	Status     string        `json:"status,omitempty"`
+	RecencyAt  int64         `json:"recencyAt,omitempty"`
+	DurationMS *int64        `json:"durationMs,omitempty"`
+	Item       *Item         `json:"item,omitempty"`
+	Delta      string        `json:"delta,omitempty"`
+	Offset     int           `json:"offset,omitempty"`
+	Summary    string        `json:"summary,omitempty"`
+	Queue      *MessageQueue `json:"queue,omitempty"`
 }
 
 type StreamBatch struct {

@@ -28,11 +28,6 @@ type pending struct {
 }
 type Provider struct {
 	assets          *assets.Store
-	probeMu         sync.Mutex
-	probeAt         time.Time
-	probeInfo       cliDaemonInfo
-	probeErr        error
-	kind            string
 	cfg             config.Config
 	broker          *events.Broker
 	mu              sync.Mutex
@@ -59,17 +54,9 @@ func New(c config.Config, _ string, b *events.Broker, stores ...*assets.Store) *
 	}
 	return &Provider{cfg: c, broker: b, pending: make(map[string]pending), assets: store}
 }
-func NewCLI(c config.Config, b *events.Broker, stores ...*assets.Store) *Provider {
-	p := New(c, "", b, stores...)
-	p.kind = "cli"
-	return p
-}
 func (p *Provider) Start(ctx context.Context) error {
-	if p.kind == "cli" {
-		return p.startCLI(ctx, true)
-	}
-	if !system.DesktopSupported {
-		return errors.New(system.DesktopUnsupportedReason)
+	if !localSupported {
+		return errors.New("当前系统暂不支持 Codex 本地连接")
 	}
 	return p.startAppServer(ctx)
 }
@@ -100,42 +87,72 @@ func (p *Provider) Close() error {
 	return nil
 }
 func (p *Provider) Status(ctx context.Context) provider.Status {
-	if p.kind == "cli" {
-		return p.cliStatus(ctx)
-	}
 	app, appErr := system.FindAppContext(ctx, p.cfg.CodexApp)
 	instances, err := system.Discover(ctx, app)
+	cli := system.FindCLI(p.cfg.CodexCLI, app)
 	p.mu.Lock()
 	c, b, last := p.client, p.ipc, p.lastError
 	p.mu.Unlock()
-	s := provider.Status{ID: "codex-app", Name: "Codex App", State: "unavailable", Installed: app != "", Running: len(instances) > 0, InstallPath: app, Instances: instances, LastError: last, Capabilities: provider.Capabilities{SessionRemoval: "archive", Streaming: true, History: true, Create: true, Send: true, Steer: true, Interrupt: true, Approvals: true, Desktop: true, ImageInput: true, FileInput: true}}
+	s := provider.Status{ID: "codex-app", Name: "Codex", State: "unavailable", Installed: app != "" || cli != "", Running: len(instances) > 0, InstallPath: app, Instances: instances, LastError: last, Capabilities: provider.Capabilities{SessionRemoval: "archive", Streaming: true, History: true, Create: true, Send: true, Steer: true, Interrupt: true, Approvals: true, Desktop: true, ImageInput: true, FileInput: true}}
 	if appErr != nil {
 		s.LastError = appErr.Error()
 	}
 	if err != nil {
 		s.LastError = err.Error()
 	}
-	if !system.DesktopSupported {
+	if !localSupported {
 		s.State = "unsupported"
-		s.Detail = system.DesktopUnsupportedReason
+		s.Detail = "当前系统暂不支持 Codex 本地连接"
 		return s
 	}
-	s.Detail = "打开 Codex App 后自动连接"
+	if s.InstallPath == "" {
+		s.InstallPath = cli
+	}
+	s.Detail = "打开 Codex 后自动连接"
 	if s.Running {
 		s.State = "detected"
 		s.Detail = "正在连接"
 	}
 	if b != nil {
 		ipc := b.client()
-		if s.Running && ipc != nil && ipc.Alive() && c != nil && c.Alive() {
+		if ipc != nil && ipc.Alive() {
+			s.Running = true
+		}
+		if ipc != nil && ipc.Alive() && c != nil && c.Alive() {
 			s.State = "connected"
 			s.Detail = "已就绪"
 			s.Endpoint = "ipc"
-			s.DesktopClients = 1
+			s.DesktopClients = len(instances)
 		}
 	}
 	return s
 }
+
+// AutoConnect attaches the existing IPC service and prepares our private reader.
+// It never launches an external Codex application or a shared CLI daemon.
+func (p *Provider) AutoConnect(ctx context.Context) error {
+	s := p.Status(ctx)
+	if s.Ready() || !s.Installed || s.State == "unsupported" {
+		return nil
+	}
+	err := p.Start(ctx)
+	p.mu.Lock()
+	p.lastError = ""
+	if err != nil {
+		p.lastError = err.Error()
+	}
+	p.mu.Unlock()
+	return err
+}
+
+func (p *Provider) session(t thread) provider.Session {
+	s := t.session()
+	s.Project = p.sessionProject(t)
+	// Keep the existing identity for pins, preferences and attachment scopes.
+	s.ProviderID = "codex-app"
+	return s
+}
+
 func (p *Provider) call(ctx context.Context, method string, params, out any) error {
 	p.mu.Lock()
 	c := p.client
@@ -221,12 +238,21 @@ func (p *Provider) TurnStatus(ctx context.Context, session, turn string) (provid
 }
 
 func (p *Provider) Transcript(ctx context.Context, id, cursor string) (provider.Transcript, error) {
-	if out, ok, err := p.ipcTranscript(ctx, id, cursor); ok {
-		if err == nil || strings.HasPrefix(cursor, "ipc:") || ctx.Err() != nil {
-			return out, err
+	var refreshErr error
+	if b := p.appBridge(); b != nil && cursor == "" {
+		refreshErr = b.refreshFollower(ctx, id)
+	}
+	if ctx.Err() != nil {
+		return provider.Transcript{}, ctx.Err()
+	}
+	if refreshErr == nil {
+		if out, ok, err := p.ipcTranscript(ctx, id, cursor); ok {
+			if err == nil || strings.HasPrefix(cursor, "ipc:") || ctx.Err() != nil {
+				return out, err
+			}
+			// A broken follower must not hide persisted history. These app-server
+			// APIs only read; they neither resume the thread nor acquire its writer.
 		}
-		// A broken follower must not hide persisted history. These app-server
-		// APIs only read; they neither resume the thread nor acquire its writer.
 	}
 	// Capture before reading: later events can safely replay over this snapshot.
 	epoch, boundary := p.stream().log.Position()
@@ -251,6 +277,11 @@ func (p *Provider) Transcript(ctx context.Context, id, cursor string) (provider.
 		}
 	}
 	out := provider.Transcript{StreamEpoch: epoch, StreamCursor: boundary, Session: p.session(metadata.Thread), Turns: []provider.Turn{}, NextCursor: turns.NextCursor}
+	queueTurns := make([]map[string]any, 0, len(turns.Data))
+	for i := len(turns.Data) - 1; i >= 0; i-- {
+		queueTurns = append(queueTurns, decodeObject(turns.Data[i]))
+	}
+	out.Queue = p.messageQueue(ctx, id, cursor, acceptedQueueMessages(queueTurns))
 	if err := provider.ObserveTranscript(ctx, out); err != nil {
 		return provider.Transcript{}, err
 	}
@@ -259,7 +290,9 @@ func (p *Provider) Transcript(ctx context.Context, id, cursor string) (provider.
 		p.attachments(ctx, id, metadata.Thread.Cwd, &normalized, turns.Data[i])
 		out.Turns = append(out.Turns, normalized)
 		out.Session.RecencyAt = max(out.Session.RecencyAt, provider.ConversationRecency([]provider.Turn{normalized}))
-		if err := provider.EmitTranscriptTurn(ctx, out, normalized); err != nil {
+		progress := out
+		progress.Queue = nil // The initial metadata fragment already carries it.
+		if err := provider.EmitTranscriptTurn(ctx, progress, normalized); err != nil {
 			return provider.Transcript{}, err
 		}
 	}

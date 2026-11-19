@@ -5,9 +5,7 @@ description: Check availability, permission, agent integration and transport.
 
 ## Sessions are visible but sending fails
 
-Check that the host provider is ready. If Codex App was launched independently, ReignHub may only be reading history. Wait for the task to finish, quit the App and launch through ReignHub so both connect to the same app-server.
-
-Codex CLI sessions owned by another backend can also have writer conflicts. Shared history files do not establish control of an active session. See [Codex CLI](/docs/agents/codex-cli).
+Check that **Codex** is ready on the host and that the application, terminal or editor managing this session is still available. ReignHub connects automatically to its current owner; it does not require launching Codex through ReignHub. Shared history alone does not guarantee live control. Follow any connection guidance and retry after recovery. See [Codex](/docs/agents/codex).
 
 ## Device appears offline
 

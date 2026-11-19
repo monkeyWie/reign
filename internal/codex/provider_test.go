@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"github.com/coder/websocket"
+	"github.com/monkeyWie/reignhub/internal/codexipc"
 	"github.com/monkeyWie/reignhub/internal/config"
 	"github.com/monkeyWie/reignhub/internal/control"
 	"github.com/monkeyWie/reignhub/internal/events"
@@ -162,20 +163,26 @@ func TestModelSelectionThroughControl(t *testing.T) {
 	defer server.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer cancel()
-	p := NewCLI(config.Config{CodexCLI: "fixture"}, events.New())
+	p := New(config.Config{CodexCLI: "fixture"}, "", events.New())
+	attachIPCFixture(t, p, func(m codexipc.Message) (codexipc.Message, bool) {
+		if m.Method == "thread-owner-discovery" {
+			return codexipc.Message{ResultType: "error", Error: "no-client-found"}, true
+		}
+		return codexipc.Message{}, false
+	})
 	client, err := rpc.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), p.observe)
 	if err != nil {
 		t.Fatal(err)
 	}
 	p.client = client
 	defer p.Close()
-	d := &control.Dispatcher{Providers: map[string]provider.Provider{"codex-cli": p}}
-	response := d.Handle(ctx, control.Request{Method: "models", Provider: "codex-cli"})
+	d := &control.Dispatcher{Providers: map[string]provider.Provider{"codex-app": p}}
+	response := d.Handle(ctx, control.Request{Method: "models", Provider: "codex-app"})
 	var models []provider.Model
 	if response.Error != "" || json.Unmarshal(response.Result, &models) != nil || len(models) != 2 || models[0].ID != "model-a" || !models[0].Default || models[1].ID != "model-b" {
 		t.Fatalf("invalid paginated catalog: %+v %s", response, response.Result)
 	}
-	response = d.Handle(ctx, control.Request{Method: "send", Provider: "codex-cli", Session: "fixture-thread", Text: "fixture message", Model: "model-b"})
+	response = d.Handle(ctx, control.Request{Method: "send", Provider: "codex-app", Session: "fixture-thread", Text: "fixture message", Model: "model-b"})
 	if response.Error != "" {
 		t.Fatal(response.Error)
 	}

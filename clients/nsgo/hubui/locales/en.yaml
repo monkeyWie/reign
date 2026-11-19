@@ -79,6 +79,9 @@ filterMatches:
     count: { type: String }
 
 projects: "Projects"
+activeSessionCount: "{count} active"
+moreProjectDetails: "{count} more · Right-click for details"
+detachedGitHead: "Detached HEAD · {commit}"
 workDetails: "Work details"
 workedFor: "Worked for {duration}"
 workedUnderSecond: "Worked for less than a second"

@@ -131,7 +131,7 @@ func (s *State) dialogView(cx *core.Scope, kind string) core.Node {
 				s.changed()
 				return
 			}
-			s.call("save-agent", "host.agent.save", Object{"id": id.Get(), "agent": value}, func(any) { close(); s.notice = "Agent 配置已保存，重启 ReignHub 后生效"; s.changed() })
+			s.call("save-agent", "host.agent.save", Object{"id": id.Get(), "agent": value}, func(any) { close(); s.showNotice("Agent 配置已保存，重启 ReignHub 后生效") })
 		}))
 	case kind == "account":
 		title = "账号与设备同步"
@@ -312,13 +312,14 @@ func (s *State) dialogView(cx *core.Scope, kind string) core.Node {
 		}
 	case kind == "create":
 		title = "新建会话"
-		cwd := core.NewSignal(cx, s.createDirectory)
+		locations := s.createProject
+		cwd := core.NewSignal(cx, "")
 		target := core.NewSignal(cx, dialogTarget)
 		agent := core.NewSignal(cx, "")
 		environments := []ui.Option[string]{}
 		for _, device := range s.devices {
 			id := str(device, "id")
-			if s.connectionReady(id) {
+			if s.connectionReady(id) && (locations == nil || projectLocationFor(locations, id).Target != "") {
 				environments = append(environments, ui.Option[string]{Value: id, Label: s.environmentName(id)})
 			}
 		}
@@ -330,8 +331,16 @@ func (s *State) dialogView(cx *core.Scope, kind string) core.Node {
 		}
 		if !valid && len(environments) > 0 {
 			target.Set(environments[0].Value)
+		} else if !valid {
+			target.Set("")
 		}
-		children = append(children, ui.Select[string]{TestID: "new-session-device", Disabled: pending, Label: locales.For(s.cx).ExecutionDevice(), Options: environments, Value: target.Get, OnChange: func(id string) { target.Set(id); cwd.Set(""); agent.Set("") }},
+		seed := func(id string) {
+			location := projectLocationFor(locations, id)
+			cwd.Set(location.Path)
+			agent.Set(location.Provider)
+		}
+		seed(target.GetUntracked())
+		children = append(children, ui.Select[string]{TestID: "new-session-device", Disabled: pending, Label: locales.For(s.cx).ExecutionDevice(), Options: environments, Value: target.Get, OnChange: func(id string) { target.Set(id); seed(id) }},
 			core.Dynamic(func(cx *core.Scope) core.Node {
 				id := target.Get()
 				s.read()
@@ -390,18 +399,57 @@ func (s *State) dialogView(cx *core.Scope, kind string) core.Node {
 		footer = append(footer, busyButton(cx, "confirm-clear-cache", "清除缓存", nil, "primary", pending, func() {
 			s.runAction("confirm-clear-cache:"+dialogTarget, func(ctx context.Context) (any, error) {
 				return s.api.Call(ctx, "client.assetCache.clear", Object{}, target, nil)
-			}, func(any) { close(); s.images = map[string][]byte{}; s.notice = "附件缓存已清除" })
+			}, func(any) { close(); s.images = map[string][]byte{}; s.showNotice("附件缓存已清除") })
 		}))
 	case kind == "forget":
 		title = "移除设备？"
-		children = append(children, label(cx, "删除本机保存的配对身份与该设备的消息、附件缓存。", 13, false))
+		children = append(children, label(cx, "删除本机保存的配对身份与该设备的消息、附件缓存和未发送草稿。", 13, false))
 		id := dialogTarget
 		footer = append(footer, busyButton(cx, "confirm-forget", "移除", nil, "primary", pending, func() {
-			s.call("confirm-forget:"+dialogTarget, "client.forget", Object{"id": id}, func(any) {
+			s.persistDraft()
+			if s.draftWriter != nil {
+				s.draftWriter.block(id, true)
+			}
+			s.runAction("confirm-forget:"+dialogTarget, func(ctx context.Context) (any, error) {
+				if s.draftWriter != nil {
+					_ = s.draftWriter.flush(ctx)
+				}
+				_, err := s.api.Call(ctx, "client.forget", Object{"id": id}, "", nil)
+				return removalResult{err}, nil
+			}, func(v any) {
+				if err := v.(removalResult).err; err != nil {
+					if s.draftWriter != nil {
+						s.draftWriter.block(id, false)
+					}
+					s.error = err.Error()
+					return
+				}
 				close()
 				if s.target == id {
 					s.selectDevice("")
 				}
+				for key, d := range s.drafts {
+					if strings.HasPrefix(key, id+"|") {
+						for _, u := range d.Uploads {
+							u.cancelled.Store(true)
+							if u.cancel != nil {
+								u.cancel()
+							}
+						}
+						delete(s.drafts, key)
+						delete(s.draftLoads, key)
+					}
+				}
+				for key := range s.draftLoads {
+					if strings.HasPrefix(key, id+"|") {
+						delete(s.draftLoads, key)
+					}
+				}
+				s.clearLastSession(id, "", "")
+				if s.draftWriter != nil {
+					s.draftWriter.block(id, false)
+				}
+				s.poll()
 			})
 		}))
 	case kind == "scan":
@@ -515,19 +563,28 @@ func (s *State) imagePreview(cx *core.Scope, close func()) core.Node {
 	}
 	cx.OnKey("left", func() { move(-1) })
 	cx.OnKey("right", func() { move(1) })
-	toolbar := row(dynamicText(cx, func() string { return fmt.Sprintf("%d / %d", index.Get()+1, len(s.preview)) }, 12, true), spacer(), button(cx, "preview-download", "下载", lucide.Download, "ghost", func() {
+	toolbar := row(dynamicText(cx, func() string { return fmt.Sprintf("%d / %d", index.Get()+1, len(s.preview)) }, 12, true), spacer(), contextualIconButton(cx, "preview-download", "下载图片", lucide.Download, func() {
 		if len(s.preview) > 0 {
 			s.download(cx, s.preview[index.Get()])
 		}
-	}), labelledIconButton(cx, "preview-close", "关闭图片预览", lucide.X, close))
+	}), contextualIconButton(cx, "preview-close", "关闭图片预览", lucide.X, close))
 	content := core.Dynamic(func(cx *core.Scope) core.Node {
 		if len(s.preview) == 0 {
 			return nil
 		}
 		a := s.preview[index.Get()]
-		s.loadImage(a, false)
+		localData, local := a["localData"].([]byte)
+		if !local {
+			s.loadImage(a, false)
+		}
 		key := s.key() + "|" + str(a, "id") + "|false"
-		img := core.Image{TestID: "preview-image", SourceFunc: func() core.ImageSource { s.read(); return core.ImageSource{Data: s.images[key]} }, ResizeMode: core.Contain, Style: fill.Merge(core.Style{AlignSelf: core.AlignStretch})}
+		img := core.Image{TestID: "preview-image", SourceFunc: func() core.ImageSource {
+			s.read()
+			if local {
+				return core.ImageSource{Data: localData}
+			}
+			return core.ImageSource{Data: s.images[key]}
+		}, ResizeMode: core.Contain, Style: fill.Merge(core.Style{AlignSelf: core.AlignStretch})}
 		return core.View{Style: fill.Merge(core.Style{Direction: core.Row, AlignItems: core.AlignCenter}), Children: []core.Node{button(cx, "preview-previous", "", lucide.ChevronLeft, "ghost", func() { move(-1) }), img, button(cx, "preview-next", "", lucide.ChevronRight, "ghost", func() { move(1) })}}
 	})
 	return base.Dialog{TestID: "image-preview", Label: "图片预览", Open: func() bool { return true }, OnOpenChange: func(open bool, _ base.Reason) {

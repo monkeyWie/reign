@@ -36,17 +36,11 @@ func TestSessionCreationSourceIsIndependentOfAccessProvider(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.source+"/"+tc.originator, func(t *testing.T) {
-			for _, cli := range []bool{false, true} {
-				p := New(config.Config{}, "", events.New())
-				wantProvider := "codex-app"
-				if cli {
-					p.kind, wantProvider = "cli", "codex-cli"
-				}
-				td := thread{ID: "original", Cwd: "/work/project", Source: json.RawMessage(tc.source), Originator: tc.originator, UpdatedAt: 42, CreatedAt: 12}
-				s := p.session(td)
-				if s.SourceKind != tc.want || s.Source != tc.source || s.Originator != tc.originator || s.ProviderID != wantProvider || s.ID != "original" || s.CWD != "/work/project" || s.UpdatedAt != 42000 || s.CreatedAt != 12000 {
-					t.Fatalf("creation source or access route lost: %+v", s)
-				}
+			p := New(config.Config{}, "", events.New())
+			td := thread{ID: "original", Cwd: "/work/project", Source: json.RawMessage(tc.source), Originator: tc.originator, UpdatedAt: 42, CreatedAt: 12}
+			s := p.session(td)
+			if s.SourceKind != tc.want || s.Source != tc.source || s.Originator != tc.originator || s.ProviderID != "codex-app" || s.ID != "original" || s.CWD != "/work/project" || s.UpdatedAt != 42000 || s.CreatedAt != 12000 {
+				t.Fatalf("creation source or access route lost: %+v", s)
 			}
 		})
 	}
@@ -91,7 +85,7 @@ func TestSessionListExcludesSDKAndPreservesPagination(t *testing.T) {
 					t.Errorf("unexpected listing filters: %s", m.Params)
 				}
 				if params.Cursor == "" {
-					result = json.RawMessage(`{"data":[{"id":"sdk","source":"appServer","originator":"codex_sdk_ts"},{"id":"app","cwd":"/project","source":"vscode","originator":"Codex Desktop","updatedAt":10},{"id":"exec","source":"exec"},{"id":"cli","cwd":"/project","source":"cli","updatedAt":9}],"nextCursor":"page-2"}`)
+					result = json.RawMessage(`{"data":[{"id":"sdk","source":"appServer","originator":"codex_sdk_ts"},{"id":"app","cwd":"/project","source":"vscode","originator":"Codex Desktop","updatedAt":10},{"id":"exec","source":"exec"},{"id":"cli","cwd":"/project","source":"cli","updatedAt":9},{"id":"vscode","cwd":"/project","source":"vscode","originator":"codex_vscode","updatedAt":8}],"nextCursor":"page-2"}`)
 				} else if params.Cursor == "page-2" {
 					result = json.RawMessage(`{"data":[{"id":"sdk-only-page","source":"exec","originator":"codex_sdk_ts"}],"nextCursor":"page-3"}`)
 				} else {
@@ -108,7 +102,7 @@ func TestSessionListExcludesSDKAndPreservesPagination(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	p := NewCLI(config.Config{}, events.New())
+	p := New(config.Config{}, "", events.New())
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	c, err := rpc.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), p.observe)
@@ -121,8 +115,13 @@ func TestSessionListExcludesSDKAndPreservesPagination(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(first.Sessions) != 2 || first.NextCursor != "page-2" || first.Sessions[0].SourceKind != "app" || first.Sessions[1].SourceKind != "cli" {
+	if len(first.Sessions) != 3 || first.NextCursor != "page-2" || first.Sessions[0].SourceKind != "app" || first.Sessions[1].SourceKind != "cli" || first.Sessions[2].SourceKind != "vscode" {
 		t.Fatalf("bad first page: %+v", first)
+	}
+	for _, session := range first.Sessions {
+		if session.ProviderID != "codex-app" {
+			t.Fatalf("split Codex route: %+v", session)
+		}
 	}
 	if first.Sessions[0].Project == nil || first.Sessions[0].Project.Name != "Project" {
 		t.Fatal("project metadata missing from session page")

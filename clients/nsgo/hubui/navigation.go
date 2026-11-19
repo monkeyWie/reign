@@ -65,8 +65,7 @@ const rootBackInterval = 2 * time.Second
 func (s *State) clearRootBack() {
 	s.rootBackDeadline = time.Time{}
 	if s.notice == rootBackHint {
-		s.notice = ""
-		s.changed()
+		s.showNotice("")
 	}
 }
 
@@ -81,8 +80,8 @@ func (s *State) rootBack() bool {
 		return true
 	}
 	deadline := now.Add(rootBackInterval)
-	s.rootBackDeadline, s.notice = deadline, rootBackHint
-	s.changed()
+	s.rootBackDeadline = deadline
+	s.showNotice(rootBackHint)
 	s.cx.AfterFunc(rootBackInterval, func() {
 		if s.rootBackDeadline == deadline {
 			s.clearRootBack()

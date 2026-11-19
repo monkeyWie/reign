@@ -86,6 +86,16 @@ func pressStyle(cx *core.Scope) core.Style {
 	return core.Style{Hover: &core.Style{Background: c.muted}, Active: &core.Style{Background: c.selected, Opacity: core.Alpha(.8)}, FocusVisible: &core.Style{OutlineWidth: 2, OutlineColor: c.focus}}
 }
 
+func filledButtonStyle(cx *core.Scope) core.Style {
+	c := palette(cx)
+	return core.Style{
+		Background: c.foreground, Color: c.background,
+		Hover:        &core.Style{Background: ui.Mix(c.foreground, c.background, .08)},
+		Active:       &core.Style{Background: ui.Mix(c.foreground, c.background, .16)},
+		FocusVisible: &core.Style{OutlineWidth: 2, OutlineColor: c.focus},
+	}
+}
+
 func (s *State) approvalKey(a Object) string { return "approval:" + s.key() + ":" + str(a, "id") }
 
 func (s *State) approvalAction(a, decision Object) {
@@ -129,9 +139,11 @@ func contextualIconButton(cx *core.Scope, id, title string, icon func() *core.SV
 	tip.PopupStyle.Padding, tip.PopupStyle.CornerRadius = core.Symmetric(5, 8), 6
 	v.Tooltip = tip
 	v.Style.Width, v.Style.Height, v.Style.MinHeight, v.Style.Padding = core.Pt(30), core.Pt(30), core.Pt(30), core.All(7)
-	v.StyleFunc = func() core.Style {
-		c := palette(cx)
-		return core.Style{Color: c.mutedText, Hover: &core.Style{Color: c.foreground}, Active: &core.Style{Color: c.foreground, Opacity: core.Alpha(.65)}, FocusVisible: &core.Style{Color: c.foreground, OutlineWidth: 2, OutlineColor: c.focus}}
-	}
+	v.StyleFunc = func() core.Style { return contextualIconStyle(cx) }
 	return v
+}
+
+func contextualIconStyle(cx *core.Scope) core.Style {
+	c := palette(cx)
+	return core.Style{Color: c.mutedText, Hover: &core.Style{Color: c.foreground}, Active: &core.Style{Color: c.foreground, Opacity: core.Alpha(.65)}, FocusVisible: &core.Style{Color: c.foreground, OutlineWidth: 2, OutlineColor: c.focus}}
 }

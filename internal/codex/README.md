@@ -2,13 +2,43 @@
 
 These notes describe this adapter, not repository-wide standards. The common contract is defined in `internal/provider`; generic architecture is documented in [architecture](../../docs/engineering/architecture.md).
 
+## Unified Codex integration
+
+ReignHub registers one **Codex** Provider. Its stable internal ID remains
+`codex-app` so existing enablement preferences, pins, caches and attachment scopes
+keep their identity. The independent `codex-cli` Provider and shared-daemon
+version/start/discovery flow are removed. Controllers hide retired Provider
+entries from old cached directories; the unified route lists native history.
+They never redirect an old route's writes or infer ownership from creation source.
+The retired ID remains reserved against custom Provider collisions.
+
+Installation can be a desktop App or a Codex executable. Enabled automatic setup
+attempts the existing IPC service without requiring a desktop App process;
+readiness requires healthy IPC and private reader connections. App, CLI and VS
+Code source metadata stays available, but the current IPC owner decides routing.
+Availability depends on that owner's IPC support, not merely shared history.
+The private `codex app-server --listen stdio://` reader/executor remains necessary
+for history, models and new sessions; removing the independent CLI integration
+does not remove this executable dependency. Local support is selected at compile
+time for desktop Unix and Windows; desktop App detection is not the support gate.
+On systems without the desktop App, a compatible IPC service and executable must
+already be available. Mobile/browser clients remain remote controllers.
+
 ## Runtime paths
 
-- Existing App-owned sessions: discover the local IPC owner and follow its snapshots/patches. Send, append, stop and approval operations go to that owner.
+- Existing Codex-owned sessions: discover the local IPC owner and follow its snapshots/patches. Send, append, stop and approval operations go to that owner.
 - Reads and new sessions: use the private app-server where required. ReignHub-owned sessions publish follower state to the App. Shutting down this executor can interrupt its tasks; lock release does not guarantee seamless continuation in the App.
 - Creation source, current owner and IPC schema version are separate facts. A read or subscription does not force `resume` or acquire a second writer. Owner discovery failures do not authorize lock takeover. An uncertain write is not replayed through a different backend.
 
 See [IPC routing](ipc.go), [owner publishing](ipc_owner.go) and [runtime composition](runtime.go). Dated verification and its limitations are recorded in [the implementation report](../../docs/research/codex-ipc-implementation-2026-11-17.md) and [sync follow-up](../../docs/research/codex-ipc-and-sync-followup-2026-11-17.md).
+
+Project metadata in [projects.go](projects.go) retains every configured root from
+`project/list` or the desktop assignment fallback in `Project.Roots`, including
+directories without a current session. `Project.Root` remains the primary root
+for existing grouping and creation defaults. Git display metadata is supplied by
+the common host workspace resolver from the actual execution checkout; it does
+not use a possibly historical Codex creation-time branch. See the
+[Provider contract](../../docs/platform/agent-providers.md#project-identity-across-agents).
 
 ## App follower writes
 
@@ -113,6 +143,54 @@ for input/approval. `TestDirectoryUsesLiveAppOwnerWithoutOpeningConversation`
 uses isolated IPC and real temporary OS locks to cover active/completed state
 without operating real Agent conversations.
 
+A valid replay cursor does not prove that its upstream follower still exists.
+Watch/probe restores missing or broken followers independently of replay-window
+resets. Opening a directory-followed thread promotes it to an explicit follower,
+so directory cleanup cannot unsubscribe it between turns. A historical thread
+without a current owner remains read-only; discovery never acquires a writer.
+`TestIPCValidCursorRestoresAndRetainsFollower` covers attachment from a valid
+cursor and continued live text after directory cleanup using isolated IPC.
+
+Stream revisions are scoped to the owner's current stream, not the IPC client's
+lifetime. The installed desktop producer clears its revision map when its backend
+reconnects without necessarily disconnecting IPC. Full snapshots establish a new
+base even when their revision is lower; only patches require continuity with the
+current base. Rejecting lower snapshots freezes all subsequent lower patches
+until the counter catches up. Validate the current discovered owner and schema
+before accepting either form.
+
+An owner's `thread-stream-following-status-requested` is an invalidation hint,
+including when its source differs from the remembered owner. Wake the affected
+watch immediately, rediscover ownership, re-follow and wait for a new snapshot.
+Never authorize a writer or accept an unsolicited owner's snapshot solely from
+that hint. Track invalidation generations separately from received metadata, so
+a valid patch or overlapping announcement cannot erase pending repair.
+
+[ipc_recovery.go](ipc_recovery.go) coalesces explicitly invalidated watch/history
+reads into one five-second discovery/re-follow/fresh-snapshot attempt. Failures
+have a five-second cooldown; waiting readers can cancel independently. An
+unchanged revision can acknowledge the new snapshot. Definitive owner absence
+retires the projection; failed repair retains the read-only persisted-history
+fallback without stale IPC previews. Healthy streams have no age-based full-state
+refresh. Completion and repair invalidate queue presentation through the same
+notification path. Public Go/Worker service contracts are unchanged.
+
+[Stream lifecycle tests](ipc_lifecycle_test.go) reproduce revision reset and owner
+handoff without a timer, session switch or real conversation. [Recovery fixtures](ipc_recovery_test.go)
+cover both schemas, invalidation followed by metadata traffic, fresh barriers,
+cancellation, backoff, owner loss and consumed queues. The
+[installed producer check](../../docs/research/verification/codex-stream-2026-11-19/validate.cjs)
+reads the packaged code and executes only its producer methods with synthetic
+state. On 2026-11-19 it confirmed revision 500 followed by a reconnect snapshot at
+1 and a patch at 2. Run it with:
+
+```sh
+node docs/research/verification/codex-stream-2026-11-19/validate.cjs /Applications/ChatGPT.app/Contents/Resources/app.asar
+```
+
+This verifies the upstream revision contract; it does not prove that every
+reported real-world stall was caused by that transition.
+
 Recent ordering uses fixed conversation boundaries, not `thread.updatedAt`.
 IPC turns supply `turnStartedAtMs` and completed `durationMs`; app-server turns
 supply `startedAt`/`completedAt` in seconds. Explicit steering-user creation
@@ -188,9 +266,9 @@ service contract and Worker implementation need no changes.
 Package discovery uses the current user's registered package names and Win32
 `GetPackagePathByFullName`, then validates the package manifest and executable.
 Process discovery uses Toolhelp and process handles; it launches no PowerShell or
-process-listing command. Actual CLI metadata probes and private stdio backends use
+process-listing command. Private stdio backends use
 the shared `system.HideConsole` Windows adapter (`CREATE_NO_WINDOW` + `HideWindow`).
-The App integration attaches automatically when installed, running and enabled;
+The Codex integration attaches automatically when installed and enabled;
 it never launches or restarts the official App.
 
 Windows fixtures cover restricted named-pipe data exchange and a console-less
@@ -205,3 +283,101 @@ All new platform tests use Windows-selected files and never connect to the real
 isolated protocol tests do not establish real Windows App interoperability or
 confirm the user's pipe ACL. The implementation reuses existing dependencies;
 binary size changes require build measurements.
+
+## Queued follow-ups
+
+The controller projects queued input separately from executed turns through
+`Transcript.queue` and `kind: "queue"` watch events. [queue.go](queue.go) accepts
+v3 `thread-queued-followups-changed` only from the selected thread's current IPC
+owner and local host. Exact message IDs and order survive duplicate text. Keep
+preparing, paused and uncertain submissions distinct; malformed state or owner
+loss is unknown, never proof that the queue is empty. Owned queues publish the
+same projection when they change. No queue write or replay is initiated by a read.
+
+Read-only inspection of the installed desktop bundle on 2026-11-19 confirmed
+that this broadcast is independent of conversation snapshots and offers no queue
+read request. For an existing queue at first open, [queue_storage.go](queue_storage.go)
+reads only its selected thread from `queued-follow-ups` in Codex home. An
+initialized `.codex-global-state.sqlite` schema v1 (`settings`, global scope)
+supersedes the older `.codex-global-state.json`; unknown/corrupt SQLite must not
+fall back to potentially obsolete JSON. Reuse the existing SQLite driver with
+read-only/query-only access, a 50 ms lock timeout inside the selected queue read's 500 ms total budget.
+JSON reads are capped at 16 MiB, each source at 4 MiB and 100 messages with at
+most 100 attachment previews each. File I/O observes cancellation between bounded
+reads; synchronous OS reads themselves cannot be interrupted. Never create,
+migrate or modify vendor state, and do not add a storage polling loop. Live owner
+broadcasts, including empty queues, supersede the entire staging bootstrap.
+
+Queue presentation also excludes messages with explicit delivery receipts in
+the same thread's history: server `userMessage.clientId` and acknowledged
+steering client IDs. A bounded set of the latest 256 IDs reconciles both staging
+IDs and server-queue `clientUserMessageId` links, including missed consumption
+broadcasts or lagging storage exports. Pending optimistic items and equal text
+are not receipts. New receipts invalidate the selected snapshot; late queue
+broadcasts cannot reintroduce matching accepted entries. This only filters the
+projection: it never removes vendor entries, retries a send or resolves an
+unknown execution outcome by guessing. Failed queue sources remain unknown.
+
+Read-only inspection of VS Code extension `openai.chatgpt` 26.1111.21308 on
+2026-11-19 confirmed the same v3 broadcasts after queue writes and a separate
+`globalStorageUri/queued-follow-ups.json`, keyed directly by thread ID. Existing
+queues need not be broadcast just because a follower connects. Compile-selected
+desktop discovery checks only the standard Code and Code - Insiders
+`User/globalStorage/openai.chatgpt/queued-follow-ups.json` paths beneath
+`os.UserConfigDir()` (Roaming AppData on Windows, Application Support on macOS,
+XDG config on Linux). Each regular file read is capped at 4 MiB with cancellation
+checks between 32 KiB chunks. Do not scan profiles, open unrelated state databases
+or write vendor files. Custom user-data directories, remote extension hosts and
+legacy VS Code globalState storage are not bootstrap sources; live owner events
+remain available. Merge selected-thread staging entries by exact ID, preserve
+identical text with different IDs, and cap the union at 100 entries. A failed
+source or overflow makes the result unknown while retaining readable entries.
+Creation-client `sourceKind` is not evidence of current ownership.
+
+The same bundle also uses a separate app-server queue. [queue_server.go](queue_server.go)
+reads `thread/queue/list` without resuming or acquiring the thread, with a 300 ms
+budget, at most four pages, and cursor-cycle/size/identity checks. Only explicit
+method-not-found means this source is unsupported/empty; failures remain unknown.
+Merge server order before desktop staging, using server `clientUserMessageId`
+links to suppress duplicates in favor of their desktop entry, never text equality.
+Full-input `codex-untrusted-app-input:` placeholders project only visible message
+text and image counts. Server `thread/queue/changed` notifications invalidate the
+selected snapshot through the existing watch reconciliation; they do not read on
+the RPC receive loop or start a new polling task. Fence in-flight reads against
+newer notifications and owner loss. Local broadcasts preserve the last known
+server portion, and failed reads preserve stale entries until a complete ready
+list replaces them. Missing desktop storage means no persisted desktop entries;
+corrupt/unreadable storage remains unknown. The controller caps a stale union at
+200 entries rather than accumulating unbounded messages during a prolonged failure.
+
+Export only text, IDs, normalized state and attachment names/kinds. Composer
+paths, credentials and execution context stay host-local. The UI currently offers
+queue preview, not queue mutation. Tests in [queue_test.go](queue_test.go) use
+temporary JSON/SQLite and isolated IPC, covering bootstrap, changes, consumption,
+owner isolation, malformed state, cancellation, recovery and fragment assembly.
+VS Code fixtures also cover first-open persisted queues, missing/corrupt/oversized
+files, read-only behavior, exact-ID merging, bounds and live consumption overriding
+stale files. A remote controller requires the controlled host to run the queue
+export implementation; updating only the controller cannot supply absent data.
+[Server queue tests](queue_server_test.go) cover both sources together, explicit
+ID matching, consumption, app-message/attachment normalization, pagination limits,
+unsupported methods, cancelled reads and stale notification races.
+[Controller tests](../../clients/nsgo/hubui/message_queue_test.go) cover stale
+snapshot replay, cache/offline display, editor/preview identity and bounded
+layouts. These fixtures do not operate real conversations or prove every Codex
+App/CLI/VS Code queue implementation. The shared encrypted endpoint fields need
+no changes in Go relay, Worker room or public service TS types.
+
+## File links
+
+Markdown file references are exported only from the session workspace or the Hub
+attachment directory, through the existing scoped attachment store. Source-line
+suffixes and anchors identify the actual file; they do not become part of its
+filename. Preserve the original link as `Attachment.Source` for activation and
+mark source-location references inline so they do not add separate file cards.
+The controller reveals local files through NSGo's file-manager API and downloads
+remote files through their exported attachment IDs. It never turns a remote path
+into an arbitrary filesystem read or opens it on the controller. This changes no
+Go/Worker service endpoints or encrypted relay behavior. Isolated attachment and
+controller link tests cover path decoding, location suffixes, remote routing,
+missing files and actual downloaded bytes.

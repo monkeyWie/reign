@@ -12,19 +12,15 @@ import (
 
 	"github.com/monkeyWie/reignhub/internal/assets"
 	"github.com/monkeyWie/reignhub/internal/provider"
+	"github.com/monkeyWie/reignhub/pkg/filelink"
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/text"
 )
 
 var fileMention = regexp.MustCompile(`(?m)^## [^\n]+?: (.+)$`)
-var fileLineSuffix = regexp.MustCompile(`:[0-9]+(?::[0-9]+)?$`)
-var fileLineFragment = regexp.MustCompile(`^L[0-9]+(?:C[0-9]+)?(?:-L?[0-9]+(?:C[0-9]+)?)?$`)
 
 func (p *Provider) providerID() string {
-	if p.kind == "cli" {
-		return "codex-cli"
-	}
 	return "codex-app"
 }
 
@@ -133,30 +129,21 @@ func (p *Provider) attachments(ctx context.Context, session, cwd string, turn *p
 			default:
 				return ast.WalkContinue, nil
 			}
-			u, e := url.Parse(source)
-			if e != nil || (u.Scheme != "" && u.Scheme != "file") || u.Host != "" {
+			path := filelink.Resolve(source, cwd)
+			if path == "" {
 				return ast.WalkContinue, nil
 			}
-			path := u.Path
-			if path == "" || strings.HasPrefix(path, "#") {
-				return ast.WalkContinue, nil
-			}
-			// Codex source-location links stay in the message as navigation,
-			// rather than becoming downloadable attachments (or missing files
-			// such as README.md:3). This applies to links, not inline images.
-			if !inline && (fileLineSuffix.MatchString(path) || fileLineFragment.MatchString(u.Fragment)) {
-				return ast.WalkContinue, nil
-			}
-			if !filepath.IsAbs(path) {
-				path = filepath.Join(cwd, path)
-			}
+			// Source locations remain inline links, with a scoped download of
+			// the actual file available to remote controllers.
+			_, location := filelink.Path(source)
+			inline = inline || location
 			// Only export Markdown file references beneath this workspace or the
 			// Hub attachment directory, not arbitrary paths sent by a controller.
 			if !beneath(cwd, path) && !beneath(p.assets.Root, path) {
 				return ast.WalkContinue, nil
 			}
 			for _, a := range item.Attachments {
-				if a.Source == path || a.Source == source {
+				if a.Source == source {
 					return ast.WalkContinue, nil
 				}
 			}

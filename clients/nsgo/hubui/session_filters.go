@@ -4,16 +4,12 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"slices"
 	"sort"
 	"strings"
 
 	"github.com/monkeyWie/reignhub/clients/nsgo/hubui/locales"
-	"github.com/nsgo-dev/nsgo/base"
 	"github.com/nsgo-dev/nsgo/core"
-	"github.com/nsgo-dev/nsgo/i18n"
 	"github.com/nsgo-dev/nsgo/icons/lucide"
-	"github.com/nsgo-dev/nsgo/ui"
 )
 
 // Filters are temporary view state. An empty dimension includes everything;
@@ -36,8 +32,11 @@ func sessionProjectKey(ss Object) string {
 func (s *State) filteredSessions() []Object { return s.sessionsMatching(s.filters) }
 
 func (s *State) sectionFilters(section string) *sessionFilters {
-	if section == "recent" {
+	switch section {
+	case "recent":
 		return &s.recentFilters
+	case "pinned":
+		return &s.pinnedFilters
 	}
 	return &s.filters
 }
@@ -122,112 +121,6 @@ func sessionFilterID(dimension, key string) string {
 	return "filter-" + dimension + "-" + base64.RawURLEncoding.EncodeToString([]byte(key))
 }
 
-func (s *State) sessionFilterGroup(cx *core.Scope, dimension, title string, selection *map[string]bool) core.Node {
-	stamp := core.NewMemo(cx, func() uint64 { s.read(); return s.catalogueVersion })
-	options := core.NewMemoFunc(cx, func() []sessionFilterOption {
-		stamp.Get()
-		i18n.Language(cx)
-		return core.Untracked(cx, func() []sessionFilterOption { return s.sessionFilterOptions(dimension) })
-	}, slices.Equal[[]sessionFilterOption])
-	return core.View{Style: core.Style{Gap: 3}, Children: []core.Node{
-		label(cx, title, 12, true),
-		ui.Checkbox{TestID: "filter-" + dimension + "-all", Text: locales.For(cx).FilterAll(),
-			Checked:  func() bool { s.read(); return len(*selection) == 0 },
-			OnChange: func(bool) { *selection = nil; s.filtersChanged() }, Style: core.Style{MinHeight: core.Pt(36)},
-		},
-		core.Each(options.Get, func(o sessionFilterOption) string { return o.Key }, func(cx *core.Scope, option func() sessionFilterOption, _ func() int) core.Node {
-			key := option().Key
-			return ui.Checkbox{TestID: sessionFilterID(dimension, key), Label: option().Title + " " + option().Detail,
-				Style:   core.Style{MinHeight: core.Pt(38), MinWidth: core.Pt(0)},
-				Checked: func() bool { s.read(); return (*selection)[key] },
-				OnChange: func(checked bool) {
-					if *selection == nil {
-						*selection = map[string]bool{}
-					}
-					if checked {
-						(*selection)[key] = true
-					} else {
-						delete(*selection, key)
-					}
-					s.filtersChanged()
-				}, Children: []core.Node{core.View{Style: core.Style{MinWidth: core.Pt(0), FlexShrink: 1, Gap: 2}, Children: []core.Node{
-					singleLine(cx, func() string { return option().Title }, 13, false),
-					core.Show{When: func() bool { return option().Detail != "" }, Then: func(cx *core.Scope) core.Node {
-						return singleLine(cx, func() string { return option().Detail }, 11, true)
-					}},
-				}}},
-			}
-		}),
-	}}
-}
-
-func (s *State) sessionFiltersButton(cx *core.Scope, section string) core.Node {
-	f := s.sectionFilters(section)
-	id := choose(section == "recent", "recent-filters", "session-filters")
-	open := core.NewSignal(cx, false)
-	tipOpen := core.NewSignal(cx, false)
-	tip := tooltipCard(cx, label(cx, locales.For(cx).SessionFilters(), 12, false))
-	tip.Open = func() bool { return tipOpen.Get() && !open.Get() }
-	tip.OnOpenChange = func(value bool, _ base.Reason) { tipOpen.Set(value && !open.GetUntracked()) }
-	count := s.sessionFilterCount(cx, section)
-	return base.Popover{TestID: id, Label: locales.For(cx).SessionFilters(), Open: open.Get,
-		OnOpenChange: func(value bool, _ base.Reason) {
-			open.Set(value)
-			if value {
-				tipOpen.Set(false)
-			}
-		}, Placement: core.PlaceBottom, Align: core.AlignEnd, Offset: 6, Margin: 8,
-		Style: core.Style{Width: core.Pt(40), Height: core.Pt(36), CornerRadius: 10, FlexShrink: 0, AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter},
-		StyleFunc: func() core.Style {
-			s.read()
-			st := pressStyle(cx)
-			if !open.Get() && f.count() == 0 {
-				st = st.Merge(contextualAffordance(cx, "directory-section", true))
-			}
-			if open.Get() || f.count() > 0 {
-				st.Background = palette(cx).selected
-			}
-			return st
-		}, Tooltip: tip,
-		Trigger: core.View{Children: []core.Node{
-			glyph(cx, lucide.ListFilter, 16),
-			core.Show{When: func() bool { s.read(); return f.count() > 0 }, Then: func(cx *core.Scope) core.Node {
-				return core.View{Style: core.Style{Position: core.Absolute, Top: core.Pt(-4), Right: core.Pt(-5), Width: core.Pt(6), Height: core.Pt(6), CornerRadius: 3}, StyleFunc: func() core.Style { return core.Style{Background: palette(cx).accent} }}
-			}},
-		}},
-		PopupStyle: core.Style{Padding: core.All(14), Gap: 10, CornerRadius: 12, BorderWidth: 1},
-		PopupStyleFunc: func() core.Style {
-			c := palette(cx)
-			return core.Style{Width: core.Pt(min(320, max(160, cx.Env().Window().Width-24))), Background: c.elevated, Color: c.foreground, BorderColor: c.border,
-				Shadows: []core.BoxShadow{{Offset: core.Point{Y: 6}, Blur: 20, Color: core.RGB(0).Faded(.16)}}}
-		},
-		Children: []core.Node{core.Dynamic(func(cx *core.Scope) core.Node {
-			i18n.Language(cx)
-			l := locales.For(cx)
-			return core.View{TestID: "session-filter-panel", Style: core.Style{Gap: 10, MinWidth: core.Pt(0)}, Children: []core.Node{
-				row(label(cx, l.SessionFilters(), 14, false), spacer(), labelledIconButton(cx, "close-session-filters", l.CloseFilters(), lucide.X, func() { open.Set(false) })),
-				core.Scroll{TestID: "session-filter-scroll", StyleFunc: func() core.Style {
-					return core.Style{MaxHeight: core.Pt(min(500, max(100, cx.Env().Window().Height-240)))}
-				}, Children: []core.Node{
-					core.View{Style: core.Style{Gap: 16, MinWidth: core.Pt(0)}, Children: []core.Node{
-						core.Show{When: func() bool { return section == "all" }, Then: func(cx *core.Scope) core.Node {
-							return core.View{Style: core.Style{Gap: 6}, Children: []core.Node{
-								label(cx, l.SessionGrouping(), 12, true),
-								ui.Select[string]{TestID: "session-grouping", Style: core.Style{Width: core.Pct(100), MinWidth: core.Pt(0)}, Label: l.SessionGrouping(), Options: []ui.Option[string]{{Value: groupProject, Label: l.GroupByProject()}, {Value: groupDevice, Label: l.GroupByDevice()}, {Value: groupAgent, Label: l.GroupByAgent()}}, Value: func() string { s.read(); return s.grouping }, OnChange: s.setGrouping},
-							}}
-						}},
-						label(cx, l.FilterHint(), 11, true),
-						s.sessionFilterGroup(cx, "device", l.FilterDevices(), &f.Devices),
-						s.sessionFilterGroup(cx, "agent", l.FilterAgents(), &f.Agents),
-						s.sessionFilterGroup(cx, "project", l.FilterProjects(), &f.Projects),
-					}},
-				}},
-				row(dynamicText(cx, func() string { return l.FilterMatches(fmt.Sprint(count.Get())) }, 12, true), spacer(), button(cx, "reset-session-filters", l.ClearFilters(), nil, "ghost", func() { s.clearSessionFilters(section) })),
-			}}
-		})},
-	}
-}
-
 func (s *State) sessionFilterFeedback(cx *core.Scope, section string) core.Node {
 	f := s.sectionFilters(section)
 	count := s.sessionFilterCount(cx, section)
@@ -249,7 +142,7 @@ func (s *State) sessionFilterCount(cx *core.Scope, section string) *core.Memo[in
 		return core.Untracked(cx, func() int {
 			n := 0
 			for _, ss := range s.sessionsMatching(*s.sectionFilters(section)) {
-				if s.pinned[sessionIdentity(ss)] == 0 {
+				if (s.pinned[sessionIdentity(ss)] != 0) == (section == "pinned") {
 					n++
 				}
 			}

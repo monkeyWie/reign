@@ -13,6 +13,7 @@ import (
 	"github.com/monkeyWie/reignhub/clients/nsgo/browserclient"
 	"github.com/monkeyWie/reignhub/internal/connectivity"
 	"github.com/monkeyWie/reignhub/internal/device"
+	"github.com/monkeyWie/reignhub/pkg/composerdraft"
 	"strings"
 	"sync"
 	"time"
@@ -329,6 +330,8 @@ func (a *API) Call(ctx context.Context, method string, p Object, target string, 
 		return a.list()
 	case "client.cached":
 		return a.cached(target, command)
+	case "client.draft.get", "client.draft.put":
+		return composerdraft.Call(ctx, a.store, method, target, p)
 	case "client.snapshot":
 		if target == "" || str(p, "provider") == "" || str(p, "session") == "" || p["transcript"] == nil {
 			return nil, errors.New("invalid local transcript snapshot")
@@ -434,7 +437,7 @@ func (a *API) Call(ctx context.Context, method string, p Object, target string, 
 				return nil, e
 			}
 			for _, k := range keys {
-				if strings.HasPrefix(k, "directory:"+id+":") || strings.HasPrefix(k, "rpc:"+id+":") || strings.HasPrefix(k, "snapshot:"+id+":") {
+				if strings.HasPrefix(k, "directory:"+id+":") || strings.HasPrefix(k, "rpc:"+id+":") || strings.HasPrefix(k, "snapshot:"+id+":") || strings.HasPrefix(k, composerdraft.Prefix(id)) {
 					_ = a.store.Delete(k)
 				}
 			}

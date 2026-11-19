@@ -14,8 +14,8 @@ type unsupportedAppAPI struct{ *demoAPI }
 func (a *unsupportedAppAPI) Call(ctx context.Context, method string, p Object, target string, r Object) (any, error) {
 	if method == "providers" {
 		return []any{
-			Object{"id": "codex-app", "name": "Codex App", "installed": true, "state": "unsupported", "detail": "Windows 已支持 Codex App 检测，暂不支持接入远控", "capabilities": Object{"desktop": true}},
-			Object{"id": "codex-cli", "name": "Codex CLI", "installed": true, "state": "unavailable", "detail": "后台未运行"},
+			Object{"id": "codex-app", "name": "Codex", "installed": true, "state": "unsupported", "detail": "Windows 已支持 Codex App 检测，暂不支持接入远控", "capabilities": Object{"desktop": true}},
+			Object{"id": "pi", "name": "Pi", "installed": true, "state": "unavailable", "detail": "需要配置", "lastError": "Fixture: missing configuration"},
 		}, nil
 	}
 	return a.demoAPI.Call(ctx, method, p, target, r)
@@ -52,6 +52,6 @@ func checkUnsupportedApp(t *testing.T, width, height core.Points, name string) {
 	if !app.Find("id:settings-agent-switch-codex-app").Props.Disabled {
 		t.Fatal("unsupported App offered activation")
 	}
-	app.Find("id:settings-configure-codex-cli")
+	app.Find("id:settings-configure-pi")
 	app.Screenshot("unsupported-codex-app-" + name)
 }

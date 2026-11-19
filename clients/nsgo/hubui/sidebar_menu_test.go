@@ -20,9 +20,9 @@ func sidebarMenuAction(app *nsgotest.App, id string) {
 }
 
 func openSectionFilters(app *nsgotest.App, section string) {
-	id := choose(section == "recent", "recent-filters", "session-filters")
+	id := sessionFiltersButtonID(section)
 	if nsgotest.Target() == "macos" {
-		// Exercise native keyboard disclosure; Web covers pointer disclosure.
+		// Native keyboard disclosure; browser tests exercise pointer hover.
 		app.Focus("id:section:" + section)
 		app.Focus("id:" + id)
 		app.Key("Enter")
@@ -32,6 +32,31 @@ func openSectionFilters(app *nsgotest.App, section string) {
 		app.Press("id:" + id)
 	}
 	app.WaitFor("id:session-filter-panel", time.Second)
+}
+
+func openFilterDimension(app *nsgotest.App, dimension string) {
+	app.Press("id:filter-menu-" + dimension)
+	app.WaitFor("id:filter-"+dimension+"-all", time.Second)
+}
+
+func leaveFilterDimension(app *nsgotest.App, dimension string) {
+	if app.Exists("id:chat-input") && app.Find("id:chat-input").Focused {
+		app.Focus("id:filter-" + dimension + "-all")
+	}
+	app.Key("Escape")
+	app.WaitUntil(time.Second, func() bool { return !app.Exists("id:filter-" + dimension + "-all") })
+}
+
+func closeSectionFilters(app *nsgotest.App) {
+	// Escape first returns from a submenu; the second dismisses its menu.
+	for range 2 {
+		if !app.Exists("id:session-filter-panel") {
+			break
+		}
+		app.Key("Escape")
+		app.Settle()
+	}
+	app.WaitUntil(time.Second, func() bool { return !app.Exists("id:session-filter-panel") })
 }
 
 func activateTestControl(app *nsgotest.App, id string) {
@@ -55,17 +80,21 @@ func TestSectionFiltersStayIndependentAndDiscoverable(t *testing.T) {
 				env = core.Environment{Idiom: core.IdiomPhone, OS: core.OSAndroid}
 			}
 			app := nsgotest.Start(t, func(cx *core.Scope) core.Node { s = sidebarInteractionFixture(cx); return s.directory(cx) }, nsgotest.Size(390, 1000), nsgotest.Environment(env))
-			if !touch && nsgotest.Target() == "" && app.Find("id:session-filters").Style.Opacity != 0 {
-				t.Fatal("pointer filter is always visible")
-			}
-			if touch && app.Find("id:session-filters").Style.Opacity == 0 {
-				t.Fatal("touch filter requires hover")
+			for _, section := range []string{"pinned", "all", "recent"} {
+				trigger := app.Find("id:" + sessionFiltersButtonID(section))
+				if !touch && nsgotest.Target() == "" && trigger.Style.Opacity != 0 {
+					t.Fatal("pointer filter is always visible", section)
+				}
+				if touch && trigger.Style.Opacity == 0 {
+					t.Fatal("touch filter requires hover", section)
+				}
 			}
 			openSectionFilters(app, "all")
 			app.Find("id:session-grouping")
-			activateTestControl(app, sessionFilterID("device", "remote"))
+			openFilterDimension(app, "device")
+			app.Press("id:" + sessionFilterID("device", "remote"))
 			app.WaitUntil(time.Second, func() bool { return app.Find("id:" + sessionFilterID("device", "remote")).Props.Checked })
-			activateTestControl(app, "close-session-filters")
+			closeSectionFilters(app)
 			app.WaitUntil(time.Second, func() bool {
 				return !app.Exists("id:"+sessionRowID("all", s.sessions[0])) && app.Exists("id:"+sessionRowID("recent", s.sessions[0])) && app.Exists("id:"+sessionRowID("pinned", s.sessions[2]))
 			})
@@ -73,9 +102,10 @@ func TestSectionFiltersStayIndependentAndDiscoverable(t *testing.T) {
 			if app.Exists("id:session-grouping") {
 				t.Fatal("recent exposes grouping")
 			}
-			activateTestControl(app, sessionFilterID("device", "local"))
+			openFilterDimension(app, "device")
+			app.Press("id:" + sessionFilterID("device", "local"))
 			app.WaitUntil(time.Second, func() bool { return app.Find("id:" + sessionFilterID("device", "local")).Props.Checked })
-			activateTestControl(app, "close-session-filters")
+			closeSectionFilters(app)
 			app.WaitUntil(time.Second, func() bool {
 				return !app.Exists("id:"+sessionRowID("recent", s.sessions[1])) && app.Exists("id:"+sessionRowID("all", s.sessions[1]))
 			})

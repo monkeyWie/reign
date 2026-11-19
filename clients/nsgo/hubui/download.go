@@ -32,10 +32,17 @@ func (s *State) download(cx *core.Scope, a Object) {
 		task.previous = ""
 	}
 	s.downloadTask = task
-	s.notice = ""
+	s.showNotice("")
 	// Mount immediately, before the cache or the first remote request responds.
 	s.dialog.Set("attachment-download")
 	s.changed()
+	if data, ok := a["localData"].([]byte); ok {
+		task.data = data
+		task.received = int64(len(data))
+		task.total = task.received
+		s.saveDownload(cx, task)
+		return
+	}
 	var received, total atomic.Int64
 	var posted atomic.Bool
 	report := func(n, size int64) {
@@ -92,7 +99,7 @@ func (s *State) saveDownload(cx *core.Scope, task *attachmentDownload) {
 			task.status, task.error = "error", err.Error()
 		} else if saved {
 			s.cancelDownload(task)
-			s.notice = "文件已保存"
+			s.showNotice("文件已保存")
 		} else {
 			// The system picker was cancelled. Retain verified bytes so saving
 			// again does not redownload the attachment.

@@ -101,7 +101,7 @@ func (s *State) directory(cx *core.Scope) core.Node {
 			core.Show{When: func() bool { return isMobile(cx) }, Then: func(cx *core.Scope) core.Node {
 				return sidebarIconButton(cx, "scan-qr", "扫描二维码", lucide.ScanLine, func() { s.scan(cx) })
 			}},
-			sidebarIconButton(cx, "new-session", locales.For(cx).NewSession(), lucide.SquarePen, func() { s.createDirectory = ""; s.dialog.Set("create") }),
+			sidebarIconButton(cx, "new-session", locales.For(cx).NewSession(), lucide.SquarePen, func() { s.openSessionCreation(nil) }),
 		)}},
 	}}
 }
@@ -112,13 +112,28 @@ func (s *State) treeHeader(cx *core.Scope, item func() directoryRow, brake *list
 	if data.Kind == "section" {
 		key = data.ID
 	}
+	unread := func() bool { s.read(); return s.collapsed[key] && item().Unread }
+	headerLabel := func() string {
+		title := item().Title
+		if unread() {
+			title += " · " + locales.For(cx).SessionCompletedUnread()
+		}
+		return title
+	}
+	unreadIndicator := func() core.Node {
+		return core.Show{When: unread, Then: func(cx *core.Scope) core.Node {
+			return unreadDot(cx, data.ID, locales.For(cx).SessionCompletedUnread())
+		}}
+	}
 	if data.Kind == "section" {
-		trigger := core.View{TestID: data.ID, Role: core.RoleButton, LabelFunc: func() string { return item().Title }, Expanded: func() bool { s.read(); return !s.collapsed[key] },
+		trigger := core.View{TestID: data.ID, Role: core.RoleButton, LabelFunc: headerLabel, Expanded: func() bool { s.read(); return !s.collapsed[key] },
 			OnPress: func(core.PressEvent) {
 				brake.action(func() { s.collapsed[key] = !s.collapsed[key]; s.saveSidebarPreferences() })()
 			},
-			Style:     core.Style{Direction: core.Row, AlignItems: core.AlignCenter, FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0), Gap: 6, Padding: core.Symmetric(9, 6), CornerRadius: 7, MinHeight: core.Pt(38)},
-			StyleFunc: func() core.Style { return pressStyle(cx) }, Children: []core.Node{
+			Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0), Gap: 6, Padding: core.Symmetric(9, 6), CornerRadius: 7, MinHeight: core.Pt(38)},
+			StyleFunc: func() core.Style {
+				return core.Style{Active: &core.Style{Opacity: core.Alpha(.65)}, FocusVisible: &core.Style{OutlineWidth: 2, OutlineColor: palette(cx).focus}}
+			}, Children: []core.Node{
 				singleLine(cx, func() string { return item().Title }, 13, true),
 				core.Icon{TestID: data.ID + "-disclosure", SVGFunc: func() *core.SVG {
 					s.read()
@@ -134,23 +149,29 @@ func (s *State) treeHeader(cx *core.Scope, item func() directoryRow, brake *list
 						}
 						return contextualAffordance(cx, "directory-section", true)
 					}},
+				spacer(), unreadIndicator(),
 			}}
-		children := []core.Node{trigger}
-		if data.Section != "pinned" {
-			children = append(children, s.sessionFiltersButton(cx, data.Section))
-		}
+		children := []core.Node{trigger, s.sessionFiltersButton(cx, data.Section)}
 		return core.View{Style: core.Style{Group: "directory-section", Direction: core.Row, AlignItems: core.AlignCenter, Margin: core.Edges{Top: 8, Left: 8, Right: 12}}, Children: children}
 	}
 	menuOpen, tipOpen := core.NewSignal(cx, false), core.NewSignal(cx, false)
-	tip := tooltipCard(cx, s.groupInfo(cx, item))
-	tip.Open = func() bool { return tipOpen.Get() && !menuOpen.Get() }
-	tip.OnOpenChange = func(open bool, _ base.Reason) { tipOpen.Set(open && !menuOpen.GetUntracked()) }
+	actionsHover := core.NewSignal(cx, false)
+	tip := tooltipCard(cx, s.groupInfo(cx, item, true))
+	tip.Placement = core.PlaceRight
+	tip.Open = func() bool {
+		s.read()
+		return tipOpen.Get() && !menuOpen.Get() && !actionsHover.Get() && s.pinDrag == nil
+	}
+	tip.OnOpenChange = func(open bool, _ base.Reason) {
+		tipOpen.Set(open && !menuOpen.GetUntracked() && !actionsHover.GetUntracked())
+	}
 	trigger := core.View{TestID: data.ID, Role: core.RoleButton,
 		Expanded:  func() bool { s.read(); return !s.collapsed[key] },
-		LabelFunc: func() string { return item().Title + " · " + locales.For(cx).FilterMatches(fmt.Sprint(item().Count)) },
+		LabelFunc: func() string { return headerLabel() + " · " + locales.For(cx).FilterMatches(fmt.Sprint(item().Count)) },
 		OnPress: func(core.PressEvent) {
 			brake.action(func() { s.collapsed[key] = !s.collapsed[key]; s.saveSidebarPreferences() })()
-		}, Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 7, Padding: core.Symmetric(7, 5), MinHeight: core.Pt(34), MinWidth: core.Pt(0), CornerRadius: 7},
+		},
+		Style:     core.Style{Direction: core.Row, AlignItems: core.AlignCenter, FlexGrow: 1, FlexShrink: 1, Gap: 7, Padding: core.Edges{Top: 7, Bottom: 7, Left: 5, Right: 36}, MinHeight: core.Pt(34), MinWidth: core.Pt(0), CornerRadius: 7},
 		StyleFunc: func() core.Style { return pressStyle(cx) }, Tooltip: tip, Children: []core.Node{
 			core.Icon{TestID: data.ID + "-icon", SVGFunc: func() *core.SVG {
 				s.read()
@@ -166,18 +187,43 @@ func (s *State) treeHeader(cx *core.Scope, item func() directoryRow, brake *list
 					return lucide.FolderOpen()
 				}
 			}, Style: core.Style{Width: core.Pt(14), Height: core.Pt(14), FlexShrink: 0}, StyleFunc: func() core.Style {
-				s.read()
-				return core.Style{Color: choose(s.collapsed[key], palette(cx).mutedText, palette(cx).foreground)}
+				return core.Style{Color: palette(cx).foreground}
 			}},
 			singleLine(cx, func() string { return item().Title }, 12, true),
 		}}
+	status := core.View{PointerEvents: core.PointerEventsNone, Style: core.Style{Position: core.Absolute, Right: core.Pt(2), Top: core.Pt(0), Bottom: core.Pt(0), Width: core.Pt(30), AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter}, StyleFunc: func() core.Style {
+		if data.Kind == "project" && cx.Env().Desktop() {
+			hidden := &core.Style{Opacity: core.Alpha(0), PointerEvents: core.PointerEventsNone}
+			return core.Style{GroupStyle: &core.GroupStyle{Name: "directory-group", Hover: hidden, FocusWithin: hidden}}
+		}
+		return core.Style{}
+	}, Children: []core.Node{unreadIndicator()}}
+	var row core.Node = trigger
+	menu := []core.Node{s.groupInfo(cx, item, false)}
+	if data.Kind == "project" {
+		children := []core.Node{trigger, status}
+		create := func() { project := item(); s.openSessionCreation(&project) }
+		menu = append(menu, ui.MenuItem{TestID: "project-create-action", Text: locales.For(cx).NewSession(), Icon: lucide.SquarePen, OnSelect: create})
+		children = append(children, core.Show{When: func() bool { return cx.Env().Desktop() }, Then: func(cx *core.Scope) core.Node {
+			return core.View{TestID: "actions-" + data.ID, Style: core.Style{Position: core.Absolute, Top: core.Pt(0), Bottom: core.Pt(0), Right: core.Pt(2), JustifyContent: core.JustifyCenter},
+				OnMouseEnter: func(core.MouseEvent) { actionsHover.Set(true); tipOpen.Set(false) }, OnMouseLeave: func(core.MouseEvent) { actionsHover.Set(false) },
+				StyleFunc: func() core.Style { return contextualAffordance(cx, "directory-group", false) },
+				Children:  []core.Node{contextualIconButton(cx, "create-"+data.ID, locales.For(cx).NewSession(), lucide.SquarePen, create)}}
+		}})
+		row = core.View{Style: core.Style{Group: "directory-group", Direction: core.Row, AlignItems: core.AlignCenter, CornerRadius: 7, MinWidth: core.Pt(0)}, StyleFunc: func() core.Style {
+			return core.Style{Hover: &core.Style{Background: palette(cx).muted}}
+		}, Children: children}
+	} else {
+		trigger.Children = append(trigger.Children, status)
+		row = trigger
+	}
 	return core.View{Style: core.Style{Padding: core.Edges{Top: 2, Left: core.Points(8 + data.Depth*14), Right: 8}}, Children: []core.Node{
 		ui.ContextMenu{TestID: "menu-" + data.ID, Open: menuOpen.Get, OnOpenChange: func(open bool, _ base.Reason) {
 			menuOpen.Set(open)
 			if open {
 				tipOpen.Set(false)
 			}
-		}, Trigger: trigger, Children: []core.Node{s.groupInfo(cx, item)}},
+		}, Trigger: row, Children: menu},
 	}}
 
 }
@@ -186,6 +232,11 @@ func (s *State) sessionRow(cx *core.Scope, item func() directoryRow, brake *list
 	data := core.Untracked(cx, item)
 	ss := data.Session
 	id := sessionRowID(data.Section, ss)
+	ref := &core.Ref{}
+	var pan func(core.PanEvent)
+	if data.Section == "pinned" {
+		pan = s.pinnedPan(cx, ss, ref)
+	}
 	pin := core.NewMemo(cx, func() bool { s.read(); return s.pinned[sessionIdentity(item().Session)] != 0 })
 	selected := func() bool {
 		s.read()
@@ -195,14 +246,17 @@ func (s *State) sessionRow(cx *core.Scope, item func() directoryRow, brake *list
 	actionsHover := core.NewSignal(cx, false)
 	tipOpen := core.NewSignal(cx, false)
 	tip := s.sessionTooltip(cx, item)
-	tip.Open = func() bool { return tipOpen.Get() && !menuOpen.Get() && !actionsHover.Get() }
+	tip.Open = func() bool {
+		s.read()
+		return tipOpen.Get() && !menuOpen.Get() && !actionsHover.Get() && s.pinDrag == nil
+	}
 	tip.OnOpenChange = func(open bool, _ base.Reason) { tipOpen.Set(open && !menuOpen.GetUntracked()) }
 	return ui.ContextMenu{TestID: "menu-" + id, Open: menuOpen.Get, OnOpenChange: func(open bool, _ base.Reason) {
 		menuOpen.Set(open)
 		if open {
 			tipOpen.Set(false)
 		}
-	}, Children: []core.Node{core.Dynamic(func(cx *core.Scope) core.Node {
+	}, Children: []core.Node{s.pinOrderMenu(cx, item), core.Dynamic(func(cx *core.Scope) core.Node {
 		pinned := pin.Get()
 		return ui.MenuItem{TestID: "session-pin-action", Text: choose(pinned, locales.For(cx).UnpinSession(), locales.For(cx).PinSession()), Icon: choose(pinned, lucide.PinOff, lucide.Pin), OnSelect: func() { s.togglePinned(item().Session) }}
 	}), ui.MenuItem{TestID: "session-remove-action", Text: locales.For(cx).RemoveSession(), Icon: lucide.Archive, Variant: ui.MenuItemDanger, OnSelect: func() { s.requestSessionRemoval(item().Session) }}}, Trigger: core.View{Style: core.Style{Group: "session-row", Direction: core.Row, AlignItems: core.AlignCenter, Margin: core.Symmetric(2, 8), CornerRadius: 9, MinWidth: core.Pt(0)}, StyleFunc: func() core.Style {
@@ -212,10 +266,19 @@ func (s *State) sessionRow(cx *core.Scope, item func() directoryRow, brake *list
 		}
 		return st
 	}, Children: []core.Node{
-		core.View{TestID: id, Role: core.RoleButton, LabelFunc: func() string {
+		core.View{TestID: id, Ref: ref, OnPan: pan, PanActivation: core.PanActivation{ActiveOffsetY: 7, FailOffsetX: 50}, Role: core.RoleButton, LabelFunc: func() string {
 			v := item()
 			return v.Title + " · " + s.environmentName(str(v.Session, "deviceId")) + " · " + s.providerName(str(v.Session, "deviceId"), str(v.Session, "providerId")) + " · " + s.sessionStatusLabel(v.Session)
-		}, OnPress: func(core.PressEvent) { brake.action(func() { s.selectSession(item().Session) })() }, Style: core.Style{FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0), Padding: core.Edges{Top: 9, Bottom: 9, Left: 7, Right: 70}, Gap: 5, CornerRadius: 9}, StyleFunc: func() core.Style { return pressStyle(cx) }, Tooltip: tip, Children: []core.Node{
+		}, OnPress: func(core.PressEvent) { brake.action(func() { s.selectSession(item().Session) })() }, Style: core.Style{FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0), Padding: core.Edges{Top: 9, Bottom: 9, Left: 7, Right: 70}, Gap: 5, CornerRadius: 9}, StyleFunc: func() core.Style {
+			st := pressStyle(cx)
+			if data.Section == "pinned" && cx.Env().Desktop() {
+				s.read()
+				if s.pinDrag != nil && s.pinDrag.source == sessionIdentity(ss) {
+					st.Opacity = core.Alpha(.55)
+				}
+			}
+			return st
+		}, Tooltip: tip, Children: []core.Node{
 			singleLine(cx, func() string {
 				v := item().Title
 				if v == "" {
@@ -226,10 +289,11 @@ func (s *State) sessionRow(cx *core.Scope, item func() directoryRow, brake *list
 			row(glyph(cx, sessionIcon(ss), 12), singleLine(cx, func() string {
 				s.read()
 				v := item().Session
-				return s.environmentName(str(v, "deviceId")) + " · " + s.providerName(str(v, "deviceId"), str(v, "providerId"))
+				return s.environmentName(str(v, "deviceId"))
 			}, 11, true)),
 		}},
 		s.sessionStatusIndicator(cx, id, item),
+		s.pinnedDropMarker(cx, sessionIdentity(ss)),
 		core.Show{When: func() bool { return cx.Env().Desktop() }, Then: func(cx *core.Scope) core.Node {
 			return core.View{TestID: "actions-" + id, Style: core.Style{Position: core.Absolute, Top: core.Pt(4), Right: core.Pt(4), Direction: core.Row, AlignItems: core.AlignCenter, CornerRadius: 7},
 				OnMouseEnter: func(core.MouseEvent) { actionsHover.Set(true) }, OnMouseLeave: func(core.MouseEvent) { actionsHover.Set(false) },

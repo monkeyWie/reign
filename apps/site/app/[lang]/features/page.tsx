@@ -164,15 +164,9 @@ export default async function Features({
             {[
               [
                 Terminal,
-                "Codex App",
+                "Codex",
                 t("桌面与远端，共享同一段对话"),
-                "/docs/agents/codex-app",
-              ],
-              [
-                Code2,
-                "Codex CLI",
-                t("从终端到手机，项目上下文随行"),
-                "/docs/agents/codex-cli",
+                "/docs/agents/codex",
               ],
               [
                 Layers3,

@@ -97,7 +97,7 @@ func TestConversationToolbarDetailsPreserveWorkspace(t *testing.T) {
 	}
 	app.Find("id:connection-status-remote")
 	app.Press("id:back-sessions")
-	localSession := "id:" + sessionRowID("pinned", Object{"deviceId": "local", "providerId": "codex-cli", "id": "design"})
+	localSession := "id:" + sessionRowID("pinned", Object{"deviceId": "local", "providerId": "pi", "id": "design"})
 	app.WaitFor(localSession, time.Second)
 	app.Press(localSession)
 	app.WaitFor("id:conversation-header-fade", time.Second)

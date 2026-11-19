@@ -2,6 +2,7 @@ package hubui
 
 import (
 	"context"
+	"errors"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -92,7 +93,7 @@ func TestAndroidTaskCompletesAfterSwitchingChats(t *testing.T) {
 	app.WaitUntil(time.Second, func() bool { return status() == "inProgress" })
 	before := f.stateReads.Load()
 	app.Press("id:back-sessions")
-	app.Press(sessionSelector("demo-device", "codex-cli", "demo-cli"))
+	app.Press(sessionSelector("demo-device", "pi", "demo-pi"))
 	app.WaitUntil(time.Second, func() bool { return f.stateReads.Load() > before })
 	historyReads := f.monitorReads.Load()
 	for range 3 {
@@ -144,14 +145,44 @@ func TestAndroidForegroundServiceRetainsStreamsOnBackground(t *testing.T) {
 	if f.watchStarts.Load() != before || f.reconnects.Load() != 0 || app.Find("id:chat-input").Text != "保留后台草稿" {
 		t.Fatal("resume replaced a healthy connection or draft")
 	}
-	// Losing the native service must fall back to the normal safe suspend /
-	// resync behavior, rather than claiming background protection still exists.
+	// Losing foreground-service protection does not stop synchronization while
+	// the OS still lets this process run. Recovery belongs to actual failures.
 	env.Lifecycle = core.LifecycleBackground
 	app.SetEnvironment(env)
 	if err := host.Send("ras.background-state", Object{"running": false}); err != nil {
 		t.Fatal(err)
 	}
-	app.WaitUntil(time.Second, func() bool { return f.watchCancels.Load() > 0 })
+	app.Settle()
+	if f.watchCancels.Load() != 0 || f.watchStarts.Load() != before {
+		t.Fatal("foreground-service loss interrupted a healthy watch")
+	}
+}
+
+func TestAndroidForegroundServiceDenialKeepsSynchronization(t *testing.T) {
+	if isWeb() || nsgotest.Target() != "" {
+		t.Skip("requires native host lifecycle injection")
+	}
+	f := &connectionFixture{demoAPI: newDemoAPI()}
+	f.blockWatch.Store(true)
+	host := core.NewHost()
+	var attempts atomic.Int32
+	host.Handle("ras.background", func(call *core.HostCall) {
+		attempts.Add(1)
+		call.Reject(errors.New("foreground service unavailable"))
+	})
+	env := core.Environment{OS: core.OSAndroid, Idiom: core.IdiomPhone}
+	app := nsgotest.Start(t, func(cx *core.Scope) core.Node { return RootWithAPI(cx, f, true) }, nsgotest.Size(390, 844), nsgotest.Environment(env), nsgotest.Host(host))
+	openDemoChat(t, app)
+	app.WaitUntil(time.Second, func() bool { return attempts.Load() > 0 && f.watchStarts.Load() > 0 })
+	env.Lifecycle = core.LifecycleBackground
+	app.SetEnvironment(env)
+	f.version.Store(1)
+	env.Lifecycle = core.LifecycleActive
+	app.SetEnvironment(env)
+	app.WaitFor("id:message-resumed|latest", 2*time.Second)
+	if f.watchCancels.Load() != 0 || f.reconnects.Load() != 0 || f.sends.Load() != 0 {
+		t.Fatal("denied foreground service cancelled synchronization or replayed a command")
+	}
 }
 
 func TestAndroidTaskStatusIgnoresHistoricalCompletions(t *testing.T) {

@@ -133,6 +133,83 @@ func TestLiveTextDoesNotWaitForSnapshotsOrApprovals(t *testing.T) {
 	app.Screenshot("sync-complete-live-reply")
 }
 
+func TestRunningOwnerReplacesTerminalCacheBeforeCompletion(t *testing.T) {
+	for _, fromSnapshot := range []bool{true, false} {
+		t.Run(choose(fromSnapshot, "snapshot", "turn-event"), func(t *testing.T) {
+			f := &independentStreamAPI{demoAPI: newDemoAPI(), snapshots: make(chan snapshotRequest, 4), events: make(chan Object, 8), approvalsStarted: make(chan struct{})}
+			cached := Object{"turns": []Object{{"id": "reply", "status": "completed", "items": []Object{
+				{"id": "question", "role": "assistant", "phase": "final_answer", "text": "选择一个方案"},
+				{"id": "steer", "role": "user", "text": "继续处理"},
+			}}}}
+			if !fromSnapshot {
+				cached["resume"] = Object{"epoch": "live", "cursor": 1}
+			}
+			app, s := conversationFixture(t, f, 390, cached, true)
+			app.Post(func() { s.cx.Post(s.startSessionWatch) })
+			if fromSnapshot {
+				app.WaitUntil(time.Second, func() bool { return len(f.snapshots) > 0 })
+				request := <-f.snapshots
+				request.reply <- Object{"streamEpoch": "live", "streamCursor": 0, "turns": []Object{{"id": "reply", "status": "inProgress", "items": []Object{
+					{"id": "question", "role": "assistant", "phase": "final_answer", "text": "选择一个方案"},
+					{"id": "steer", "role": "user", "text": "继续处理"},
+					{"id": "progress", "role": "assistant", "phase": "commentary", "status": "inProgress", "text": "开始检查"},
+				}}}}
+			} else {
+				f.events <- Object{"epoch": "live", "cursor": 3, "events": []Object{
+					{"id": 2, "kind": "turn", "turnId": "reply", "status": "inProgress"},
+					{"id": 3, "kind": "item", "turnId": "reply", "itemId": "progress", "item": Object{"id": "progress", "role": "assistant", "phase": "commentary", "status": "inProgress", "text": "开始检查"}},
+				}}
+			}
+			app.WaitFor("text:开始检查", time.Second)
+			if activeTurn(s.transcript) == nil {
+				t.Fatal("current owner could not restore the running turn")
+			}
+			f.events <- Object{"epoch": "live", "cursor": 4, "events": []Object{{"id": 4, "kind": "text", "turnId": "reply", "itemId": "progress", "offset": 4, "delta": "，仍在执行🙂"}}}
+			waitAnimatedText(app, "开始检查，仍在执行🙂", time.Second)
+			app.Find("text:继续处理")
+			for _, row := range s.messageRows {
+				if row.Role == "work" {
+					t.Fatal("running messages were folded as completed work")
+				}
+			}
+			app.Screenshot("running-owner-restored-" + choose(fromSnapshot, "snapshot", "event"))
+		})
+	}
+}
+
+func TestDelayedRunningSnapshotReplaysCompletionBeforeMerging(t *testing.T) {
+	f := &independentStreamAPI{demoAPI: newDemoAPI(), snapshots: make(chan snapshotRequest, 4), events: make(chan Object, 8), approvalsStarted: make(chan struct{})}
+	cached := Object{"resume": Object{"epoch": "live", "cursor": 1}, "turns": []Object{{"id": "reply", "status": "inProgress", "items": []Object{{"id": "answer", "role": "assistant", "text": "尚未完成"}}}}}
+	app, s := conversationFixture(t, f, 390, cached, true)
+	app.Post(func() { s.cx.Post(s.startSessionWatch) })
+	app.WaitUntil(time.Second, func() bool { app.Settle(); return s.stream != nil && s.stream.baseline })
+	f.events <- Object{"epoch": "live", "cursor": 2, "events": []Object{{"id": 2, "kind": "snapshot"}}}
+	app.WaitUntil(time.Second, func() bool { return len(f.snapshots) > 0 })
+	request := <-f.snapshots
+	f.events <- Object{"epoch": "live", "cursor": 4, "events": []Object{
+		{"id": 3, "kind": "item", "turnId": "reply", "itemId": "answer", "item": Object{"id": "answer", "role": "assistant", "status": "completed", "text": "最终结果"}},
+		{"id": 4, "kind": "turn", "turnId": "reply", "status": "completed"},
+	}}
+	app.WaitFor("text:最终结果", time.Second)
+	// This response was captured before completion, but arrives after it.
+	request.reply <- Object{"streamEpoch": "live", "streamCursor": 2, "turns": objects(cached["turns"])}
+	// Completion requests one authoritative reconciliation after the old read.
+	app.WaitUntil(time.Second, func() bool { return len(f.snapshots) > 0 })
+	app.Find("text:最终结果")
+	if activeTurn(s.transcript) != nil {
+		t.Fatal("late history resurrected a completed turn")
+	}
+	final := <-f.snapshots
+	final.reply <- Object{"streamEpoch": "live", "streamCursor": 4, "turns": []Object{{"id": "reply", "status": "completed", "items": []Object{{"id": "answer", "role": "assistant", "status": "completed", "text": "最终结果"}}}}}
+	app.WaitUntil(time.Second, func() bool { app.Settle(); return !s.stream.snapshotInFlight && s.streamCursor == 4 })
+	f.events <- Object{"epoch": "live", "cursor": 5, "events": []Object{{"id": 5, "kind": "text", "turnId": "reply", "itemId": "answer", "offset": 4, "delta": "过期片段"}}}
+	app.WaitUntil(time.Second, func() bool { app.Settle(); return s.streamCursor == 5 })
+	app.Find("text:最终结果")
+	if activeTurn(s.transcript) != nil || app.Exists("text:最终结果过期片段") {
+		t.Fatal("late delta resurrected a completed reply")
+	}
+}
+
 func TestFirstHistoryDisplaysMessagesBeforeTheFinalResponse(t *testing.T) {
 	f := &independentStreamAPI{demoAPI: newDemoAPI(), snapshots: make(chan snapshotRequest, 4), events: make(chan Object, 8), approvalsStarted: make(chan struct{})}
 	app, s := conversationFixture(t, f, 390, Object{}, true)
@@ -315,12 +392,17 @@ func TestSavedSessionCursorResumesWithMatchingContent(t *testing.T) {
 	cached := Object{"resume": Object{"epoch": "live", "cursor": int64(10)}, "turns": []Object{{"id": "reply", "status": "inProgress", "items": []Object{{"id": "answer", "type": "agentMessage", "role": "assistant", "text": "saved"}}}}}
 	app, s := conversationFixture(t, f, 390, cached, true)
 	app.Post(func() { s.cx.Post(s.startSessionWatch) })
-	app.WaitUntil(time.Second, func() bool { return s.stream != nil && s.stream.baseline })
-	if f.reads.Load() != 0 {
-		t.Fatal("saved baseline refetched full history")
+	app.WaitUntil(time.Second, func() bool { return s.stream != nil && s.stream.baseline && len(f.snapshots) > 0 })
+	if f.reads.Load() != 1 || app.Exists("id:transcript-syncing") {
+		t.Fatal("saved baseline must remain readable during one independent revalidation")
 	}
+	request := <-f.snapshots
 	f.events <- Object{"epoch": "live", "cursor": int64(11), "events": []Object{{"id": int64(11), "kind": "text", "sessionId": "demo-chat", "turnId": "reply", "itemId": "answer", "offset": 5, "delta": " tail"}}}
-	app.WaitUntil(time.Second, func() bool { return s.streamCursor == 11 })
+	waitAnimatedText(app, "saved tail", time.Second)
+	// The independent read predates the delta. Preserve it by replaying the
+	// journal, then checkpoint matching content/cursor only after completion.
+	request.reply <- Object{"streamEpoch": "live", "streamCursor": int64(10), "turns": objects(cached["turns"])}
+	app.WaitUntil(time.Second, func() bool { return s.streamCursor == 11 && !s.stream.snapshotInFlight })
 	completed := make(chan struct{}, 1)
 	app.Post(func() {
 		s.cx.Post(func() {

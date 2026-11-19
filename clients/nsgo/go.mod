@@ -6,7 +6,7 @@ require (
 	github.com/coder/websocket v1.8.15
 	github.com/liyue201/goqr v0.0.0-20200803022322-df443203d4ea
 	github.com/monkeyWie/reignhub v0.0.0
-	github.com/nsgo-dev/nsgo v0.1.1-0.20261117035253-7774099b6513
+	github.com/nsgo-dev/nsgo v0.2.0
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	go.yaml.in/yaml/v3 v3.0.6
 	golang.org/x/sync v0.25.0

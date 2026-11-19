@@ -100,12 +100,12 @@ func TestAttachmentCardsSeparatePreviewDownloadAndUnsupportedFiles(t *testing.T)
 	}
 	app.Post(func() {
 		s.cx.Post(func() {
-			s.openLink(s.cx, Message{Attachments: []Object{{"id": "2", "kind": "file", "source": "attachment://file"}}}, "attachment://file")
+			s.openLink(s.cx, Message{Attachments: []Object{{"id": "2", "kind": "file", "source": "attachment://file", "state": "ready", "name": "file"}}}, "attachment://file")
 		})
 	})
 	app.Settle()
-	if app.Exists("id:attachment-download") {
-		t.Fatal("an attachment link bypassed the download icon")
+	if !app.Exists("id:attachment-download") {
+		t.Fatal("explicit remote attachment link did not start download")
 	}
 }
 

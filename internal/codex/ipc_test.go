@@ -51,6 +51,7 @@ func attachIPCFixture(t *testing.T, p *Provider, callback func(codexipc.Message)
 	t.Helper()
 	b := newAppIPC(p)
 	b.home = t.TempDir()
+	b.queueFiles = nil
 	p.ipc = b
 	a, wire := net.Pipe()
 	f := &ipcFixture{t: t, b: b, wire: wire, callback: callback}
@@ -98,8 +99,11 @@ func attachIPCFixture(t *testing.T, p *Provider, callback func(codexipc.Message)
 	t.Cleanup(func() { _ = p.Close(); _ = wire.Close() })
 	return f
 }
-func (f *ipcFixture) snapshot(id string, revision int64, text string) {
+func (f *ipcFixture) snapshot(id string, revision int64, text string, source ...string) {
 	state := map[string]any{"id": id, "title": "App session", "cwd": "/project", "latestModel": "native", "historyMode": "paginated", "turnHistory": map[string]any{"kind": "canonical", "history": map[string]any{"isComplete": true, "entitiesByKey": map[string]any{"turn:t": map[string]any{"turnId": "t", "status": "inProgress", "items": []any{map[string]any{"id": "a", "type": "agentMessage", "text": text}}}}, "islands": []any{map[string]any{"entries": []any{map[string]any{"key": "turn:t", "value": "turn:t"}}}}}}, "requests": []any{}}
+	if len(source) == 2 {
+		state["source"], state["originator"] = source[0], source[1]
+	}
 	f.send(codexipc.Message{Type: "broadcast", Method: "thread-stream-state-changed", Source: "app-owner", Version: 11, Params: rawJSON(map[string]any{"hostId": "local", "conversationId": id, "change": map[string]any{"type": "snapshot", "revision": revision, "conversationState": state}})})
 }
 func backendFixture(t *testing.T, p *Provider, handle func(rpc.Message) (any, *rpc.Error)) {
@@ -144,38 +148,48 @@ func backendFixture(t *testing.T, p *Provider, handle func(rpc.Message) (any, *r
 	p.client = c
 	t.Cleanup(func() { _ = c.Close(); server.Close() })
 }
-func TestIPCAppSendAndWatchNeverResumeExternalThread(t *testing.T) {
-	p := New(config.Config{}, "", events.New())
-	backendFixture(t, p, func(m rpc.Message) (any, *rpc.Error) {
-		t.Errorf("external thread reached private backend: %s", m.Method)
-		return nil, nil
-	})
-	var f *ipcFixture
-	f = attachIPCFixture(t, p, func(m codexipc.Message) (codexipc.Message, bool) {
-		if m.Method == "thread-stream-following-changed" {
-			go f.snapshot("external", 1, "hello")
-		}
-		return codexipc.Message{}, false
-	})
-	ctx, stop := context.WithTimeout(context.Background(), 4*time.Second)
-	defer stop()
-	if _, err := p.Probe(ctx, "external", "", 0); err != nil {
-		t.Fatal(err)
-	}
-	if err := p.Send(ctx, "external", "continue"); err != nil {
-		t.Fatal(err)
-	}
-	out, err := p.Transcript(ctx, "external", "")
-	if err != nil || len(out.Turns) != 1 || out.Turns[0].Items[0].Text != "hello" {
-		t.Fatalf("IPC transcript: %+v %v", out, err)
-	}
-	f.mu.Lock()
-	methods := strings.Join(f.methods, ",")
-	f.mu.Unlock()
-	if !strings.Contains(methods, "thread-follower-start-turn") {
-		t.Fatal(methods)
+func TestIPCSharedCodexRoutesSourcesToCurrentOwner(t *testing.T) {
+	for _, tc := range []struct{ source, originator, kind string }{
+		{"vscode", "Codex Desktop", "app"}, {"cli", "codex-tui", "cli"}, {"vscode", "codex_vscode", "vscode"},
+	} {
+		t.Run(tc.kind, func(t *testing.T) {
+			p := New(config.Config{}, "", events.New())
+			backendFixture(t, p, func(m rpc.Message) (any, *rpc.Error) {
+				if m.Method == "thread/queue/list" {
+					return nil, &rpc.Error{Code: -32601, Message: "Unsupported method"}
+				}
+				t.Errorf("external thread reached private backend: %s", m.Method)
+				return nil, nil
+			})
+			var f *ipcFixture
+			f = attachIPCFixture(t, p, func(m codexipc.Message) (codexipc.Message, bool) {
+				if m.Method == "thread-stream-following-changed" {
+					go f.snapshot("external", 1, "hello", tc.source, tc.originator)
+				}
+				return codexipc.Message{}, false
+			})
+			ctx, stop := context.WithTimeout(context.Background(), 4*time.Second)
+			defer stop()
+			if _, err := p.Probe(ctx, "external", "", 0); err != nil {
+				t.Fatal(err)
+			}
+			if err := p.Send(ctx, "external", "continue"); err != nil {
+				t.Fatal(err)
+			}
+			out, err := p.Transcript(ctx, "external", "")
+			if err != nil || len(out.Turns) != 1 || out.Turns[0].Items[0].Text != "hello" || out.Session.ProviderID != "codex-app" || out.Session.SourceKind != tc.kind {
+				t.Fatalf("IPC transcript: %+v %v", out, err)
+			}
+			f.mu.Lock()
+			methods := strings.Join(f.methods, ",")
+			f.mu.Unlock()
+			if !strings.Contains(methods, "thread-follower-start-turn") {
+				t.Fatal(methods)
+			}
+		})
 	}
 }
+
 func TestIPCUnknownSendOutcomeDoesNotFallbackOrReplay(t *testing.T) {
 	p := New(config.Config{}, "", events.New())
 	backendFixture(t, p, func(m rpc.Message) (any, *rpc.Error) { t.Errorf("unsafe fallback: %s", m.Method); return nil, nil })
@@ -231,8 +245,8 @@ func TestIPCSnapshotRejectsWrongOwnerAndUnknownVersion(t *testing.T) {
 		t.Fatal("supported snapshot failed")
 	}
 	b.Broadcast(message("owner", 11, 1))
-	if b.followed["s"].revision != 2 {
-		t.Fatal("old snapshot rolled state back")
+	if b.followed["s"].revision != 1 {
+		t.Fatal("owner snapshot did not establish its new revision base")
 	}
 }
 func TestIPCPatchesUnicodeAndTransactionalRecovery(t *testing.T) {

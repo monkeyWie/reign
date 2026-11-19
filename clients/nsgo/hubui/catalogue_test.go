@@ -16,6 +16,7 @@ type lazyCatalogueAPI struct {
 	*demoAPI
 	release                    chan struct{}
 	syncs, transcripts, models atomic.Int32
+	unrelatedTranscript        atomic.Bool
 }
 
 type refreshCatalogueAPI struct {
@@ -191,6 +192,9 @@ func (f *lazyCatalogueAPI) Call(ctx context.Context, method string, p Object, ta
 		switch str(r, "method") {
 		case "transcript":
 			f.transcripts.Add(1)
+			if str(r, "session") != "demo-chat" {
+				f.unrelatedTranscript.Store(true)
+			}
 		case "models":
 			f.models.Add(1)
 		case "watch":
@@ -209,18 +213,20 @@ func TestColdCatalogueIsUsableBeforeFullScanAndMessagesLoadOnOpen(t *testing.T) 
 	app.WaitFor("id:device-demo-device", time.Second)
 	app.WaitFor(sessionSelector("demo-device", "codex-app", "demo-chat"), time.Second)
 	// A different provider must remain usable while the App directory is blocked.
-	app.WaitFor(sessionSelector("demo-device", "codex-cli", "demo-cli"), time.Second)
+	app.WaitFor(sessionSelector("demo-device", "pi", "demo-pi"), time.Second)
 	app.WaitUntil(time.Second, func() bool { return f.syncs.Load() > 0 })
 	if f.transcripts.Load() != 0 || f.models.Load() != 0 {
 		t.Fatal("opening a device eagerly loaded messages/models")
 	}
 	app.Press(sessionSelector("demo-device", "codex-app", "demo-chat"))
-	app.WaitUntil(time.Second, func() bool { return f.transcripts.Load() == 1 })
+	app.WaitUntil(time.Second, func() bool { return f.transcripts.Load() > 0 })
 	app.WaitFor("id:message-demo-turn|demo-assistant", time.Second)
 	close(f.release)
 	app.Press("id:back-sessions")
 	app.WaitFor(sessionSelector("demo-device", "codex-app", "older-chat"), time.Second)
-	if f.transcripts.Load() != 1 {
+	// The independent history read may finish before the live join and need
+	// one reconciliation. Check which session was read, not that scheduling.
+	if f.unrelatedTranscript.Load() {
 		t.Fatal("directory completion loaded unrelated transcripts")
 	}
 }
@@ -264,8 +270,8 @@ func TestBackFromStalledHistoryPreservesCatalogueAcrossDiscoveryFailure(t *testi
 
 type unavailableCatalogueAPI struct {
 	*demoAPI
-	ready              atomic.Bool
-	cliReads, appSyncs atomic.Int32
+	ready             atomic.Bool
+	piReads, appSyncs atomic.Int32
 }
 
 func (f *unavailableCatalogueAPI) Call(ctx context.Context, method string, p Object, target string, r Object) (any, error) {
@@ -273,15 +279,15 @@ func (f *unavailableCatalogueAPI) Call(ctx context.Context, method string, p Obj
 		providers := demoProviders()
 		if !f.ready.Load() {
 			providers[1]["state"] = "unavailable"
-			providers[1]["detail"] = "CLI background is not running"
+			providers[1]["detail"] = "Pi is not ready"
 		}
 		return providers, nil
 	}
 	if method == "client.sync" && str(p, "provider") == "codex-app" {
 		f.appSyncs.Add(1)
 	}
-	if method == "client.sync" && str(p, "provider") == "codex-cli" || method == "client.call" && str(r, "method") == "sessions" && str(r, "provider") == "codex-cli" {
-		f.cliReads.Add(1)
+	if method == "client.sync" && str(p, "provider") == "pi" || method == "client.call" && str(r, "method") == "sessions" && str(r, "provider") == "pi" {
+		f.piReads.Add(1)
 		if !f.ready.Load() {
 			return nil, errors.New("Agent is not ready")
 		}
@@ -304,7 +310,7 @@ func TestCatalogueSkipsUnavailableHistoryProviderAndResumesWhenReady(t *testing.
 				s.target = "demo-device"
 				s.devices = []Object{{"id": s.target, "connected": true}}
 				if cached {
-					s.sessions = []Object{{"id": "demo-cli", "providerId": "codex-cli", "title": "Cached CLI conversation"}}
+					s.sessions = []Object{{"id": "demo-pi", "providerId": "pi", "title": "Cached Pi conversation"}}
 				}
 				return s.directory(cx)
 			}, nsgotest.Size(390, 844))
@@ -325,23 +331,23 @@ func TestCatalogueSkipsUnavailableHistoryProviderAndResumesWhenReady(t *testing.
 			}
 			refresh(1)
 			app.WaitFor(sessionSelector("demo-device", "codex-app", "demo-chat"), time.Second)
-			if f.cliReads.Load() != 0 {
+			if f.piReads.Load() != 0 {
 				t.Fatal("unavailable history provider received directory requests")
 			}
 			if cached {
-				app.WaitFor(sessionSelector("demo-device", "codex-cli", "demo-cli"), time.Second)
+				app.WaitFor(sessionSelector("demo-device", "pi", "demo-pi"), time.Second)
 			}
 			f.ready.Store(true)
 			refresh(2)
-			app.WaitFor(sessionSelector("demo-device", "codex-cli", "demo-cli"), time.Second)
-			if f.cliReads.Load() == 0 {
+			app.WaitFor(sessionSelector("demo-device", "pi", "demo-pi"), time.Second)
+			if f.piReads.Load() == 0 {
 				t.Fatal("provider did not resume synchronization after becoming ready")
 			}
-			reads := f.cliReads.Load()
+			reads := f.piReads.Load()
 			f.ready.Store(false)
 			refresh(3)
-			app.WaitFor(sessionSelector("demo-device", "codex-cli", "demo-cli"), time.Second)
-			if f.cliReads.Load() != reads {
+			app.WaitFor(sessionSelector("demo-device", "pi", "demo-pi"), time.Second)
+			if f.piReads.Load() != reads {
 				t.Fatal("provider becoming unavailable restarted rejected reads")
 			}
 		})

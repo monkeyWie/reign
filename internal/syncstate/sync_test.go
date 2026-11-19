@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -34,6 +35,13 @@ func TestProjectDirectoryMatchesFirstPageAndIncrementalCatalogue(t *testing.T) {
 	defer db.Close()
 	index := &Index{DB: db, Epoch: "epoch"}
 	cwd, project := t.TempDir(), t.TempDir()
+	git := filepath.Join(cwd, ".git")
+	if err := os.MkdirAll(git, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(git, "HEAD"), []byte("ref: refs/heads/main\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	p := &projectProvider{session: provider.Session{ID: "thread", ProviderID: "any-agent", CWD: cwd, Project: &provider.Project{ID: "native", Root: project}}}
 	dispatcher := &control.Dispatcher{Providers: map[string]provider.Provider{"any-agent": p}}
 	response := dispatcher.Handle(context.Background(), control.Request{Method: "sessions", Provider: "any-agent"})
@@ -49,6 +57,9 @@ func TestProjectDirectoryMatchesFirstPageAndIncrementalCatalogue(t *testing.T) {
 	if json.Unmarshal(delta.Items[0], &synced) != nil || synced.ProjectDir != page.Sessions[0].ProjectDir || synced.ProjectDir != workspace.CanonicalPath(project) || synced.CWD != cwd {
 		t.Fatal("first metadata page and catalogue disagree", synced, page)
 	}
+	if synced.GitInfo == nil || page.Sessions[0].GitInfo == nil || *synced.GitInfo != *page.Sessions[0].GitInfo || synced.GitInfo.Branch != "main" {
+		t.Fatal("first page and sync lost checkout metadata", synced, page)
+	}
 	unchanged, err := index.Sync(context.Background(), p, "any-agent", index.Epoch, delta.Cursor)
 	if err != nil || unchanged.Reset || len(unchanged.Changes) != 0 {
 		t.Fatal("unchanged project caused extra sync traffic", unchanged, err)
@@ -56,12 +67,18 @@ func TestProjectDirectoryMatchesFirstPageAndIncrementalCatalogue(t *testing.T) {
 	// A native reassignment must flow through the incremental cache even when
 	// the conversation has not received any new messages.
 	p.session.Project = &provider.Project{ID: "standalone-worktree", Root: cwd}
+	if err := os.WriteFile(filepath.Join(git, "HEAD"), []byte("ref: refs/heads/feature/hover\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	changed, err := index.Sync(context.Background(), p, "any-agent", index.Epoch, unchanged.Cursor)
 	if err != nil || changed.Reset || len(changed.Changes) != 1 {
 		t.Fatal("project reassignment was not delivered incrementally", changed, err)
 	}
 	if json.Unmarshal(changed.Changes[0].Value, &synced) != nil || synced.ProjectDir != workspace.CanonicalPath(cwd) || synced.CWD != cwd {
 		t.Fatal("lost worktree project reassignment", synced)
+	}
+	if synced.GitInfo == nil || synced.GitInfo.Branch != "feature/hover" {
+		t.Fatal("branch switch was not delivered", synced)
 	}
 }
 

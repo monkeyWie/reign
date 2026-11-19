@@ -25,6 +25,7 @@ type sessionStream struct {
 	historyRetry                          readretry.Backoff
 	historyRetryVersion                   uint64
 	nextSnapshot                          time.Time
+	verified                              bool
 	historyError                          error
 }
 
@@ -67,6 +68,7 @@ func (w *sessionStream) refreshSnapshot() {
 	}
 	w.startSnapshot()
 }
+
 func (w *sessionStream) startSnapshot() {
 	if !w.current() || w.snapshotInFlight || time.Now().Before(w.nextSnapshot) {
 		return
@@ -136,6 +138,7 @@ func (w *sessionStream) startSnapshot() {
 				w.startSnapshot()
 				return
 			}
+			w.verified = true
 			// History is readable even if the live subscription has not joined yet.
 			// Its event boundary can establish the initial baseline independently.
 			if w.epoch == "" {
@@ -307,6 +310,10 @@ func (w *sessionStream) run(epoch string, cursor int64) {
 					w.batch(object(v))
 				} else if !w.snapshotInFlight {
 					w.syncing(false)
+					// A broken subscription must not hide readable persisted
+					// history. Recovery follows the watch's existing error backoff;
+					// healthy heartbeats never trigger periodic history downloads.
+					w.startSnapshot()
 				}
 				w.s.changed()
 			}

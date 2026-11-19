@@ -42,47 +42,49 @@ func (p *Provider) Probe(ctx context.Context, session, epoch string, after int64
 }
 func (p *Provider) watch(ctx context.Context, session, epoch string, after int64, probe bool) (provider.StreamBatch, error) {
 	log := p.stream().log
-	if b := p.appBridge(); b != nil {
-		b.mu.Lock()
-		f := b.followed[session]
-		repair := f != nil && (f.err != nil || f.owner == "" || len(f.state) == 0)
-		b.mu.Unlock()
-		if repair && !b.owns(session) {
-			owner, err := b.follow(ctx, session)
-			if err != nil {
-				return provider.StreamBatch{}, err
-			}
-			if owner == "" {
-				return provider.StreamBatch{}, provider.ErrUnavailable
-			}
-			if _, err = b.waitState(ctx, session, owner); err != nil {
-				return provider.StreamBatch{}, err
-			}
-		}
-	}
-	// Check the boundary without waiting before rejoining a replaced subscription.
+	// A replay cursor describes buffered events, not the lifetime of the
+	// upstream subscription. History may supply it before the first follow.
 	batch, err := log.Probe(ctx, session, epoch, after)
 	if err != nil {
 		return batch, err
 	}
-	if batch.Reset {
-		if b := p.appBridge(); b != nil {
+	if b := p.appBridge(); b != nil {
+		if err := b.refreshFollower(ctx, session); err != nil {
+			return provider.StreamBatch{}, err
+		}
+		b.mu.Lock()
+		f := b.followed[session]
+		repair := f == nil || f.err != nil || f.owner == "" || len(f.state) == 0
+		if f != nil {
+			// Opening a sidebar-followed thread retains its subscription even
+			// when directory cleanup observes a released writer lock.
+			f.directory = false
+		}
+		b.mu.Unlock()
+		if (repair || batch.Reset) && !b.owns(session) {
 			owner, err := b.follow(ctx, session)
 			if err != nil {
 				return provider.StreamBatch{}, err
+			}
+			if owner == "" && repair && f != nil {
+				return provider.StreamBatch{}, provider.ErrUnavailable
 			}
 			if owner != "" {
 				if _, err = b.waitState(ctx, session, owner); err != nil {
 					return provider.StreamBatch{}, err
 				}
 			}
-		} else if _, err := p.threadClient(ctx, session); err != nil {
+		}
+	} else if batch.Reset {
+		if _, err := p.threadClient(ctx, session); err != nil {
 			return provider.StreamBatch{}, err
 		}
+	}
+	if batch.Reset {
 		return log.Probe(ctx, session, "", 0)
 	}
 	if probe {
-		return batch, nil
+		return log.Probe(ctx, session, epoch, after)
 	}
 	return log.Watch(ctx, session, epoch, after)
 }
@@ -96,6 +98,10 @@ func utf16Length(s string) int {
 }
 
 func (p *Provider) observeStream(m rpc.Message) {
+	if m.Method == "thread/queue/changed" {
+		p.serverQueueChanged(m.Params)
+		return
+	}
 	// Only forward an explicit presentation allowlist. In particular, raw
 	// reasoning deltas, command output and tool arguments never enter this log.
 	switch m.Method {

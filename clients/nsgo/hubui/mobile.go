@@ -49,6 +49,8 @@ func (s *State) showPhoneChat() {
 	}
 }
 func (s *State) backSessions() {
+	s.restoreSession = nil
+	s.persistDraft()
 	s.rememberDraft()
 	s.narrowChat = false
 	if s.phoneNav != nil {

@@ -19,6 +19,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/monkeyWie/reignhub/clients/nsgo/hubui/locales"
+	"github.com/monkeyWie/reignhub/pkg/filelink"
 	"github.com/nsgo-dev/nsgo/core"
 	"github.com/nsgo-dev/nsgo/i18n"
 	"github.com/nsgo-dev/nsgo/icons/lucide"
@@ -99,7 +100,7 @@ func (s *State) drop(cx *core.Scope, uris []string) {
 	}
 }
 func (s *State) addUpload(name, mime string, data []byte) {
-	if s.selected == nil || !s.connected() {
+	if s.selected == nil || !s.connected() || !s.draftReady() {
 		return
 	}
 	capabilities := s.agentCapabilities()
@@ -127,6 +128,7 @@ func (s *State) addUpload(name, mime string, data []byte) {
 	}
 	u := &Upload{Name: name, MIME: mime, Data: data, Status: "queued", Target: s.target, Provider: str(s.selected, "providerId"), Session: str(s.selected, "id")}
 	s.uploads = append(s.uploads, u)
+	s.persistDraft()
 	s.changed()
 	s.upload(u)
 }
@@ -287,13 +289,24 @@ func (s *State) uploadPreviews(cx *core.Scope) core.Node {
 					break
 				}
 			}
+			s.persistDraft()
 			s.changed()
 		}
 		// Bytes and metadata are immutable for this keyed upload. Only progress
 		// changes; remounting the image on every poll restarts native decoding.
 		var tile core.Node = chat.Attachment{Label: u.Name, Detail: fmt.Sprintf("%.1f KB", float64(len(u.Data))/1024), RemoveLabel: locales.For(cx).RemoveAttachment(), OnRemove: remove}
 		if strings.HasPrefix(u.MIME, "image/") || strings.HasSuffix(strings.ToLower(u.Name), ".png") || strings.HasSuffix(strings.ToLower(u.Name), ".jpg") {
-			tile = chat.AttachmentPreview{Label: u.Name, Image: core.ImageSource{Data: u.Data}, RemoveLabel: locales.For(cx).RemoveAttachment(), OnRemove: remove}
+			preview := core.View{TestID: "preview-upload-" + u.Name, Role: core.RoleButton, Label: "预览图片 " + u.Name, OnPress: func(core.PressEvent) { s.previewDraftImage(u) }, Style: core.Style{Width: core.Pt(64), Height: core.Pt(64), CornerRadius: 8, Overflow: core.Hidden}, StyleFunc: func() core.Style { return pressStyle(cx) }, Children: []core.Node{chat.AttachmentPreview{Label: u.Name, Image: core.ImageSource{Data: u.Data}}}}
+			removeButton := contextualIconButton(cx, "remove-upload-"+u.Name, locales.For(cx).RemoveAttachment(), lucide.X, remove)
+			removeButton.Style.Padding = core.All(5)
+			removeButton.Children = []core.Node{core.View{Style: core.Style{Width: core.Pt(20), Height: core.Pt(20), CornerRadius: 10, AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter}, StyleFunc: func() core.Style { return core.Style{Background: palette(cx).elevated} }, Children: []core.Node{core.Icon{SVG: lucide.X(), Style: core.Style{Width: core.Pt(12), Height: core.Pt(12)}}}}}
+			actions := core.View{TestID: "upload-actions-" + u.Name,
+				Style:     core.Style{Position: core.Absolute, Top: core.Pt(-6), Right: core.Pt(-6)},
+				StyleFunc: func() core.Style { return contextualAffordance(cx, "draft-image", false) },
+				Children:  []core.Node{removeButton}}
+			tile = ui.ContextMenu{TestID: "upload-menu-" + u.Name,
+				Trigger:  core.View{Style: core.Style{Group: "draft-image", Width: core.Pt(64), Height: core.Pt(64)}, Children: []core.Node{preview, actions}},
+				Children: []core.Node{ui.MenuItem{TestID: "upload-remove-action", Text: locales.For(cx).RemoveAttachment(), Icon: lucide.X, OnSelect: remove}}}
 		}
 		status := core.Show{When: func() bool { s.read(); return u.Status != "ready" }, Then: func(cx *core.Scope) core.Node {
 			return core.Dynamic(func(cx *core.Scope) core.Node {
@@ -546,6 +559,9 @@ func (s *State) attachmentGallery(cx *core.Scope, get func() Message) core.Node 
 	attachments := core.NewMemoFunc(cx, func() []Object {
 		out := []Object{}
 		for _, a := range get().Attachments {
+			if _, location := filelink.Path(str(a, "source")); location && flag(a, "inline") {
+				continue
+			}
 			// Inline images render at their Markdown location. Inline file
 			// links still need an explicit download action in this collection.
 			if (get().Role != "user" || str(a, "kind") != "image") && (!flag(a, "inline") || str(a, "kind") != "image") {
@@ -607,4 +623,21 @@ func (s *State) userImageGallery(cx *core.Scope, get func() Message) core.Node {
 			}),
 		}}
 	}}
+}
+
+func (s *State) previewDraftImage(selected *Upload) {
+	images := []Object{}
+	index := 0
+	for _, u := range s.uploads {
+		if !strings.HasPrefix(u.MIME, "image/") && !strings.HasPrefix(http.DetectContentType(u.Data), "image/") {
+			continue
+		}
+		if u == selected {
+			index = len(images)
+		}
+		images = append(images, Object{"name": u.Name, "mime": u.MIME, "kind": "image", "size": len(u.Data), "localData": u.Data})
+	}
+	s.preview = images
+	s.previewIndex.Set(index)
+	s.dialog.Set("preview")
 }

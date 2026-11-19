@@ -9,6 +9,7 @@ import (
 )
 
 func browserStorage(t *testing.T) {
+	testDraftStorage(t, &Store{})
 	key := fmt.Sprintf("fixture-%d", time.Now().UnixNano())
 	s := &Store{}
 	if e := s.Put(key, Object{"text": "离线缓存🙂", "cursor": 4}); e != nil {

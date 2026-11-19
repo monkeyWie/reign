@@ -38,7 +38,7 @@ func TestDesktopNavigationAndDrafts(t *testing.T) {
 	if app.Find("id:chat-input").ID != inputID {
 		t.Fatal("poll rebuilt editor")
 	}
-	app.Press(sessionSelector("demo-device", "codex-cli", "demo-cli"))
+	app.Press(sessionSelector("demo-device", "pi", "demo-pi"))
 	app.WaitFor("id:chat-input", 3*time.Second)
 	app.Press(sessionSelector("demo-device", "codex-app", "demo-chat"))
 	app.WaitUntil(3*time.Second, func() bool { return app.Find("id:chat-input").Text == "未发送的草稿" })

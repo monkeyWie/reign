@@ -180,6 +180,12 @@ func CallContext(parent context.Context, raw string) string {
 		out, e = h.Sync(ctx, in.Target, p.Provider)
 	case "client.cached":
 		out, e = h.Cached(in.Target, in.Request)
+	case "client.draft.get", "client.draft.put":
+		var params map[string]any
+		e = json.Unmarshal(in.Params, &params)
+		if e == nil {
+			out, e = h.Draft(ctx, in.Method, in.Target, params)
+		}
 	case "client.snapshot":
 		var snapshot struct {
 			Provider, Session string

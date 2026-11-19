@@ -16,10 +16,17 @@ const config = {
   turbopack: { root: workspaceRoot },
   outputFileTracingRoot:
     process.env.NEXT_PRIVATE_OUTPUT_TRACE_ROOT || workspaceRoot,
-  transpilePackages: [
-    "@reignhub/account-ui",
-  ],
+  transpilePackages: ["@reignhub/account-ui"],
   images: { unoptimized: true },
   poweredByHeader: false,
+  redirects() {
+    return ["", "/zh-CN"].flatMap((prefix) =>
+      ["codex-app", "codex-cli"].map((slug) => ({
+        source: `${prefix}/docs/agents/${slug}`,
+        destination: `${prefix}/docs/agents/codex`,
+        permanent: true,
+      })),
+    );
+  },
 };
 export default createMDX()(config);

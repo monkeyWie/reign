@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -34,13 +35,22 @@ var ipcVersions = map[string]int{
 }
 
 type followedThread struct {
-	directory bool
-	owner     string
-	version   int
-	revision  int64
-	state     json.RawMessage
-	err       error
-	changed   chan struct{}
+	directory                              bool
+	owner                                  string
+	version                                int
+	revision                               int64
+	state                                  json.RawMessage
+	err                                    error
+	changed                                chan struct{}
+	queue                                  *provider.MessageQueue
+	serverQueue                            *serverQueue
+	queueRevision                          uint64
+	snapshots                              uint64
+	refresh                                *followerRefresh
+	refreshAfter                           time.Time
+	refreshErr                             error
+	refreshGeneration, refreshedGeneration uint64
+	accepted                               map[string]bool
 }
 type ownedSend struct {
 	result      json.RawMessage
@@ -49,29 +59,32 @@ type ownedSend struct {
 	uncertain   bool
 }
 type ownedThread struct {
-	metadata     map[string]any
-	pubMu        chan struct{}
-	published    map[string]any
-	subscribers  uint64
-	version      uint64
-	turnVersions map[string]uint64
-	turns        []map[string]any
-	settings     map[string]any
-	followers    map[string]bool
-	revision     int64
-	loaded       bool
-	announced    bool
-	queue        []map[string]any
-	draining     bool
-	uncertain    bool
-	blocked      string
-	sent         map[string]bool
-	inflight     string
-	sends        map[string]*ownedSend
+	metadata      map[string]any
+	pubMu         chan struct{}
+	published     map[string]any
+	subscribers   uint64
+	version       uint64
+	turnVersions  map[string]uint64
+	turns         []map[string]any
+	settings      map[string]any
+	followers     map[string]bool
+	revision      int64
+	loaded        bool
+	announced     bool
+	queue         []map[string]any
+	serverQueue   *serverQueue
+	queueRevision uint64
+	draining      bool
+	uncertain     bool
+	blocked       string
+	sent          map[string]bool
+	inflight      string
+	sends         map[string]*ownedSend
 }
 type appIPC struct {
 	p          *Provider
 	home       string
+	queueFiles []string
 	mu         sync.Mutex
 	conn       *codexipc.Client
 	connectErr error
@@ -85,7 +98,7 @@ type appIPC struct {
 
 func newAppIPC(p *Provider) *appIPC {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &appIPC{p: p, home: codexProjectHome(), followed: map[string]*followedThread{}, owned: map[string]*ownedThread{}, ctx: ctx, cancel: cancel, done: make(chan struct{}), dirty: make(chan string, 128)}
+	return &appIPC{p: p, home: codexProjectHome(), queueFiles: vscodeQueueFiles(), followed: map[string]*followedThread{}, owned: map[string]*ownedThread{}, ctx: ctx, cancel: cancel, done: make(chan struct{}), dirty: make(chan string, 128)}
 }
 func (b *appIPC) client() *codexipc.Client { b.mu.Lock(); defer b.mu.Unlock(); return b.conn }
 func (b *appIPC) connectionError() error   { b.mu.Lock(); defer b.mu.Unlock(); return b.connectErr }
@@ -111,6 +124,7 @@ func (b *appIPC) connect(ctx context.Context) error {
 	ids := make([]string, 0, len(b.followed))
 	for id, f := range b.followed {
 		f.state = nil
+		b.invalidateQueue(id, f)
 		f.owner = ""
 		f.err = nil
 		b.signal(f)
@@ -144,9 +158,10 @@ func (b *appIPC) run() {
 			}
 		}
 		b.mu.Lock()
-		for _, f := range b.followed {
+		for id, f := range b.followed {
 			f.owner = ""
 			f.state = nil
+			b.invalidateQueue(id, f)
 			f.err = errors.New("Codex IPC 已断开")
 			b.signal(f)
 		}
@@ -257,6 +272,7 @@ func (b *appIPC) followFor(ctx context.Context, id string, directory bool) (stri
 	if f.owner != response.HandledBy {
 		f.owner = response.HandledBy
 		f.state = nil
+		b.invalidateQueue(id, f)
 		f.revision = 0
 		f.err = nil
 		b.signal(f)
@@ -307,10 +323,11 @@ func (b *appIPC) Broadcast(m codexipc.Message) {
 			return
 		}
 		b.mu.Lock()
-		for _, f := range b.followed {
+		for id, f := range b.followed {
 			if f.owner == v.ClientID {
 				f.owner = ""
 				f.state = nil
+				b.invalidateQueue(id, f)
 				f.err = errors.New("Codex 会话持有者已断开")
 				b.signal(f)
 			}
@@ -323,6 +340,10 @@ func (b *appIPC) Broadcast(m codexipc.Message) {
 	}
 	id, host := ipcID(m.Params)
 	if id == "" || host != "local" {
+		return
+	}
+	if m.Method == "thread-queued-followups-changed" {
+		b.receiveQueue(m, id)
 		return
 	}
 	if m.Method == "thread-stream-following-changed" && m.Version == 1 {
@@ -348,12 +369,17 @@ func (b *appIPC) Broadcast(m codexipc.Message) {
 	if m.Method == "thread-stream-following-status-requested" && m.Version == 1 {
 		b.mu.Lock()
 		f := b.followed[id]
-		yes := f != nil && f.owner == m.Source
+		if f != nil {
+			// An owner can change while the old IPC client stays connected.
+			// Treat this as a hint to rediscover, never as authority to route
+			// commands or accept state from an unsolicited owner.
+			f.err = errors.New("Codex 会话流请求重新订阅")
+			f.refreshGeneration++
+			b.signal(f)
+		}
 		b.mu.Unlock()
-		if yes {
-			go func() {
-				_ = b.broadcast(b.ctx, "thread-stream-following-changed", map[string]any{"hostId": "local", "conversationId": id, "following": true}, []string{m.Source})
-			}()
+		if f != nil {
+			b.p.stream().log.Publish(provider.StreamEvent{Kind: "snapshot", SessionID: id})
 		}
 		return
 	}
@@ -385,18 +411,18 @@ func (b *appIPC) Broadcast(m codexipc.Message) {
 		return
 	}
 	change := v.Change
+	rebased := change.Type == "snapshot" && change.Revision < f.revision
 	old := append(json.RawMessage(nil), f.state...)
 	var next json.RawMessage
 	var err error
 	switch change.Type {
 	case "snapshot":
-		if len(f.state) > 0 && (change.Revision < f.revision || change.Revision == f.revision && f.err == nil) {
-			b.mu.Unlock()
-			return
-		}
+		// Snapshots establish a new revision base. The owner's backend may
+		// reconnect and reset its counter without replacing the IPC client.
+		// Only patches are ordered against the previous revision.
 		next = change.ConversationState
 	case "patches":
-		if change.Revision <= f.revision {
+		if change.Revision == f.revision {
 			b.mu.Unlock()
 			return
 		}
@@ -413,30 +439,46 @@ func (b *appIPC) Broadcast(m codexipc.Message) {
 		b.mu.Unlock()
 		return
 	}
+	var accepted map[string]bool
 	if err == nil {
 		var state struct{ ID string }
 		if len(next) > codexipc.MaxFrame || json.Unmarshal(next, &state) != nil || state.ID != id {
 			err = errors.New("IPC 会话状态结构无效")
 		} else {
-			_, _, err = stateTurns(decodeObject(next))
+			var turns []map[string]any
+			turns, _, err = stateTurns(decodeObject(next))
+			if err == nil {
+				accepted = acceptedQueueMessages(turns)
+			}
 		}
 	}
 	if err != nil {
 		f.err = err
+		f.refreshGeneration++
 		b.signal(f)
 		b.mu.Unlock()
-		go func() {
-			_ = b.broadcast(b.ctx, "thread-stream-following-changed", map[string]any{"hostId": "local", "conversationId": id, "following": true}, []string{m.Source})
-		}()
+		// Wake existing watches immediately. Their next read coalesces one
+		// bounded re-follow and waits for its fresh snapshot before trusting it.
+		b.p.stream().log.Publish(provider.StreamEvent{Kind: "snapshot", SessionID: id})
 		return
 	}
 	f.state = append(json.RawMessage(nil), next...)
 	f.revision = change.Revision
 	f.version = m.Version
 	f.err = nil
+	if change.Type == "snapshot" {
+		f.refreshErr = nil
+		f.refreshAfter = time.Time{}
+		f.snapshots++ // An unchanged revision still acknowledges a fresh follow.
+	}
+	queueChanged := !maps.Equal(f.accepted, accepted)
+	f.accepted = accepted
 	b.signal(f)
 	b.mu.Unlock()
 	b.p.observeIPCState(id, m.Source, old, next)
+	if queueChanged || rebased {
+		b.p.stream().log.Publish(provider.StreamEvent{Kind: "snapshot", SessionID: id})
+	}
 }
 
 func (p *Provider) appBridge() *appIPC { p.mu.Lock(); defer p.mu.Unlock(); return p.ipc }

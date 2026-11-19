@@ -37,10 +37,10 @@ func deployedBrowserStability(t *testing.T) {
 		t.Fatalf("server directory presence via browser Fetch: %v, %v", statuses, err)
 	}
 	for round := 0; round < 60; round++ {
-		if _, err = a.Call(ctx, "client.sync", Object{"provider": "codex-cli"}, target, nil); err != nil {
+		if _, err = a.Call(ctx, "client.sync", Object{"provider": "codex-app"}, target, nil); err != nil {
 			t.Fatalf("sync %d: %v", round, err)
 		}
-		if _, err = a.Call(ctx, "client.call", nil, target, Object{"method": "transcript", "provider": "codex-cli", "session": "isolated"}); err != nil {
+		if _, err = a.Call(ctx, "client.call", nil, target, Object{"method": "transcript", "provider": "codex-app", "session": "isolated"}); err != nil {
 			t.Fatalf("transcript %d: %v", round, err)
 		}
 		if round%10 == 0 {

@@ -66,9 +66,18 @@ type AutoConnector interface {
 // Project retains an Agent's native project metadata. Its ID is Agent-local;
 // controllers group by Session.ProjectDir, never by this ID or project name.
 type Project struct {
-	ID   string `json:"id,omitempty"`
-	Name string `json:"name,omitempty"`
-	Root string `json:"root,omitempty"`
+	ID    string   `json:"id,omitempty"`
+	Name  string   `json:"name,omitempty"`
+	Root  string   `json:"root,omitempty"`
+	Roots []string `json:"roots,omitempty"`
+}
+
+// GitInfo describes the checkout at the execution directory, resolved by its host.
+// Repository is a credential-free display name; Commit is used for detached HEAD.
+type GitInfo struct {
+	Repository string `json:"repository,omitempty"`
+	Branch     string `json:"branch,omitempty"`
+	Commit     string `json:"commit,omitempty"`
 }
 
 type Session struct {
@@ -78,6 +87,7 @@ type Session struct {
 	Preview    string   `json:"preview"`
 	CWD        string   `json:"cwd"`
 	Project    *Project `json:"project,omitempty"`
+	GitInfo    *GitInfo `json:"gitInfo,omitempty"`
 	// ProjectDir is the host-resolved project directory across all Agents.
 	// CWD remains the session's actual execution directory, including worktrees.
 	ProjectDir string `json:"projectDir,omitempty"`
@@ -162,11 +172,34 @@ type Turn struct {
 }
 
 type Transcript struct {
-	StreamEpoch  string  `json:"streamEpoch,omitempty"`
-	StreamCursor int64   `json:"streamCursor,omitempty"`
-	Session      Session `json:"session"`
-	Turns        []Turn  `json:"turns"`
-	NextCursor   string  `json:"nextCursor,omitempty"`
+	StreamEpoch  string        `json:"streamEpoch,omitempty"`
+	StreamCursor int64         `json:"streamCursor,omitempty"`
+	Session      Session       `json:"session"`
+	Turns        []Turn        `json:"turns"`
+	NextCursor   string        `json:"nextCursor,omitempty"`
+	Queue        *MessageQueue `json:"queue,omitempty"`
+}
+
+// MessageQueue is the Agent's ordered, not-yet-consumed input, separate from
+// transcript turns and the controller's unacknowledged outgoing messages.
+// Unknown state must not be interpreted as an empty queue.
+type MessageQueue struct {
+	State    string          `json:"state"` // ready or unknown
+	Messages []QueuedMessage `json:"messages"`
+}
+
+type QueuedMessage struct {
+	ID          string             `json:"id"`
+	Text        string             `json:"text"`
+	Status      string             `json:"status"` // queued, preparing, paused, uncertain
+	Attachments []QueuedAttachment `json:"attachments,omitempty"`
+}
+
+// QueuedAttachment is a preview only. Private composer paths and execution
+// context remain in the Provider and are not downloadable attachment IDs.
+type QueuedAttachment struct {
+	Name string `json:"name"`
+	Kind string `json:"kind"`
 }
 
 type CreateOptions struct {

@@ -37,7 +37,7 @@ func (p *Provider) startAppServer(ctx context.Context) error {
 		if err := b.connectionError(); err != nil {
 			return appIPCConnectionError(err)
 		}
-		return fmt.Errorf("Codex App IPC 尚未就绪，请稍后重试")
+		return fmt.Errorf("Codex 连接尚未就绪，请稍后重试")
 	}
 	if c != nil && c.Alive() {
 		return nil
@@ -45,7 +45,7 @@ func (p *Provider) startAppServer(ctx context.Context) error {
 	app := system.FindApp(p.cfg.CodexApp)
 	cli := system.FindCLI(p.cfg.CodexCLI, app)
 	if cli == "" {
-		return fmt.Errorf("未找到 Codex CLI；请安装官方 App 或设置 codexCli")
+		return fmt.Errorf("未找到 Codex 可执行文件；请安装 Codex 或设置 codexCli")
 	}
 	if err := os.MkdirAll(p.cfg.DataDir, 0700); err != nil {
 		return err
@@ -93,12 +93,12 @@ func appIPCConnectionError(err error) error {
 		if errors.As(err, &diagnostic) {
 			return fmt.Errorf("%s：%w", diagnostic.ConnectionGuidance(), err)
 		}
-		return fmt.Errorf("Codex App IPC 访问被拒绝，请确认 ReignHub 与 Codex App 由同一用户以相同权限级别运行：%w", err)
+		return fmt.Errorf("Codex 连接访问被拒绝，请确认 ReignHub 与 Codex App 由同一用户以相同权限级别运行：%w", err)
 	case errors.Is(err, os.ErrNotExist):
-		return fmt.Errorf("未找到 Codex App IPC，请先打开官方 App：%w", err)
+		return fmt.Errorf("Codex 连接服务尚未启动，请先打开 Codex：%w", err)
 	case errors.Is(err, context.DeadlineExceeded):
-		return fmt.Errorf("连接 Codex App IPC 超时，请稍后重试：%w", err)
+		return fmt.Errorf("连接 Codex 超时，请稍后重试：%w", err)
 	default:
-		return fmt.Errorf("连接 Codex App IPC 失败：%w", err)
+		return fmt.Errorf("连接 Codex 失败：%w", err)
 	}
 }

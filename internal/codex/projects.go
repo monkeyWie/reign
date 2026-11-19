@@ -67,8 +67,13 @@ func newProjectIndex(projects []codexProject) *projectIndex {
 	index := &projectIndex{byID: map[string]provider.Project{}}
 	for _, project := range projects {
 		info := provider.Project{ID: project.ID, Name: project.Name}
-		if len(project.Roots) > 0 {
-			info.Root = project.Roots[0].Path
+		for _, root := range project.Roots {
+			if root.Path != "" {
+				info.Roots = append(info.Roots, root.Path)
+			}
+		}
+		if len(info.Roots) > 0 {
+			info.Root = info.Roots[0]
 		}
 		index.byID[project.ID] = info
 		for _, root := range project.Roots {
@@ -163,7 +168,7 @@ func (index *projectIndex) loadDesktopAssignments(home string) {
 		if !ok {
 			continue
 		}
-		project := provider.Project{ID: assignment.ProjectID, Name: local.Name}
+		project := provider.Project{ID: assignment.ProjectID, Name: local.Name, Roots: local.RootPaths}
 		if len(local.RootPaths) > 0 {
 			project.Root = local.RootPaths[0]
 		}

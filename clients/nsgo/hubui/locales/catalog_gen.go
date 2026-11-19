@@ -46,6 +46,9 @@ var Parameters = map[string][]string{
 	"UploadFailed":            {"error_"},
 	"SecondsAgo":              {"seconds"},
 	"FilterMatches":           {"count"},
+	"ActiveSessionCount":      {"count"},
+	"MoreProjectDetails":      {"count"},
+	"DetachedGitHead":         {"commit"},
 	"WorkedFor":               {"duration"},
 	"WorkSeconds":             {"seconds"},
 	"WorkMinutesSeconds":      {"minutes", "seconds"},
@@ -61,6 +64,9 @@ type Translation struct {
 	UploadFailed            func(error_ string) string
 	SecondsAgo              func(seconds int) string
 	FilterMatches           func(count string) string
+	ActiveSessionCount      func(count string) string
+	MoreProjectDetails      func(count string) string
+	DetachedGitHead         func(commit string) string
 	WorkedFor               func(duration string) string
 	WorkSeconds             func(seconds int) string
 	WorkMinutesSeconds      func(minutes int, seconds int) string
@@ -746,6 +752,15 @@ func Supply(lang string, t Translation) {
 	if t.FilterMatches != nil {
 		s.FilterMatches = t.FilterMatches
 	}
+	if t.ActiveSessionCount != nil {
+		s.ActiveSessionCount = t.ActiveSessionCount
+	}
+	if t.MoreProjectDetails != nil {
+		s.MoreProjectDetails = t.MoreProjectDetails
+	}
+	if t.DetachedGitHead != nil {
+		s.DetachedGitHead = t.DetachedGitHead
+	}
 	if t.WorkedFor != nil {
 		s.WorkedFor = t.WorkedFor
 	}
@@ -1293,6 +1308,76 @@ func Projects(cx *core.Scope) string { return For(cx).Projects() }
 
 // Projects is the package's Projects in the language of msgs.
 func (msgs Messages) Projects() string { return msgs.text(textProjects) }
+
+// ActiveSessionCount says "{count} active"
+// in the language the app shows under cx.
+func ActiveSessionCount(cx *core.Scope, count string) string {
+	return For(cx).ActiveSessionCount(count)
+}
+
+// ActiveSessionCount is the package's ActiveSessionCount in the language of msgs.
+func (msgs Messages) ActiveSessionCount(count string) string {
+	if i18n.IsPseudo(msgs.lang) {
+		return i18n.Pseudo(msgs.lang, Messages{lang: Source, mark: true}.ActiveSessionCount(count))
+	}
+	for lang := msgs.lang; ; lang = i18n.Parent(lang) {
+		if f := supplied[lang].ActiveSessionCount; f != nil {
+			return f(count)
+		}
+		switch lang {
+		case "", "en":
+			return msgs.arg(count) + " active"
+		case "zh-Hans":
+			return count + " 个活跃会话"
+		}
+	}
+}
+
+// MoreProjectDetails says "{count} more · Right-click for details"
+// in the language the app shows under cx.
+func MoreProjectDetails(cx *core.Scope, count string) string {
+	return For(cx).MoreProjectDetails(count)
+}
+
+// MoreProjectDetails is the package's MoreProjectDetails in the language of msgs.
+func (msgs Messages) MoreProjectDetails(count string) string {
+	if i18n.IsPseudo(msgs.lang) {
+		return i18n.Pseudo(msgs.lang, Messages{lang: Source, mark: true}.MoreProjectDetails(count))
+	}
+	for lang := msgs.lang; ; lang = i18n.Parent(lang) {
+		if f := supplied[lang].MoreProjectDetails; f != nil {
+			return f(count)
+		}
+		switch lang {
+		case "", "en":
+			return msgs.arg(count) + " more · Right-click for details"
+		case "zh-Hans":
+			return "还有 " + count + " 项 · 右键查看详情"
+		}
+	}
+}
+
+// DetachedGitHead says "Detached HEAD · {commit}"
+// in the language the app shows under cx.
+func DetachedGitHead(cx *core.Scope, commit string) string { return For(cx).DetachedGitHead(commit) }
+
+// DetachedGitHead is the package's DetachedGitHead in the language of msgs.
+func (msgs Messages) DetachedGitHead(commit string) string {
+	if i18n.IsPseudo(msgs.lang) {
+		return i18n.Pseudo(msgs.lang, Messages{lang: Source, mark: true}.DetachedGitHead(commit))
+	}
+	for lang := msgs.lang; ; lang = i18n.Parent(lang) {
+		if f := supplied[lang].DetachedGitHead; f != nil {
+			return f(commit)
+		}
+		switch lang {
+		case "", "en":
+			return "Detached HEAD · " + msgs.arg(commit)
+		case "zh-Hans":
+			return "分离的 HEAD · " + commit
+		}
+	}
+}
 
 // WorkDetails says "Work details"
 // in the language the app shows under cx.

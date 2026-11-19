@@ -31,15 +31,14 @@ func agentSetup(p Object) string {
 	if str(p, "id") == "codex-app" && !flag(p, "running") {
 		return "open-app"
 	}
-	if str(p, "id") == "codex-cli" && !flag(p, "running") {
-		return "configure"
-	}
 	return "connecting"
 }
 
 func agentGuideURL(id string) string {
 	switch id {
-	case "codex-app", "codex-cli", "pi":
+	case "codex-app":
+		return "https://reignhub.app/docs/agents/codex"
+	case "pi":
 		return "https://reignhub.app/docs/agents/" + id
 	default:
 		return "https://reignhub.app/docs/agents/acp"

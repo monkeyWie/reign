@@ -5,9 +5,7 @@ description: 从设备在线、授权、Agent 接入和网络路径逐层检查�
 
 ## 能看到会话，但发送失败
 
-先检查被控端对应 Provider 是否已就绪。Codex App 如果由用户直接启动，可能只是读到了本地历史；需等待任务结束，退出 App 后通过 ReignHub 启动，让双方连接同一个 app-server。
-
-Codex CLI 会话由不同后端持有时也可能有写入冲突。不要仅凭共享目录中的历史文件判断可以控制正在运行的会话。参见 [Codex CLI](/docs/agents/codex-cli)。
+确认被控端的 **Codex** 已就绪，管理此会话的应用、终端或编辑器仍可用。ReignHub 会自动连接当前持有者，无需通过 ReignHub 启动 Codex。读到历史不代表已能实时交互；如有连接错误，按提示处理后重试。参见 [Codex](/docs/agents/codex)。
 
 ## 显示设备离线
 

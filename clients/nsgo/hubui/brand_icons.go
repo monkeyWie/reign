@@ -21,7 +21,7 @@ var brandLogos = func() map[string]*core.SVG {
 func agentIcon(providerID string) *core.SVG {
 	key := ""
 	switch providerID {
-	case "codex-app", "codex-cli":
+	case "codex-app":
 		key = "openai"
 	case "claude-code":
 		key = "claude"

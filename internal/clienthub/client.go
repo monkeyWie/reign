@@ -12,6 +12,7 @@ import (
 	"github.com/monkeyWie/reignhub/internal/deviceservice"
 	"github.com/monkeyWie/reignhub/internal/remote"
 	"github.com/monkeyWie/reignhub/internal/store"
+	"github.com/monkeyWie/reignhub/pkg/composerdraft"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -411,6 +412,11 @@ func (h *Hub) Forget(id string) error {
 		return e
 	}
 	keys = append(keys, snapshots...)
+	drafts, e := h.DB.Keys(composerdraft.Prefix(id))
+	if e != nil {
+		return e
+	}
+	keys = append(keys, drafts...)
 	for _, k := range keys {
 		if e = h.DB.Delete(k); e != nil {
 			return e

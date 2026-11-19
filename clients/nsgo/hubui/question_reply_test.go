@@ -15,13 +15,14 @@ func TestQuestionReplyCard(t *testing.T) {
 		return core.View{Style: fill.Merge(core.Style{Padding: core.All(20)}), Children: []core.Node{s.message(cx, func() Message { return m })}}
 	}, nsgotest.Size(390, 600))
 	app.Find("id:question-replies")
-	app.Find("text:已回答")
-	app.Find("text:你的回答")
+	if app.Exists("text:已回答") || app.Exists("text:你的回答") {
+		t.Fatal("reply duplicates its meaning with status labels")
+	}
 	app.Find("text:允许，点击 Authorize 并继续部署")
 	if app.Exists("text:internal-call") {
 		t.Fatal("internal ID is visible")
 	}
-	if b := app.Find("id:question-replies").Frame; b.Size.Width > 350 || b.Size.Height < 100 {
+	if b := app.Find("id:question-replies").Frame; b.Size.Width > 350 || b.Size.Height <= 0 {
 		t.Fatalf("bad reply card layout: %#v", b)
 	}
 	app.Screenshot("question-reply-card")

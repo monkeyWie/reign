@@ -103,6 +103,8 @@ func TestIPCFailedFollowerStillReadsHistoryWithoutAcquiringWriter(t *testing.T) 
 	backendFixture(t, p, func(m rpc.Message) (any, *rpc.Error) {
 		calls = append(calls, m.Method)
 		switch m.Method {
+		case "thread/queue/list":
+			return map[string]any{"data": []any{}}, nil
 		case "thread/read":
 			return map[string]any{"thread": map[string]any{"id": "s", "cwd": "/project"}}, nil
 		case "thread/turns/list":
@@ -120,7 +122,7 @@ func TestIPCFailedFollowerStillReadsHistoryWithoutAcquiringWriter(t *testing.T) 
 	if err != nil || len(out.Turns) != 1 || out.Turns[0].Items[0].Text != "persisted reply" {
 		t.Fatalf("persisted history hidden by live failure: %+v %v", out, err)
 	}
-	if !reflect.DeepEqual(calls, []string{"thread/read", "thread/turns/list"}) {
+	if !reflect.DeepEqual(calls, []string{"thread/read", "thread/turns/list", "thread/queue/list"}) {
 		t.Fatal(calls)
 	}
 	// App-server pagination remains readable while the IPC follower is broken.
@@ -131,7 +133,7 @@ func TestIPCFailedFollowerStillReadsHistoryWithoutAcquiringWriter(t *testing.T) 
 	if _, err := p.Transcript(context.Background(), "s", "ipc:dA"); err == nil {
 		t.Fatal("expired IPC cursor accepted")
 	}
-	if len(calls) != 4 {
+	if len(calls) != 5 {
 		t.Fatal("IPC cursor leaked to app-server", calls)
 	}
 }

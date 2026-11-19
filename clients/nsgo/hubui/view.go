@@ -81,17 +81,16 @@ func button(cx *core.Scope, id, title string, icon func() *core.SVG, variant str
 		}
 	}, Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter, Gap: 8, Padding: core.Symmetric(8, buttonHorizontalPadding), MinHeight: core.Pt(36), CornerRadius: 10, FlexShrink: 0}, StyleFunc: func() core.Style {
 		c := palette(cx)
-		st := pressStyle(cx).Merge(core.Style{Color: c.foreground, Disabled: &core.Style{Opacity: core.Alpha(.5)}})
+		st := pressStyle(cx).Merge(core.Style{Color: c.foreground})
 		if variant == "outline" {
 			st.BorderWidth = 1
 			st.BorderColor = c.border
 			st.Background = c.background
 		}
 		if variant == "primary" {
-			st.Background, st.Color = c.foreground, c.background
-			st.Hover = &core.Style{Opacity: core.Alpha(.88)}
-			st.Active = &core.Style{Opacity: core.Alpha(.72)}
+			st = filledButtonStyle(cx)
 		}
+		st.Disabled = &core.Style{Opacity: core.Alpha(.5)}
 		return st
 	}, Children: nodes}
 }
@@ -101,7 +100,7 @@ func (s *State) refreshSessionsButton(cx *core.Scope) core.Node {
 	v := button(cx, "refresh-sessions", "", nil, "ghost", s.refreshSessions).(core.View)
 	v.Label = "刷新会话"
 	v.Busy = busy.Get
-	v.Disabled = func() bool { s.read(); return busy.Get() || s.suspended || !s.anyConnected() }
+	v.Disabled = func() bool { s.read(); return busy.Get() || !s.anyConnected() }
 	v.Tooltip = tooltipCard(cx, dynamicText(cx, func() string {
 		s.read()
 		if !s.anyConnected() {
@@ -237,12 +236,7 @@ func (s *State) workspaceView(cx *core.Scope) core.Node {
 		core.Show{When: func() bool { s.read(); return s.error != "" && !s.errorAtComposer() }, Then: func(cx *core.Scope) core.Node {
 			return s.errorOverlay(cx, false)
 		}},
-		core.Show{When: func() bool { s.read(); return s.notice != "" }, Then: func(cx *core.Scope) core.Node {
-			return core.Overlay{TestID: "notice", Topmost: true, PointerEvents: core.PointerEventsNone, Style: core.Style{Bottom: core.Pt(16), Right: core.Pt(20), Padding: core.All(10), CornerRadius: 8, BorderWidth: 1}, StyleFunc: func() core.Style {
-				c := palette(cx)
-				return core.Style{Background: c.background, BorderColor: c.border}
-			}, Children: []core.Node{dynamicText(cx, func() string { s.read(); return s.notice }, 12, false)}}
-		}},
+		s.noticeOverlay(cx),
 		core.Dynamic(func(cx *core.Scope) core.Node { return s.dialogView(cx, s.dialog.Get()) }),
 	}})
 }

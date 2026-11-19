@@ -120,8 +120,10 @@ func (s *State) queueOutgoing(body string, uploads []*Upload) *outgoingMessage {
 		s.images[s.key()+"|"+u.ID+"|false"] = u.Data
 	}
 	s.outgoing[s.key()] = append(s.outgoing[s.key()], m)
+	s.submittedDraft, s.submittedDraftSession = s.draft.GetUntracked(), s.key()
 	s.draft.Set("")
 	s.uploads = nil
+	s.persistDraft()
 	// Append the local row directly. Hashing and snapshot serialization must
 	// not delay the send button's first pending frame.
 	s.messageRows = append(s.messageRows, Message{ID: m.ID, Role: "user", Text: m.Text, Timestamp: m.Timestamp, Attachments: m.Attachments, Delivery: m.Status})

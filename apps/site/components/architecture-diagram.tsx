@@ -18,10 +18,7 @@ export function ArchitectureDiagram({
       "从配对到加密对话",
       "From pairing to encrypted conversations",
     ),
-    codex: label(
-      "Codex App 本地 IPC 远控",
-      "Codex App remote control over local IPC",
-    ),
+    codex: label("Codex 本地 IPC 远控", "Codex remote control over local IPC"),
     stack: label("ReignHub 技术分层", "ReignHub technology layers"),
   };
   const captions = {
@@ -156,10 +153,7 @@ export function ArchitectureDiagram({
                 y={198}
                 w={160}
                 title="Agent"
-                detail={label(
-                  "Codex App / CLI · 项目",
-                  "Codex App / CLI · projects",
-                )}
+                detail={label("Codex · 项目", "Codex · projects")}
               />
               <Arrow d="M300 98 V138 H120 V191" dashed />
               <Arrow d="M430 98 V138 H400 V191" dashed />

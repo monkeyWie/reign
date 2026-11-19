@@ -67,7 +67,7 @@ func TestTranscriptAttachmentsAndSourceLifetime(t *testing.T) {
 	}
 }
 
-func TestSourceLocationLinksAreNotAttachments(t *testing.T) {
+func TestSourceLocationLinksExportActualFileInline(t *testing.T) {
 	cwd := t.TempDir()
 	readme := filepath.Join(cwd, "README.md")
 	if err := os.WriteFile(readme, []byte("# Example\n"), 0600); err != nil {
@@ -78,13 +78,13 @@ func TestSourceLocationLinksAreNotAttachments(t *testing.T) {
 		name, destination string
 		wantAttachments   int
 	}{
-		{"relative line", "README.md:3", 0},
-		{"absolute line", readme + ":3", 0},
-		{"line and column", readme + ":3:5", 0},
-		{"file URL line", "file://" + readme + ":3", 0},
-		{"line anchor", "README.md#L3", 0},
-		{"line range", "README.md#L3-L8", 0},
-		{"line column range", "README.md#L3C2-L8C5", 0},
+		{"relative line", "README.md:3", 1},
+		{"absolute line", readme + ":3", 1},
+		{"line and column", readme + ":3:5", 1},
+		{"file URL line", "file://" + readme + ":3", 1},
+		{"line anchor", "README.md#L3", 1},
+		{"line range", "README.md#L3-L8", 1},
+		{"line column range", "README.md#L3C2-L8C5", 1},
 		{"download", "README.md", 1},
 		{"missing download", "report.pdf", 1},
 	} {
@@ -110,12 +110,36 @@ func TestSourceLocationLinksAreNotAttachments(t *testing.T) {
 			if len(item.Attachments) != tc.wantAttachments {
 				t.Fatalf("got %d attachments, want %d", len(item.Attachments), tc.wantAttachments)
 			}
-			if tc.name == "download" && item.Attachments[0].State != "ready" {
+			if tc.name != "missing download" && item.Attachments[0].State != "ready" {
 				t.Fatal("ordinary file download lost")
+			}
+			if tc.name != "download" && tc.name != "missing download" && !item.Attachments[0].Inline {
+				t.Fatal("source link created a separate attachment card")
 			}
 			if tc.name == "missing download" && item.Attachments[0].State != "missing" {
 				t.Fatal("genuinely missing attachment must retain its state")
 			}
 		})
+	}
+}
+
+func TestFileLinkAliasesKeepDownloadableReferences(t *testing.T) {
+	cwd := t.TempDir()
+	path := filepath.Join(cwd, "report.md")
+	if err := os.WriteFile(path, []byte("fixture"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	p := &Provider{assets: assets.New(t.TempDir())}
+	message := "[absolute](<" + filepath.ToSlash(path) + ">) [relative](report.md) [line](report.md:2)"
+	raw, _ := json.Marshal(map[string]any{"id": "turn", "items": []any{map[string]any{"id": "a", "type": "agentMessage", "text": message}}})
+	turn := normalizeTurn(raw)
+	p.attachments(context.Background(), "aliases", cwd, &turn, raw)
+	if len(turn.Items[0].Attachments) != 3 {
+		t.Fatalf("file aliases lost their download mapping: %+v", turn.Items[0].Attachments)
+	}
+	for _, a := range turn.Items[0].Attachments {
+		if a.State != "ready" {
+			t.Fatalf("unreadable alias: %+v", a)
+		}
 	}
 }

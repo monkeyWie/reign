@@ -104,9 +104,10 @@ func TestOutgoingRestoresFromDiskAndIsolatesSessions(t *testing.T) {
 
 func TestCachedAndPreviewCataloguesExcludeSDK(t *testing.T) {
 	sessions := []Object{
-		{"id": "sdk", "providerId": "codex-cli", "originator": "codex_sdk_ts", "source": `"appServer"`},
+		{"id": "old-route", "providerId": "codex-cli", "sourceKind": "cli"},
+		{"id": "sdk", "providerId": "codex-app", "originator": "codex_sdk_ts", "source": `"appServer"`},
 		{"id": "exec", "providerId": "codex-app", "sourceKind": "exec"},
-		{"id": "cli", "providerId": "codex-cli", "sourceKind": "cli", "cwd": "/project"},
+		{"id": "cli", "providerId": "codex-app", "sourceKind": "cli", "cwd": "/project"},
 	}
 	groups := projectGroups(sessions)
 	if len(groups) != 1 || len(groups[0].Sessions) != 1 || str(groups[0].Sessions[0], "id") != "cli" {

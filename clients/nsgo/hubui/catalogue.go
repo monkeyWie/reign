@@ -85,7 +85,7 @@ func (s *State) reconcileEnvironments() {
 	s.pollCatalogues()
 }
 func (s *State) pollCatalogues() {
-	if s.suspended || s.ctx.Err() != nil {
+	if s.ctx.Err() != nil {
 		return
 	}
 	manual := s.manualRefresh
@@ -238,6 +238,7 @@ func (s *State) publishWorkspaces() {
 		s.sessions = sessions
 		s.catalogueVersion++
 	}
+	s.restoreLastSession()
 }
 func (s *State) applyCataloguePage(providerID string, incoming []Object, complete bool) {
 	s.applyEnvironmentPage(s.target, providerID, incoming, complete)
@@ -277,5 +278,5 @@ func (s *State) applyEnvironmentPage(target, providerID string, incoming []Objec
 	s.changed()
 }
 func visibleSession(s Object) bool {
-	return str(s, "providerId") != "codex-vscode" && provider.SyncSession(provider.Session{ProviderID: str(s, "providerId"), Source: str(s, "source"), SourceKind: str(s, "sourceKind"), Originator: str(s, "originator")})
+	return str(s, "providerId") != "codex-vscode" && str(s, "providerId") != "codex-cli" && provider.SyncSession(provider.Session{ProviderID: str(s, "providerId"), Source: str(s, "source"), SourceKind: str(s, "sourceKind"), Originator: str(s, "originator")})
 }

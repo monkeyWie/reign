@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
@@ -26,11 +27,15 @@ func TestProjectsResolveWorktreesAndRespectExplicitAssignment(t *testing.T) {
 	}
 	projects := []codexProject{{ID: "gopeed", Name: "Gopeed"}, {ID: "other", Name: "Other"}}
 	projects[0].Roots = append(projects[0].Roots, struct{ Path string }{repo})
+	projects[0].Roots = append(projects[0].Roots, struct{ Path string }{filepath.Join(root, "docs")})
 	p := &Provider{projects: newProjectIndex(projects)}
 	for _, cwd := range []string{repo, work, filepath.Join(work, "src")} {
 		session := p.session(thread{Cwd: cwd})
 		if session.Project == nil || session.Project.ID != "gopeed" || session.Project.Name != "Gopeed" || session.Project.Root != repo || session.CWD != cwd {
 			t.Fatalf("lost project/execution directory: %+v", session)
+		}
+		if !slices.Equal(session.Project.Roots, []string{repo, filepath.Join(root, "docs")}) {
+			t.Fatal("project dropped an associated directory", session.Project)
 		}
 	}
 	explicit := p.session(thread{Cwd: work, ProjectID: "other"})
@@ -72,7 +77,7 @@ func TestProjectRootMatchingPrefersNestedProjectAndHandlesSymlink(t *testing.T) 
 func TestDesktopAssignmentWinsOverWorktreeUntilServerMigration(t *testing.T) {
 	home := t.TempDir()
 	state, err := json.Marshal(map[string]any{
-		"local-projects":                                     map[string]any{"legacy": map[string]any{"id": "legacy", "name": "Website", "rootPaths": []string{"/website"}}},
+		"local-projects":                                     map[string]any{"legacy": map[string]any{"id": "legacy", "name": "Website", "rootPaths": []string{"/website", "/docs"}}},
 		"thread-project-assignments":                         map[string]any{"thread": map[string]string{"projectKind": "local", "projectId": "legacy"}},
 		"app-server-project-id-by-legacy-project-id-by-host": map[string]any{"local:" + home: map[string]string{"legacy": "canonical"}},
 	})
@@ -85,6 +90,11 @@ func TestDesktopAssignmentWinsOverWorktreeUntilServerMigration(t *testing.T) {
 	project := codexProject{ID: "canonical", Name: "Website"}
 	project.Roots = append(project.Roots, struct{ Path string }{"/website"})
 	index := newProjectIndex([]codexProject{project})
+	legacy := newProjectIndex(nil)
+	legacy.loadDesktopAssignments(home)
+	if !slices.Equal(legacy.assignments["thread"].Roots, []string{"/website", "/docs"}) {
+		t.Fatal("desktop assignment dropped project roots")
+	}
 	index.loadDesktopAssignments(home)
 	p := &Provider{projects: index}
 	session := p.session(thread{ID: "thread", Cwd: "/worktrees/gopeed"})

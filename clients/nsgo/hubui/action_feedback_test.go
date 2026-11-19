@@ -41,7 +41,9 @@ func TestActionButtonContentStaysCentered(t *testing.T) {
 				// Text-only labels must be centered themselves, with no empty icon slot.
 				centered(bounds["deny"], globalBounds(app.Find("text:拒绝")))
 				centered(bounds["allow"], globalBounds(app.Find("text:允许连接")))
-				app.Screenshot("buttons-centered")
+				app.Hover("id:allow")
+				app.Screenshot(fmt.Sprintf("buttons-hover-%g-dark-%t", width, dark))
+				app.HoverOut()
 				app.Press("id:allow")
 				for _, id := range []string{"deny", "allow", "save", "icon"} {
 					app.WaitFor("id:"+id+"-loading", time.Second)
@@ -50,7 +52,7 @@ func TestActionButtonContentStaysCentered(t *testing.T) {
 					}
 					centered(bounds[id], globalBounds(app.Find("id:"+id+"-loading")))
 				}
-				app.Screenshot("buttons-loading-centered")
+				app.Screenshot(fmt.Sprintf("buttons-loading-centered-%g-dark-%t", width, dark))
 			})
 		}
 	}

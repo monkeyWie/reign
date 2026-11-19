@@ -17,6 +17,11 @@ type sessionRemovalFixture struct {
 }
 
 func (f *sessionRemovalFixture) Call(ctx context.Context, method string, params Object, target string, request Object) (any, error) {
+	if method == "client.call" && str(request, "method") == "providers" {
+		// These tests explicitly supply each directory reconciliation.
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
 	if method == "client.call" && str(request, "method") == "session.remove" {
 		f.calls <- target + "/" + str(request, "provider") + "/" + str(request, "session")
 		select {
@@ -35,7 +40,6 @@ func TestSessionRemovalRoutesAndPreservesOtherConversation(t *testing.T) {
 	app := nsgotest.Start(t, func(cx *core.Scope) core.Node {
 		s = sidebarInteractionFixture(cx)
 		s.api = f
-		s.suspended = true // The fixture owns its directory; no background discovery.
 		for _, ss := range s.sessions {
 			ss["status"] = "idle"
 		}
@@ -55,7 +59,7 @@ func TestSessionRemovalRoutesAndPreservesOtherConversation(t *testing.T) {
 	app.Press("id:session-remove-action")
 	app.Press("id:confirm-remove-session")
 	app.WaitUntil(time.Second, func() bool { return len(f.calls) == 1 })
-	if route := <-f.calls; route != "local/codex-cli/design" {
+	if route := <-f.calls; route != "local/pi/design" {
 		t.Fatal("wrong removal route", route)
 	}
 	if !app.Find("id:confirm-remove-session").Props.Busy {
@@ -70,7 +74,7 @@ func TestSessionRemovalRoutesAndPreservesOtherConversation(t *testing.T) {
 	if str(s.selected, "id") != "review" || s.draft.GetUntracked() != "keep this draft" {
 		t.Fatal("removal changed another conversation")
 	}
-	if !s.removedSessions[sessionIdentity(Object{"deviceId": "local", "providerId": "codex-cli", "id": "design"})] {
+	if !s.removedSessions[sessionIdentity(Object{"deviceId": "local", "providerId": "pi", "id": "design"})] {
 		t.Fatal("stale cache not fenced")
 	}
 }
@@ -81,13 +85,12 @@ func TestUnknownRemovalCannotBeResubmitted(t *testing.T) {
 	app := nsgotest.Start(t, func(cx *core.Scope) core.Node {
 		s = sidebarInteractionFixture(cx)
 		s.api = f
-		s.suspended = true
 		s.target, s.selected = "local", s.sessions[2]
 		s.draft.Set("removed session draft")
 		return core.View{Style: fill, Children: []core.Node{s.directory(cx),
-			button(cx, "partial-directory", "Partial directory", nil, "ghost", func() { s.applyEnvironmentPage("local", "codex-cli", nil, false) }),
-			button(cx, "present-directory", "Present directory", nil, "ghost", func() { s.applyEnvironmentPage("local", "codex-cli", []Object{s.selected}, true) }),
-			button(cx, "absent-directory", "Absent directory", nil, "ghost", func() { s.applyEnvironmentPage("local", "codex-cli", nil, true) }),
+			button(cx, "partial-directory", "Partial directory", nil, "ghost", func() { s.applyEnvironmentPage("local", "pi", nil, false) }),
+			button(cx, "present-directory", "Present directory", nil, "ghost", func() { s.applyEnvironmentPage("local", "pi", []Object{s.selected}, true) }),
+			button(cx, "absent-directory", "Absent directory", nil, "ghost", func() { s.applyEnvironmentPage("local", "pi", nil, true) }),
 			core.Dynamic(func(cx *core.Scope) core.Node { return s.dialogView(cx, s.dialog.Get()) })}}
 	}, nsgotest.Size(800, 1000), nsgotest.Environment(core.Environment{Locale: "zh-CN", Idiom: core.IdiomDesktop}))
 	ss := s.sessions[2]
@@ -123,7 +126,6 @@ func TestRemovalReconciliationClosesOnlyMatchingConversationAndDialog(t *testing
 			var s *State
 			app := nsgotest.Start(t, func(cx *core.Scope) core.Node {
 				s = sidebarInteractionFixture(cx)
-				s.suspended = true
 				s.target, s.selected = "local", s.sessions[2]
 				if name == "other" {
 					s.target, s.selected = "remote", s.sessions[1]
@@ -131,7 +133,7 @@ func TestRemovalReconciliationClosesOnlyMatchingConversationAndDialog(t *testing
 				s.draft.Set("draft")
 				s.uncertainRemovals = map[string]bool{sessionIdentity(s.sessions[2]): true}
 				s.requestSessionRemoval(s.selected)
-				return button(cx, "reconcile-removal", "Reconcile", nil, "ghost", func() { s.applyEnvironmentPage("local", "codex-cli", nil, true) })
+				return button(cx, "reconcile-removal", "Reconcile", nil, "ghost", func() { s.applyEnvironmentPage("local", "pi", nil, true) })
 			})
 			app.Press("id:reconcile-removal")
 			if name == "other" {

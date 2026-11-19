@@ -384,6 +384,7 @@ func (p *Provider) ipcTranscript(ctx context.Context, id, cursor string) (provid
 	}
 	start := max(0, end-30)
 	out := provider.Transcript{Session: p.session(stateThread(state)), Turns: []provider.Turn{}, StreamEpoch: epoch, StreamCursor: boundary}
+	out.Queue = p.messageQueue(ctx, id, cursor, acceptedQueueMessages(turns))
 	if (start > 0 || !complete) && end > 0 {
 		out.NextCursor = "ipc:" + base64.RawURLEncoding.EncodeToString([]byte(stringValue(turns[start]["id"])))
 	}
@@ -396,7 +397,9 @@ func (p *Provider) ipcTranscript(ctx context.Context, id, cursor string) (provid
 		p.attachments(ctx, id, out.Session.CWD, &normalized, raw)
 		out.Turns = append(out.Turns, normalized)
 		out.Session.RecencyAt = max(out.Session.RecencyAt, provider.ConversationRecency([]provider.Turn{normalized}))
-		if err = provider.EmitTranscriptTurn(ctx, out, normalized); err != nil {
+		progress := out
+		progress.Queue = nil // Do not repeat the queue for every history text part.
+		if err = provider.EmitTranscriptTurn(ctx, progress, normalized); err != nil {
 			return out, true, err
 		}
 	}

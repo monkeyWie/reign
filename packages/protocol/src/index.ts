@@ -116,6 +116,9 @@ export interface Session {
   title: string;
   preview: string;
   cwd: string;
+  project?: { id?: string; name?: string; root?: string; roots?: string[] };
+  /** Host-resolved execution checkout; repository excludes credentials and URL parameters. */
+  gitInfo?: { repository?: string; branch?: string; commit?: string };
   projectDir?: string;
   projectKey?: string;
   /** Unix milliseconds; 0 means the Agent did not supply a creation time. */

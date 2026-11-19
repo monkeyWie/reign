@@ -60,6 +60,23 @@ func (s *State) markSessionRead(ss Object) {
 	}
 }
 
+func (s *State) sessionUnread(ss Object) bool {
+	return s.unreadSessions[activityIdentity(ss)] && !s.sessionActive(ss)
+}
+
+func (s *State) anySessionUnread(sessions []Object) bool {
+	for _, ss := range sessions {
+		if s.sessionUnread(ss) {
+			return true
+		}
+	}
+	return false
+}
+
+func unreadDot(cx *core.Scope, id, title string) core.Node {
+	return core.View{TestID: "unread-" + id, Label: title, Tooltip: tooltipCard(cx, label(cx, title, 12, false)), Style: core.Style{Width: core.Pt(7), Height: core.Pt(7), CornerRadius: 4, FlexShrink: 0}, StyleFunc: func() core.Style { return core.Style{Background: palette(cx).brand} }}
+}
+
 func (s *State) sessionStatusLabel(ss Object) string {
 	l := locales.For(s.cx)
 	if s.sessionActive(ss) {
@@ -94,6 +111,6 @@ func (s *State) sessionStatusIndicator(cx *core.Scope, id string, item func() di
 			}
 			return s.loadingRing("running-"+id, label, 14)
 		}
-		return core.View{TestID: "unread-" + id, Label: label, Tooltip: tooltipCard(cx, dynamicText(cx, status.Get, 12, false)), Style: core.Style{Width: core.Pt(7), Height: core.Pt(7), CornerRadius: 4}, StyleFunc: func() core.Style { return core.Style{Background: palette(cx).brand} }}
+		return unreadDot(cx, id, label)
 	})}}
 }

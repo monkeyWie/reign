@@ -28,6 +28,33 @@ func TestLiveDeltaDoesNotMutateEarlierHistoryOrCachedSnapshot(t *testing.T) {
 	}
 }
 
+func TestOnlyLiveTailToolGroupAnimates(t *testing.T) {
+	turn := Object{"id": "t", "status": "inProgress", "items": []Object{
+		{"id": "old-tools", "role": "tool", "status": "completed"},
+		{"id": "progress", "role": "assistant", "phase": "commentary", "text": "Next step"},
+		{"id": "current-tools", "role": "tool", "status": "inProgress"},
+	}}
+	check := func(want string) {
+		t.Helper()
+		var running []string
+		for _, message := range messages(Object{"turns": []Object{turn}}) {
+			if message.Role == "activity" && message.Live {
+				running = append(running, message.ID)
+			}
+		}
+		if strings.Join(running, ",") != want {
+			t.Fatalf("animated tool groups = %v, want %q", running, want)
+		}
+	}
+	check("t|tools|current-tools")
+	turn["items"] = append(objects(turn["items"]), Object{"id": "answer", "role": "assistant", "text": "Answer"})
+	check("")
+	turn["items"] = append(objects(turn["items"]), Object{"id": "last-tools", "role": "tool", "status": "inProgress"})
+	check("t|tools|last-tools")
+	turn["status"] = "completed"
+	check("")
+}
+
 func BenchmarkApplyLiveDeltaLargeHistory(b *testing.B) {
 	turns := make([]Object, 3000)
 	for i := range turns {
@@ -61,7 +88,7 @@ func TestQuestionReplyPresentationKeepsOriginalMessage(t *testing.T) {
 }
 
 func TestDirectoryRoutingAndCreationOrder(t *testing.T) {
-	rows := []Object{{"id": "same", "providerId": "codex-cli", "sourceKind": "app", "cwd": "/a/project", "updatedAt": 30, "createdAt": 30}, {"id": "same", "providerId": "codex-app", "sourceKind": "app", "cwd": "/a/project", "updatedAt": 29, "createdAt": 29}, {"id": "c", "providerId": "claude-code", "cwd": "/a/project", "updatedAt": 40, "createdAt": 40}, {"id": "other", "providerId": "codex-cli", "sourceKind": "cli", "cwd": "/b/project", "updatedAt": 20, "createdAt": 20}, {"id": "vscode", "providerId": "codex-vscode", "cwd": "/a/project", "updatedAt": 100, "createdAt": 100}}
+	rows := []Object{{"id": "same", "providerId": "codex-app", "sourceKind": "app", "cwd": "/a/project", "updatedAt": 30, "createdAt": 30}, {"id": "same", "providerId": "codex-app", "sourceKind": "app", "cwd": "/a/project", "updatedAt": 29, "createdAt": 29}, {"id": "c", "providerId": "claude-code", "cwd": "/a/project", "updatedAt": 40, "createdAt": 40}, {"id": "other", "providerId": "codex-app", "sourceKind": "cli", "cwd": "/b/project", "updatedAt": 20, "createdAt": 20}, {"id": "vscode", "providerId": "codex-vscode", "cwd": "/a/project", "updatedAt": 100, "createdAt": 100}}
 	d := projectGroups(rows)
 	if len(d) != 2 || d[0].Path != "/a/project" || len(d[0].Sessions) != 2 || str(d[0].Sessions[0], "id") != "c" || str(d[0].Sessions[1], "providerId") != "codex-app" {
 		t.Fatalf("lost route/group/order: %#v", d)
@@ -175,7 +202,7 @@ func TestProjectGroupingCombinesWorktreesAndKeepsExecutionDirectories(t *testing
 	project := Object{"id": "gopeed", "name": "Gopeed", "root": "/projects/gopeed"}
 	sessions := []Object{
 		{"id": "main", "providerId": "codex-app", "cwd": "/projects/gopeed", "projectDir": "/projects/gopeed", "project": project, "updatedAt": 10, "createdAt": 10},
-		{"id": "work", "providerId": "codex-cli", "cwd": "/worktrees/feature", "projectDir": "/projects/gopeed", "project": project, "updatedAt": 40, "createdAt": 40},
+		{"id": "work", "providerId": "codex-app", "cwd": "/worktrees/feature", "projectDir": "/projects/gopeed", "project": project, "updatedAt": 40, "createdAt": 40},
 		{"id": "other", "providerId": "codex-app", "cwd": "/other/gopeed", "projectDir": "/other/gopeed", "project": Object{"id": "other", "name": "Gopeed", "root": "/other/gopeed"}, "updatedAt": 30, "createdAt": 30},
 		{"id": "plain", "providerId": "claude-code", "cwd": "/plain/project", "updatedAt": 20, "createdAt": 20},
 	}
@@ -211,7 +238,7 @@ func TestProjectGroupingCombinesWorktreesAndKeepsExecutionDirectories(t *testing
 func TestMissingProjectDirectoryFallsBackToExecutionDirectory(t *testing.T) {
 	sessions := []Object{
 		{"id": "a", "providerId": "codex-app", "cwd": "/work/a", "project": Object{"id": "p", "name": "Project"}, "updatedAt": 10, "createdAt": 10},
-		{"id": "b", "providerId": "codex-cli", "cwd": "/work/b", "project": Object{"id": "p", "name": "Project"}, "updatedAt": 20, "createdAt": 20},
+		{"id": "b", "providerId": "codex-app", "cwd": "/work/b", "project": Object{"id": "p", "name": "Project"}, "updatedAt": 20, "createdAt": 20},
 	}
 	groups := projectGroups(sessions)
 	if len(groups) != 2 || groups[0].Path != "/work/b" || groups[1].Path != "/work/a" {

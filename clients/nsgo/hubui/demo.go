@@ -18,7 +18,7 @@ type demoAPI struct {
 func newDemoAPI() *demoAPI {
 	now := time.Now().UnixMilli()
 	s := Object{"id": "demo-chat", "providerId": "codex-app", "title": "ReignHub 界面与连接方案", "cwd": "/workspace/agenthub", "updatedAt": now, "createdAt": now, "sourceKind": "app", "model": "gpt-5.4"}
-	return &demoAPI{sessions: []Object{s, {"id": "demo-cli", "providerId": "codex-cli", "title": "检查客户端的同步状态", "cwd": "/workspace/agenthub", "updatedAt": now - 1000, "createdAt": now - 1000, "sourceKind": "cli"}, {"id": "demo-claude", "providerId": "claude-code", "title": "整理组件与主题", "cwd": "/workspace/design-system", "updatedAt": now - 2000, "createdAt": now - 2000, "sourceKind": "custom"}}, transcript: Object{"session": s, "turns": []Object{{"id": "demo-turn", "status": "completed", "items": []Object{{"id": "demo-user", "role": "user", "text": "统一聚合这些会话，按照工作目录分组。\n\n桌面和手机都要保持一致的体验。", "timestampMs": now - 20000}, {"id": "demo-assistant", "role": "assistant", "text": "已按工作目录聚合会话，项目中的会话按创建时间排序，项目下方的最近区按发送消息或 Agent 回复完成时间展示全部未置顶会话。\n\n## 连接方式\n\n- 优先尝试 **WebRTC 直连**\n- 不可直连时使用自己的 WSS 中继\n- 断线后保留本地消息缓存\n\n```go\nfunc main() {\n    nsgo.Run(hubui.Root)\n}\n```\n\n| 平台 | UI |\n| --- | --- |\n| 桌面 / 手机 | 原生视图 |\n| 浏览器 | Go WASM + DOM |", "timestampMs": now - 10000}}}}}}
+	return &demoAPI{sessions: []Object{s, {"id": "demo-pi", "providerId": "pi", "title": "检查客户端的同步状态", "cwd": "/workspace/agenthub", "updatedAt": now - 1000, "createdAt": now - 1000, "sourceKind": "custom"}, {"id": "demo-claude", "providerId": "claude-code", "title": "整理组件与主题", "cwd": "/workspace/design-system", "updatedAt": now - 2000, "createdAt": now - 2000, "sourceKind": "custom"}}, transcript: Object{"session": s, "turns": []Object{{"id": "demo-turn", "status": "completed", "items": []Object{{"id": "demo-user", "role": "user", "text": "统一聚合这些会话，按照工作目录分组。\n\n桌面和手机都要保持一致的体验。", "timestampMs": now - 20000}, {"id": "demo-assistant", "role": "assistant", "text": "已按工作目录聚合会话，项目中的会话按创建时间排序，项目下方的最近区按发送消息或 Agent 回复完成时间展示全部未置顶会话。\n\n## 连接方式\n\n- 优先尝试 **WebRTC 直连**\n- 不可直连时使用自己的 WSS 中继\n- 断线后保留本地消息缓存\n\n```go\nfunc main() {\n    nsgo.Run(hubui.Root)\n}\n```\n\n| 平台 | UI |\n| --- | --- |\n| 桌面 / 手机 | 原生视图 |\n| 浏览器 | Go WASM + DOM |", "timestampMs": now - 10000}}}}}}
 }
 func (*demoAPI) CanHost() bool { return true }
 func (*demoAPI) Close()        {}
@@ -78,6 +78,8 @@ func (d *demoAPI) Call(ctx context.Context, method string, p Object, target stri
 			}
 		}
 		return out, nil
+	case "client.draft.get", "client.draft.put":
+		return nil, nil
 	case "client.assetCache.get":
 		return nil, nil
 	case "client.assetCache.put", "client.assetCache.clear":
@@ -124,5 +126,5 @@ func (d *demoAPI) Call(ctx context.Context, method string, p Object, target stri
 	return nil, fmt.Errorf("演示环境不提供 %s / %s", method, str(r, "method"))
 }
 func demoProviders() []Object {
-	return []Object{{"id": "codex-app", "name": "Codex App", "installed": true, "state": "ready", "detail": "已就绪", "capabilities": Object{"sessionRemoval": "archive", "desktop": true, "history": true, "create": true, "imageInput": true, "fileInput": true}}, {"id": "codex-cli", "name": "Codex CLI", "installed": true, "state": "ready", "detail": "已就绪", "capabilities": Object{"sessionRemoval": "archive", "history": true, "create": true}}, {"id": "claude-code", "name": "Claude Code", "installed": true, "state": "ready", "detail": "已就绪", "capabilities": Object{"sessionRemoval": "archive", "history": true}}}
+	return []Object{{"id": "codex-app", "name": "Codex", "installed": true, "state": "ready", "detail": "已就绪", "capabilities": Object{"sessionRemoval": "archive", "desktop": true, "history": true, "create": true, "imageInput": true, "fileInput": true}}, {"id": "pi", "name": "Pi", "installed": true, "state": "ready", "detail": "已就绪", "capabilities": Object{"sessionRemoval": "archive", "history": true, "create": true}}, {"id": "claude-code", "name": "Claude Code", "installed": true, "state": "ready", "detail": "已就绪", "capabilities": Object{"sessionRemoval": "archive", "history": true}}}
 }

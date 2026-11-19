@@ -1,0 +1,33 @@
+---
+title: Connect Codex
+description: Manage Codex App, CLI and VS Code sessions from one integration.
+---
+
+## One Codex entry
+
+ReignHub shows one **Codex** integration. Sessions created in the App, CLI or VS Code appear together, grouped by project. Their creation source remains available in session details.
+
+1. Install Codex on the host and confirm it works locally.
+2. Keep the application, terminal or editor managing your session available.
+3. Open ReignHub. Codex connects automatically and its switch defaults on.
+4. Open a session in the sidebar, or connect another device to manage it remotely.
+
+No App restart or separate CLI enablement is required. On desktop platforms, live interaction requires a compatible, reachable local Codex connection service. A visible history entry alone does not prove its current owner can be reached.
+
+<ArchitectureDiagram kind="codex" />
+
+## Ownership and quitting
+
+Existing sessions execute through their current owner. Sessions created by ReignHub use its private Codex backend. Explicitly quitting ReignHub closes that backend and may interrupt its tasks; it does not terminate the external Codex App, CLI or editor. Closing the window keeps ReignHub in the tray.
+
+## Connection and retry
+
+After a connection interruption, ReignHub follows the current state again. If a send result is unknown, it is not automatically replayed: check the conversation first. ReignHub never takes over an active writer merely because its connection is unavailable.
+
+On Windows, an access-denied error may identify an SSH or VS Code environment holding the connection service. Follow the displayed guidance to close the corresponding instance in that environment, then reopen desktop Codex App and retry. ReignHub does not change permissions or terminate user processes.
+
+## Support boundaries
+
+Codex's local IPC interface can change with updates. Following sessions currently supports state versions 11 and 13; publishing ReignHub-owned state uses version 11. Unknown versions fail explicitly, while available saved history can still load through read-only APIs. The Codex executable remains required for history, model lists and new sessions, including when it is bundled with the desktop App.
+
+Isolated tests verify source preservation, routing, live state and failure recovery. Compatibility with each installed App, CLI and VS Code version still requires device verification.

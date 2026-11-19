@@ -241,22 +241,29 @@ func (s *State) message(cx *core.Scope, get func() Message) core.Node {
 			}
 		}
 		return label(cx, choose(im.Alt != "", im.Alt, "图片不可用"), 13, true)
-	}, Selectable: true, OpenLinks: false, OnLinkPress: func(e textview.LinkPressEvent) { s.openLink(cx, get(), e.URL) }, CodeBlockActions: []textview.CodeAction{{ID: textview.CopyAction, Label: "复制"}}, Styles: textview.Styles{textview.PartRoot: core.Style{FontSize: 15, LineHeight: 25, MinWidth: core.Pt(0), Width: bodyWidth}}, StyleOf: func(p textview.Part) core.Style {
-		c := palette(cx)
-		switch p {
-		case textview.PartRoot, textview.PartParagraph, textview.PartHeading:
-			return core.Style{Color: c.foreground}
-		case textview.PartCodeBlock:
-			return core.Style{Background: c.code, BorderWidth: 1, BorderColor: c.border, CornerRadius: 12, Overflow: core.Hidden}
-		case textview.PartCodeBlockScroll:
-			return core.Style{Background: c.code, Padding: core.All(18)}
-		case textview.PartCode:
-			return core.Style{Color: c.brand, Background: c.code, CornerRadius: 4}
-		case textview.PartLink, textview.PartFootnoteReference:
-			return core.Style{Color: c.brand, TextDecorationColor: c.brand.Faded(.5)}
-		}
-		return core.Style{}
-	}}
+	}, Selectable: true, OpenLinks: false, OnLinkPress: func(e textview.LinkPressEvent) { s.openLink(cx, get(), e.URL) }, CodeBlockActions: []textview.CodeAction{{ID: textview.CopyAction, Label: "复制代码"}},
+		RenderCodeBlockAction: func(cx *core.Scope, a textview.CodeBlockAction) core.Node {
+			return core.View{TestID: "code-copy-icon", Tooltip: tooltipCard(cx, dynamicText(cx, func() string { return choose(a.Done(), "已复制", "复制代码") }, 12, false)), Children: []core.Node{core.Dynamic(func(cx *core.Scope) core.Node {
+				return core.View{TestID: choose(a.Done(), "code-copy-done", "code-copy-ready"), Children: []core.Node{glyph(cx, choose(a.Done(), lucide.Check, lucide.Copy), 16)}}
+			})}}
+		}, Styles: textview.Styles{textview.PartRoot: core.Style{FontSize: 15, LineHeight: 25, MinWidth: core.Pt(0), Width: bodyWidth}}, StyleOf: func(p textview.Part) core.Style {
+			c := palette(cx)
+			switch p {
+			case textview.PartRoot, textview.PartParagraph, textview.PartHeading:
+				return core.Style{Color: c.foreground}
+			case textview.PartCodeBlock:
+				return core.Style{Background: c.code, BorderWidth: 1, BorderColor: c.border, CornerRadius: 12, Overflow: core.Hidden}
+			case textview.PartCodeBlockAction:
+				return contextualIconStyle(cx).Merge(core.Style{Width: core.Pt(30), Height: core.Pt(30), Padding: core.All(7), Background: core.RGBA(0, 0), BorderStyle: core.BorderNone, CornerRadius: 6})
+			case textview.PartCodeBlockScroll:
+				return core.Style{Background: c.code, Padding: core.Edges{Top: 38, Left: 18, Right: 18, Bottom: 18}}
+			case textview.PartCode:
+				return core.Style{Color: c.brand, Background: c.code, CornerRadius: 4}
+			case textview.PartLink, textview.PartFootnoteReference:
+				return core.Style{Color: c.brand, TextDecorationColor: c.brand.Faded(.5), Cursor: core.CursorPointer}
+			}
+			return core.Style{}
+		}}
 	var bodyContent core.Node = body
 	if user {
 		// A menu/selection belongs to these text views. Polls, delivery changes,
@@ -373,6 +380,23 @@ func (s *State) activity(cx *core.Scope, get func() Message) core.Node {
 	}}}}
 }
 func (s *State) composer(cx *core.Scope) core.Node {
+	input := &core.Ref{}
+	key, generation := s.key(), s.sessionGeneration
+	focusRequested := false
+	cx.Effect(func() {
+		s.read()
+		if focusRequested || s.key() != key || s.sessionGeneration != generation || !s.draftReady() {
+			return
+		}
+		focusRequested = true
+		// Focus after the restored draft and enabled editor reach the platform.
+		// This scope belongs to the entry, so navigation cancels a pending focus.
+		cx.Post(func() {
+			if s.key() == key && s.sessionGeneration == generation && s.draftReady() && s.dialog.GetUntracked() == "" {
+				input.Focus()
+			}
+		})
+	})
 	inputHeight := core.NewSignal(cx, core.Points(56))
 	modelCatalog := core.NewMemo(cx, func() string {
 		s.read()
@@ -380,12 +404,16 @@ func (s *State) composer(cx *core.Scope) core.Node {
 		return string(b) + "|" + s.model + "|" + fmt.Sprint(activeTurn(s.transcript) != nil)
 	})
 	running := func() bool { s.read(); return s.connected() && activeTurn(s.transcript) != nil }
-	disabled := func() bool { s.read(); return !s.connected() }
+	disabled := func() bool { s.read(); return !s.connected() || !s.draftReady() }
 	submit := core.SubmitBehaviorSubmit
 	if isMobile(cx) {
 		submit = core.SubmitBehaviorNewline
 	}
-	return core.View{Style: core.Style{AlignItems: core.AlignCenter, Padding: core.Edges{Top: 6, Left: 18, Right: 18, Bottom: 18}, PaddingEnv: core.EnvEdges{Bottom: core.EnvKeyboard}}, Children: []core.Node{core.Show{When: s.errorAtComposer, Then: func(cx *core.Scope) core.Node { return s.errorOverlay(cx, true) }}, core.View{TestID: "composer-card", OnFileDrop: func(uris []string) {
+	return core.View{Style: core.Style{AlignItems: core.AlignCenter, Padding: core.Edges{Top: 6, Left: 18, Right: 18, Bottom: 18}, PaddingEnv: core.EnvEdges{Bottom: core.EnvKeyboard}}, Children: []core.Node{core.Show{When: s.errorAtComposer, Then: func(cx *core.Scope) core.Node { return s.errorOverlay(cx, true) }}, s.messageQueueView(cx), core.Show{When: func() bool { s.read(); return s.draftSaveFailed }, Then: func(cx *core.Scope) core.Node {
+		return button(cx, "retry-save-draft", "重试保存草稿", lucide.RotateCcw, "ghost", func() { s.draftSaveFailed = false; s.draftWriter.retry(); s.changed() })
+	}}, core.Show{When: func() bool { s.read(); return s.draftLoads[s.key()] == "failed" }, Then: func(cx *core.Scope) core.Node {
+		return button(cx, "retry-draft", "重试恢复草稿", lucide.RotateCcw, "ghost", func() { s.loadDraft(); s.changed() })
+	}}, core.View{TestID: "composer-card", OnFileDrop: func(uris []string) {
 		if !isMobile(cx) {
 			s.drop(cx, uris)
 		}
@@ -394,13 +422,25 @@ func (s *State) composer(cx *core.Scope) core.Node {
 		return core.Style{Background: c.elevated, BorderColor: c.border, Color: c.foreground, Shadows: []core.BoxShadow{{Offset: core.Point{Y: 5}, Blur: 20, Color: core.RGB(0x000000).Faded(choose(cx.Dark(), float32(.18), float32(.07)))}}}
 	}, Children: []core.Node{
 		core.Show{When: func() bool { s.read(); return len(s.uploads) > 0 }, Then: func(cx *core.Scope) core.Node { return s.uploadPreviews(cx) }},
-		core.Input{TestID: "chat-input", Label: "消息", Placeholder: "发送消息…", Value: s.draft.Get, OnChange: s.draft.Set, Multiline: true, SubmitBehavior: submit, OnSubmit: func(string) { s.send(choose(running(), "steer", "send")) }, OnPaste: func(e core.PasteEvent) {
-			if !isMobile(cx) {
-				s.paste(cx, e)
-			}
-		}, OnContentSizeChange: func(size core.Size) { inputHeight.Set(min(168, max(56, size.Height+12))) }, Style: core.Style{FontSize: 14, LineHeight: 23, Padding: core.Symmetric(10, 4)}, StyleFunc: func() core.Style {
-			return textInputStyle(cx).Merge(core.Style{Height: core.Pt(inputHeight.Get())})
-		}},
+		core.Input{Ref: input, TestID: "chat-input", Label: "消息", Disabled: func() bool { s.read(); return !s.draftReady() }, Placeholder: "发送消息…", Value: s.draft.Get, OnChange: s.changeDraft, Multiline: true, SubmitBehavior: submit,
+			OnKeyPress: func(key string) {
+				if key != "Enter" {
+					s.beginDraftEdit()
+				}
+			},
+			OnCompositionChange: func(c core.Composition) {
+				if c.Composing {
+					s.beginDraftEdit()
+				}
+			},
+			OnSubmit: func(text string) { s.submitDraft(text, choose(running(), "steer", "send")) }, OnPaste: func(e core.PasteEvent) {
+				s.beginDraftEdit()
+				if !isMobile(cx) {
+					s.paste(cx, e)
+				}
+			}, OnContentSizeChange: func(size core.Size) { inputHeight.Set(min(168, max(56, size.Height+12))) }, Style: core.Style{FontSize: 14, LineHeight: 23, Padding: core.Symmetric(10, 4)}, StyleFunc: func() core.Style {
+				return textInputStyle(cx).Merge(core.Style{Height: core.Pt(inputHeight.Get())})
+			}},
 		core.View{Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 10}, Children: []core.Node{core.Show{When: func() bool { return s.agentCapability("imageInput") || s.agentCapability("fileInput") }, Then: func(cx *core.Scope) core.Node {
 			v := labelledIconButton(cx, "attach-files", "添加附件", lucide.Plus, func() { s.chooseFiles(cx) }).(core.View)
 			v.Disabled = disabled
@@ -440,10 +480,10 @@ func (s *State) composer(cx *core.Scope) core.Node {
 					return s.model
 				}
 				return "Agent 默认模型"
-			}, Options: options, Selected: func() string { s.read(); return s.model }, OnChange: func(id string) { s.model = id; s.changed() }, Width: 300, SearchLabel: "搜索模型"}}}
+			}, Options: options, Selected: func() string { s.read(); return s.model }, OnChange: func(id string) { s.model = id; s.persistDraft(); s.changed() }, Width: 300, SearchLabel: "搜索模型"}}}
 		}), core.Show{When: func() bool { return running() && s.agentCapability("interrupt") }, Then: func(cx *core.Scope) core.Node {
 			return core.View{TestID: "interrupt-generation", Role: core.RoleButton, Label: "停止生成", Tooltip: tooltipCard(cx, label(cx, "停止生成", 12, false)), Busy: func() bool { return s.pendingSend() == "interrupt" }, Disabled: func() bool { return !s.connected() || s.pendingSend() != "" }, OnPress: func(core.PressEvent) { s.send("interrupt") }, Style: core.Style{Width: core.Pt(36), Height: core.Pt(36), CornerRadius: 18, FlexShrink: 0, AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter}, StyleFunc: func() core.Style {
-				return pressStyle(cx).Merge(core.Style{Background: palette(cx).foreground, Active: &core.Style{Opacity: core.Alpha(.65)}})
+				return filledButtonStyle(cx)
 			}, Children: []core.Node{core.Show{When: func() bool { return s.pendingSend() == "interrupt" }, Then: func(cx *core.Scope) core.Node {
 				theme := *cx.Theme()
 				theme.Light.TextMuted, theme.Dark.TextMuted = theme.Light.Background, theme.Dark.Background
@@ -458,12 +498,11 @@ func (s *State) composer(cx *core.Scope) core.Node {
 			}
 			return "发送消息"
 		}, Busy: func() bool { return s.pendingSend() != "" && s.pendingSend() != "interrupt" }, Disabled: func() bool { return !s.canSend() }, OnPress: func(core.PressEvent) { s.send(choose(running(), "steer", "send")) }, Style: core.Style{Width: core.Pt(36), Height: core.Pt(36), CornerRadius: 18, FlexShrink: 0, AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter}, StyleFunc: func() core.Style {
-			c := palette(cx)
 			opacity := float32(1)
 			if !s.canSend() && (s.pendingSend() == "" || s.pendingSend() == "interrupt") {
 				opacity = .35
 			}
-			return pressStyle(cx).Merge(core.Style{Background: c.foreground, Color: c.background, Opacity: core.Alpha(opacity), Active: &core.Style{Opacity: core.Alpha(.65)}})
+			return filledButtonStyle(cx).Merge(core.Style{Opacity: core.Alpha(opacity)})
 		}, Children: []core.Node{core.Show{When: func() bool { return s.pendingSend() != "" && s.pendingSend() != "interrupt" }, Then: func(cx *core.Scope) core.Node {
 			theme := *cx.Theme()
 			theme.Light.TextMuted = theme.Light.Background
@@ -511,17 +550,6 @@ func (s *State) approvalCard(cx *core.Scope, a Object) core.Node {
 		title = str(a, "method")
 	}
 	return s.messageInset(cx, card(cx, label(cx, "Agent 请求授权", 14, false), label(cx, title, 12, true), core.View{Style: core.Style{Gap: 8}, Children: buttons}))
-}
-func (s *State) openLink(cx *core.Scope, m Message, url string) {
-	for _, a := range m.Attachments {
-		if str(a, "source") == url {
-			s.previewAttachment(m, a)
-			return
-		}
-	}
-	if strings.HasPrefix(url, "https://") || strings.HasPrefix(url, "http://") {
-		cx.OpenURL(url, nil)
-	}
 }
 
 func (s *State) workspaceSurface(cx *core.Scope) core.Style {

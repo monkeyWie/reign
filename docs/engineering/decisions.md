@@ -31,6 +31,25 @@ RPC payloads. Verification belongs to the environment, cache-race, shared local
 execution and responsive UI fixtures; it does not certify live vendor credentials
 or physical-device weak-network behavior.
 
+## Synchronize independently of visibility (2026-11-19, accepted)
+
+The earlier mobile policy cancelled reads on background entry and exempted
+Android foreground-service holders. Reusing it on desktop left completed Agent
+replies showing as running when a macOS window was covered. All controllers now
+retain synchronization for their application lifetime, including mobile/Web.
+Actual transport failures drive bounded recovery; foreground return reconciles
+history and presence without replaying commands or replacing a healthy watch.
+Android foreground-service availability only reports OS protection.
+
+This supersedes both eager mobile/Web suspension and the desktop-only exception.
+Background reads can consume more network and energy than eager suspension;
+existing concurrency limits, polling intervals and retry backoff remain in force.
+OS/browser freezing and process termination remain external limits. Only the
+shared controller lifecycle changes; Providers, persistence formats and the
+Go/Worker public service contract are unchanged. The [lifecycle contract](architecture.md#lifecycle-and-state-transitions)
+and [regressions and limits](troubleshooting.md#desktop-remains-on-an-old-running-reply-after-codex-finishes)
+own the implementation and verification details.
+
 ## Record a change
 
 For a cross-cutting decision, record the problem, choice, costs, affected boundaries and evidence. Ordinary local fixes do not need a long decision record.

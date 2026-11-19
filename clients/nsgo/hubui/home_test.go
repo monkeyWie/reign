@@ -27,7 +27,7 @@ func (a *homeDashboardAPI) Call(ctx context.Context, method string, p Object, ta
 		return host, err
 	case "providers":
 		return []any{
-			Object{"id": "codex-app", "name": "Codex App", "state": "connected", "installed": true, "detail": "已通过本地 IPC 接入"},
+			Object{"id": "codex-app", "name": "Codex", "state": "connected", "installed": true, "detail": "已通过本地 IPC 接入"},
 			Object{"id": "fixture-acp", "name": "Fixture Agent", "state": choose(a.enabled.Load(), "ready", "disabled"), "enabled": a.enabled.Load(), "installed": true, "detail": "隔离测试 Agent"},
 			Object{"id": "fixture-missing", "name": "Optional Agent", "state": "unavailable", "installed": false},
 		}, nil

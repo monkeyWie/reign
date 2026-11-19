@@ -122,7 +122,7 @@ func (s *State) finishSessionRemoval(ss Object) {
 	if s.removedSessions == nil {
 		s.removedSessions = map[string]bool{}
 	}
-	// Codex App/CLI may expose the same native thread; its archive removes both.
+	// Codex may expose the same native thread; its archive removes both.
 	matches := func(row Object) bool {
 		return str(row, "id") == id && agentFamily(str(row, "providerId")) == agentFamily(agent)
 	}
@@ -146,9 +146,10 @@ func (s *State) finishSessionRemoval(ss Object) {
 	}
 	w.sessions = kept
 	s.workspaces[target] = w
+	s.discardSessionDraft(target, agent, id)
 	s.clearRemovedSelection(target, agent, id)
 	s.publishWorkspaces()
-	s.notice = locales.For(s.cx).SessionRemoved()
+	s.showNotice(locales.For(s.cx).SessionRemoved())
 	s.saveSidebarPreferences()
 	s.pollCatalogues()
 }
@@ -179,13 +180,14 @@ func (s *State) reconcileSessionRemovals(target, agent string, incoming []Object
 		for key := range markers {
 			identity := decodeSessionIdentity(key)
 			if len(identity) == 3 && identity[0] == target && identity[1] == agent && !present[identity[2]] {
+				s.discardSessionDraft(target, agent, identity[2])
 				s.clearRemovedSelection(target, agent, identity[2])
 				if s.dialog.GetUntracked() == "remove-session" && sessionIdentity(s.removalTarget) == key {
 					s.closeDialog()
 				}
 				if s.uncertainRemovals[key] {
 					l := locales.For(s.cx)
-					s.notice = l.SessionRemoved()
+					s.showNotice(l.SessionRemoved())
 					if s.error == l.RemovalUncertain() {
 						s.error = ""
 					}

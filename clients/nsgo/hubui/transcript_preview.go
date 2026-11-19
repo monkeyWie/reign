@@ -92,6 +92,9 @@ func (b *transcriptPreview) add(fragment provider.Transcript) error {
 	if err := json.Unmarshal(raw, &value); err != nil {
 		return err
 	}
+	if _, ok := value["queue"]; !ok && b.metadata["queue"] != nil {
+		value["queue"] = b.metadata["queue"]
+	}
 	b.metadata = value
 	if b.indices == nil {
 		b.indices, b.items = map[string]int{}, map[string]map[string]int{}

@@ -72,6 +72,9 @@ filterMatches:
     count: { type: String }
 
 projects: "项目"
+activeSessionCount: "{count} 个活跃会话"
+moreProjectDetails: "还有 {count} 项 · 右键查看详情"
+detachedGitHead: "分离的 HEAD · {commit}"
 workDetails: "处理过程"
 workedFor: "已处理 {duration}"
 workedUnderSecond: "已处理不到 1 秒"

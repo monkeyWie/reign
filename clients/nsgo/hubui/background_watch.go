@@ -22,7 +22,7 @@ func (s *State) syncNativeTaskMonitors() {
 			}
 		}
 		selected := s.key() == target+"|"+str(task, "providerId")+"|"+str(task, "id")
-		needed := connected && !selected && !s.suspended && str(task, "status") == "inProgress"
+		needed := s.ctx.Err() == nil && connected && !selected && str(task, "status") == "inProgress"
 		monitor := s.nativeTaskMonitors[key]
 		if !needed && monitor != nil {
 			monitor.cancel()

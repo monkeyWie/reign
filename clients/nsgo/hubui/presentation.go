@@ -103,9 +103,9 @@ func messages(t Object) []Message {
 			}
 		}
 		tools := []Object{}
-		flush := func() {
+		flush := func(current bool) {
 			if len(tools) > 0 {
-				m := Message{ID: id + "|tools|" + str(tools[0], "id"), Role: "activity", Turn: id, Live: live, Tools: tools}
+				m := Message{ID: id + "|tools|" + str(tools[0], "id"), Role: "activity", Turn: id, Live: current, Tools: tools}
 				if fold {
 					details = append(details, m)
 				} else {
@@ -128,7 +128,7 @@ func messages(t Object) []Message {
 			if strings.TrimSpace(body) == "" && len(attachments) == 0 {
 				continue
 			}
-			flush()
+			flush(false)
 			m := Message{ID: id + "|" + str(item, "id"), Role: role, Text: body, Turn: id, Live: live && role == "assistant", Timestamp: number(item, "timestampMs"), Attachments: attachments}
 			if fold && role == "assistant" && str(item, "phase") == "commentary" {
 				details = append(details, m)
@@ -139,7 +139,9 @@ func messages(t Object) []Message {
 			flushDetails()
 			out = append(out, m)
 		}
-		flush()
+		// Only the activity group at the live tail represents the current work.
+		// Earlier groups stop animating as soon as a later message arrives.
+		flush(live)
 		flushDetails()
 		if workRow >= 0 && turn["durationMs"] != nil && number(turn, "durationMs") >= 0 {
 			out[workRow].DurationMS = new(number(turn, "durationMs"))
@@ -220,6 +222,9 @@ func messagePreviewText(m Message) string {
 
 func mergeLatest(old, latest Object) Object {
 	out := copyObject(latest)
+	if queue := object(latest["queue"]); queue != nil {
+		out["queue"] = mergeMessageQueue(object(old["queue"]), queue)
+	}
 	previous, next := objects(old["turns"]), append([]Object{}, objects(latest["turns"])...)
 	// A recovered connection can first return its last persisted snapshot.
 	// Preserve the live tail until a newer/final snapshot actually supersedes it.
@@ -245,7 +250,9 @@ func mergeLatest(old, latest Object) Object {
 			continue // A final snapshot is authoritative, including corrected text.
 		}
 		if str(prior, "status") != "inProgress" {
-			next[i] = prior
+			// A current snapshot can correct a persisted terminal status or
+			// describe a resumed turn. The stream reconciles its boundary and
+			// replays newer events before merging; old status is not a veto.
 			continue
 		}
 		merged := copyObject(turn)
@@ -323,6 +330,12 @@ func applyEvents(source Object, events []Object) (Object, bool) {
 			reset = true
 			continue
 		}
+		if kind == "queue" {
+			if queue := object(e["queue"]); queue != nil {
+				out["queue"] = mergeMessageQueue(object(out["queue"]), queue)
+			}
+			continue
+		}
 		id := str(e, "turnId")
 		if id == "" {
 			continue
@@ -341,13 +354,15 @@ func applyEvents(source Object, events []Object) (Object, bool) {
 		turn := turns[i]
 		terminal := str(turn, "status") == "completed" || str(turn, "status") == "failed" || str(turn, "status") == "interrupted"
 		if kind == "turn" {
-			if !terminal || str(e, "status") != "inProgress" {
-				turn["status"] = e["status"]
-				turn["recencyAt"] = max(number(turn, "recencyAt"), number(e, "recencyAt"))
-				recency = max(recency, number(turn, "recencyAt"))
-				if e["durationMs"] != nil && number(e, "durationMs") >= 0 {
-					turn["durationMs"] = e["durationMs"]
-				}
+			// Explicit lifecycle events are ordered by the subscription cursor.
+			// They may reopen a turn; item/text events alone must not do so.
+			turn["status"] = e["status"]
+			turn["recencyAt"] = max(number(turn, "recencyAt"), number(e, "recencyAt"))
+			recency = max(recency, number(turn, "recencyAt"))
+			if e["durationMs"] != nil && number(e, "durationMs") >= 0 {
+				turn["durationMs"] = e["durationMs"]
+			} else if terminal && str(e, "status") == "inProgress" {
+				delete(turn, "durationMs")
 			}
 			if str(e, "status") != "inProgress" {
 				reset = true

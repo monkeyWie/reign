@@ -63,8 +63,7 @@ func (s *State) emptyCatalogue(cx *core.Scope) core.Node {
 							}
 						}
 					case "create":
-						s.createDirectory = ""
-						s.dialog.Set("create")
+						s.openSessionCreation(nil)
 					case "agents":
 						s.manageDevice(control.LocalTarget)
 					case "connect":

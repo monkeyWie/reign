@@ -43,25 +43,15 @@ func sessionAccessHelp(raw string, failure *sessionOperationError) accessHelp {
 	if failure == nil || failure.Error() != raw || failure.method != "send" && failure.method != "steer" || !strings.HasPrefix(failure.provider, "codex-") || !strings.Contains(strings.ToLower(raw), "already has an active writer") {
 		return accessHelp{}
 	}
-	app := failure.provider == "codex-app" || failure.source == "app"
-	h := accessHelp{Title: "此会话暂时无法发送消息", Description: "该会话由另一个 Codex 进程管理。能查看会话历史，不代表 ReignHub 已接入它的运行后端。请按接入步骤启用远控后重试。"}
+	h := accessHelp{Title: "此会话暂时无法发送消息", Description: "该会话由另一个 Codex 进程管理，目前无法连接它。会话历史仍可查看，请确认所在设备上的 Codex 可用后再重试。"}
 	where := "被控电脑"
 	if failure.device != "" {
 		where += "「" + failure.device + "」"
 	}
-	if app {
-		h.Steps = []string{
-			"在" + where + "上打开 ReignHub，进入「设置 → Agent」。",
-			"保持 Codex App 运行，在「设置 → Agent」的「Codex App」卡片点击「启用」，通过本地 IPC 接入。",
-			"确认 Codex App 显示「已就绪」后，返回此会话重试发送。",
-		}
-	} else {
-		h.Steps = []string{
-			"在" + where + "上确认这个会话当前由哪个 Codex 应用或终端管理。",
-			"如果来自 Codex App：保持 App 运行，在 ReignHub「设置 → Agent」启用本地 IPC 接入。",
-			"如果来自 Codex CLI：需让 CLI 会话使用 ReignHub 已接入的共享后台；独立进程占用的会话不能直接接管。",
-			"接入完成后返回原会话重试；请勿仅因这个提示强制结束正在运行的任务。",
-		}
+	h.Steps = []string{
+		"在" + where + "上确认管理此会话的 Codex 应用、终端或编辑器仍在运行。",
+		"在 ReignHub「设置 → Agent」确认「Codex」已启用并显示「已就绪」；如有连接错误，请查看处理指引。",
+		"连接恢复后返回原会话重试；请勿仅因这个提示强制结束正在运行的任务。",
 	}
 	return h
 }

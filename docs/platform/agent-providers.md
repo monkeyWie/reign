@@ -29,7 +29,7 @@ flowchart LR
   Call --> RPC[Authenticated encrypted device RPC]
   Local --> Providers[Provider API on host]
   RPC --> Providers
-  Providers --> Codex[Codex app-server]
+  Providers --> Codex[Codex IPC and private app-server]
   Providers --> ACP[Go ACP SDK]
   Providers --> Pi[Pi native RPC]
   ACP --> Commands[Configured local ACP executables]
@@ -41,7 +41,7 @@ No change to Worker signaling, pairing, relay or policy interfaces is needed. Th
 
 ## Transport coverage
 
-Codex App and CLI retain their dedicated app-server providers. Claude Code, Cursor, OpenCode, Grok Build, Antigravity, Kiro, Muse Code, fx, DeepSeek Harness and Gemini CLI use ACP launch presets. Pi uses native RPC and an injected local approval extension.
+Codex uses one Provider for App, CLI and VS Code sessions, routing writes to the current IPC owner and using a private app-server for reads and new sessions. See the [Codex reference](../../internal/codex/README.md). Claude Code, Cursor, OpenCode, Grok Build, Antigravity, Kiro, Muse Code, fx, DeepSeek Harness and Gemini CLI use ACP launch presets. Pi uses native RPC and an injected local approval extension.
 
 T3 Code uses dedicated SDKs for Cursor and Muse. We use their currently published official ACP entry points (`cursor-agent acp`, `muse acp` with `MUSE_EXPERIMENTAL_ACP=on`) to keep the host free of an additional JavaScript SDK runtime and reuse the same protocol and UI. This covers portable ACP features, not every SDK-specific T3 feature.
 
@@ -91,6 +91,20 @@ host. Nonstandard ports remain distinct. No network access or Git process is use
 Unversioned/local-only origins fall back to device-scoped paths. Explicit separate
 worktree roots outside the main repository retain device-local identity.
 
+Optional `project.roots` retains an Agent's complete configured directory list;
+`project.root` remains its primary grouping root. Optional `gitInfo` describes
+the session's actual `cwd`: `branch` is a local branch name, `commit` is a full
+detached-HEAD object ID, and `repository` is a credential-free host/path display
+name. The shared workspace resolver reads bounded Git metadata files once per
+checkout per request, using a linked worktree's own HEAD and its common config.
+It performs no Git subprocess, network request, write or hover-triggered polling.
+Missing/unreadable data is omitted; no default branch is invented. A later
+catalogue request picks up branch changes without changing conversation timing.
+First pages, deltas and transcript responses use the same host enrichment;
+controllers keep the received metadata in their existing caches. Remote hosts
+must be updated to supply these optional fields. Go/Worker relays still forward
+opaque ciphertext and need no service changes.
+
 `createdAt` and `updatedAt` are Unix milliseconds. Codex app-server seconds are
 normalized; IPC dates are decoded before normalization. ReignHub-owned ACP/Pi
 sessions record creation when created. Imported Agents that do not supply creation
@@ -105,7 +119,7 @@ history without recorded boundaries remains unknown; neither native metadata
 creation time and a stable identity tie-breaker.
 
 Activity summaries must reflect the executor that actually owns the session.
-Codex App directory reads combine persisted metadata with bounded read-only IPC
+Codex directory reads combine persisted metadata with bounded read-only IPC
 owner state; the private reader's `notLoaded` does not describe another executor.
 Unknown state remains unknown. The [Codex adapter reference](../../internal/codex/README.md)
 owns lock probing, subscription bounds and runtime-state normalization. Local
@@ -126,7 +140,7 @@ The controller uses one Remove session action and describes that outcome before
 submission. Providers reject running, waiting and restoring sessions. Removal
 must never silently cancel independent Agent execution.
 
-Codex App/CLI use `thread/read` metadata to reject active work, then the supported
+Codex uses `thread/read` metadata to reject active work, then the supported
 `thread/archive` request with the exact `threadId`. The installed Codex
 `app-server generate-json-schema` contract was checked for these parameters.
 No writer takeover or private history-file deletion is used. ACP v1 and Pi do not

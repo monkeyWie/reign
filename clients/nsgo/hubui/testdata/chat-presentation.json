@@ -34,7 +34,7 @@
     },
     "ids": ["old|u","live|u","live|a","live|tools|t1","live|b","live|tools|t3"],
     "roles": ["user","user","assistant","activity","assistant","activity"],
-    "live": [false,false,true,true,true,true], "thinking": false
+    "live": [false,false,true,false,true,true], "thinking": false
   },
   {
     "name": "thinking only before visible text or tool activity",

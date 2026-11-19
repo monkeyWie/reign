@@ -73,6 +73,9 @@ func (b *TranscriptBuffer) Add(fragment Transcript) error {
 	b.Seen = true
 	b.StreamEpoch, b.StreamCursor = fragment.StreamEpoch, fragment.StreamCursor
 	b.Session, b.NextCursor = fragment.Session, fragment.NextCursor
+	if fragment.Queue != nil {
+		b.Queue = fragment.Queue
+	}
 	if b.turns == nil {
 		b.turns, b.items, b.texts = map[string]int{}, map[string]map[string]int{}, map[string]map[string]*TranscriptTextBuffer{}
 		b.Turns = []Turn{}

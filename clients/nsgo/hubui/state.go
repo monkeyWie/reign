@@ -20,13 +20,21 @@ type draftState struct {
 }
 
 type State struct {
+	draftWriter     *draftWriter
+	draftSaveFailed bool
+	draftLoads      map[string]string
+	restoreSession  Object
+	pinnedRefs      map[string]*core.Ref
+	pinDrag         *pinnedDrag
+
+	submittedDraft, submittedDraftSession                   string
 	directoryGeneration                                     uint64
 	phoneNav                                                *base.Nav[string]
 	phoneRoute                                              *core.Signal[string]
 	clientName                                              string
 	drafts                                                  map[string]draftState
 	expanded                                                map[string]bool
-	createDirectory                                         string
+	createProject                                           []projectLocation
 	cx                                                      *core.Scope
 	api                                                     API
 	ctx                                                     context.Context
@@ -41,13 +49,15 @@ type State struct {
 	accountStatusLoading                                    bool
 	accountDevices                                          []Object
 	target, error, notice, model                            string
+	noticeGeneration                                        uint64
+	noticeTimer                                             func() bool
 	failure                                                 *sessionOperationError
 	copiedValue                                             string
 	copyVersion                                             uint64
 	ready, polling, narrowChat, dark                        bool
 	manualRefresh                                           bool
 	actions                                                 map[string]bool
-	questionDrafts                                          map[string]map[string]string
+	questionDrafts                                          map[string]map[string]questionDraft
 	draft                                                   *core.Signal[string]
 	sessionWidth                                            *core.Signal[core.Points]
 	sidebarHidden                                           *core.Signal[bool]
@@ -67,7 +77,6 @@ type State struct {
 	retrying                                                map[string]time.Time
 	connections                                             map[string]*connectionHealth
 	connectionDetailTarget                                  string
-	suspended                                               bool
 	presencePolling                                         bool
 	presenceGeneration                                      uint64
 	devicePresence                                          map[string]Object
@@ -85,7 +94,7 @@ type State struct {
 	workspaces                                              map[string]workspaceCache
 	catalogues                                              map[string]*catalogueState
 	grouping                                                string
-	filters, recentFilters                                  sessionFilters
+	filters, recentFilters, pinnedFilters                   sessionFilters
 	removedSessions                                         map[string]bool
 	removalTarget                                           Object
 	uncertainRemovals                                       map[string]bool
@@ -125,13 +134,23 @@ func newState(cx *core.Scope, api API) *State {
 	s.phoneRoute = core.NewSignal(cx, "")
 	s.sidebarHidden = core.NewSignal(cx, false)
 	s.loadSidebarPreferences()
+	s.loadLastSession()
 	cx.Cleanup(func() {
 		cancel()
 		if s.watchCancel != nil {
 			s.watchCancel()
 		}
 	})
-	cx.OnQuit(func(context.Context) { cancel(); go api.Close() })
+	cx.OnQuit(func(ctx context.Context) {
+		s.persistDraft()
+		if s.draftWriter != nil {
+			_ = s.draftWriter.flush(ctx)
+		}
+		if !isWeb() {
+			cancel()
+			go api.Close()
+		}
+	})
 	return s
 }
 func (s *State) read()    { s.revision.Get() }
@@ -163,6 +182,20 @@ func (s *State) call(action, method string, p Object, done func(any)) {
 	})
 }
 func (s *State) initialize() {
+	s.draftLoads = map[string]string{}
+	s.draftWriter = newDraftWriter(s.ctx, s.api, func(err error) {
+		s.cx.Post(func() {
+			if s.ctx.Err() == nil {
+				s.draftSaveFailed = s.draftWriter.hasFailures()
+				if err != nil {
+					s.error = "草稿保存失败：" + err.Error()
+				} else if !s.draftSaveFailed && strings.HasPrefix(s.error, "草稿保存失败：") {
+					s.error = ""
+				}
+				s.changed()
+			}
+		})
+	})
 	// Saved devices are local data; native host startup must not delay browsing.
 	s.pollPresence()
 	s.observeLifecycle()
@@ -230,7 +263,7 @@ func (s *State) pollLocal() {
 		}
 		s.cx.Post(func() {
 			s.localPolling = false
-			if s.ctx.Err() != nil || s.suspended {
+			if s.ctx.Err() != nil {
 				return
 			}
 			if info != nil {
@@ -258,7 +291,7 @@ func (s *State) cancelCatalogue() {
 }
 
 func (s *State) refreshSessions() {
-	if s.manualRefresh || s.suspended || !s.anyConnected() || s.ctx.Err() != nil {
+	if s.manualRefresh || !s.anyConnected() || s.ctx.Err() != nil {
 		return
 	}
 	// A manual refresh supersedes a background read instead of showing its
@@ -269,7 +302,7 @@ func (s *State) refreshSessions() {
 }
 
 func (s *State) poll() {
-	if s.suspended || s.ctx.Err() != nil {
+	if s.ctx.Err() != nil {
 		return
 	}
 	s.pollPresence()
@@ -293,7 +326,7 @@ func (s *State) pollPresence() {
 				return
 			}
 			s.presencePolling = false
-			if s.ctx.Err() != nil || s.suspended {
+			if s.ctx.Err() != nil {
 				return
 			}
 			s.setConnectionIssue("", "presence", err)
@@ -312,7 +345,11 @@ func (s *State) pollPresence() {
 func visibleProviders(in []Object) []Object {
 	out := []Object{}
 	for _, p := range in {
-		if str(p, "id") != "codex-vscode" {
+		if str(p, "id") != "codex-vscode" && str(p, "id") != "codex-cli" {
+			if str(p, "id") == "codex-app" {
+				p = copyObject(p)
+				p["name"] = "Codex"
+			}
 			out = append(out, p)
 		}
 	}
@@ -334,7 +371,7 @@ func (s *State) key() string {
 	return s.target + "|" + str(s.selected, "providerId") + "|" + str(s.selected, "id")
 }
 func (s *State) rememberDraft() {
-	if s.selected != nil {
+	if s.selected != nil && s.draftReady() {
 		s.drafts[s.key()] = draftState{s.draft.GetUntracked(), s.model, s.uploads}
 	}
 }
@@ -343,6 +380,7 @@ func (s *State) selectDevice(id string) {
 		s.showPhoneSessions()
 		return
 	}
+	s.persistDraft()
 	s.rememberDraft()
 	s.rememberSession()
 	if s.watchCancel != nil {
@@ -364,6 +402,7 @@ func (s *State) selectDevice(id string) {
 	s.poll()
 }
 func (s *State) selectSession(session Object) {
+	s.restoreSession = nil
 	s.markSessionRead(session)
 	target := str(session, "deviceId")
 	if target == "" {
@@ -378,6 +417,7 @@ func (s *State) selectSession(session Object) {
 		s.changed()
 		return
 	}
+	s.persistDraft()
 	s.rememberDraft()
 	s.rememberSession()
 	s.sessionGeneration++
@@ -385,6 +425,7 @@ func (s *State) selectSession(session Object) {
 		s.watchCancel()
 	}
 	s.selected = session
+	s.saveLastSession()
 	s.transcriptSyncing = false
 	s.transcript = s.sessionCache[s.key()]
 	s.restoreOutgoing(s.transcript)
@@ -399,6 +440,7 @@ func (s *State) selectSession(session Object) {
 	if d.Model != "" {
 		s.model = d.Model
 	}
+	s.loadDraft()
 	s.timeline = &core.Ref{}
 	s.showPhoneChat()
 	s.changed()
@@ -406,12 +448,13 @@ func (s *State) selectSession(session Object) {
 	s.startSessionWatch()
 }
 func (s *State) startSessionWatch() {
-	if s.selected == nil || s.suspended || !s.connected() {
+	if s.ctx.Err() != nil || s.selected == nil || !s.connected() {
 		return
 	}
 	if s.watchCancel != nil {
 		s.watchCancel()
 	}
+	s.resumeDraftUploads()
 	s.transcriptSyncing = false
 	s.syncVisible = false
 	s.animateText = map[string]bool{}
@@ -441,9 +484,13 @@ func (s *State) startSessionWatch() {
 		})
 	}()
 	w := &sessionStream{s: s, ctx: ctx, target: target, provider: p, session: id, key: key, epoch: epoch, cursor: cursor, baseline: epoch != "", approvals: make(chan struct{}, 1)}
+	if previous := s.stream; previous != nil && previous.key == key {
+		w.verified = previous.verified
+	}
 	s.stream = w
-	if epoch == "" {
+	if epoch == "" || !w.verified {
 		// Do not gate the first readable messages on IPC/live subscription setup.
+		// A persisted cursor proves cache consistency, not current freshness.
 		w.startSnapshot()
 	}
 	go w.run(epoch, cursor)
@@ -509,7 +556,7 @@ func (s *State) pendingSend() string {
 }
 func (s *State) canSubmitMessage() bool {
 	s.read()
-	if s.selected == nil || !s.connected() || s.pendingSend() != "" {
+	if s.selected == nil || !s.connected() || !s.draftReady() || s.pendingSend() != "" {
 		return false
 	}
 	if activeTurn(s.transcript) != nil && !s.agentCapability("steer") {
@@ -529,7 +576,7 @@ func (s *State) canSend() bool {
 	return strings.TrimSpace(s.draft.Get()) != "" || len(s.uploads) > 0
 }
 func (s *State) send(method string) {
-	if s.selected == nil || !s.connected() || s.pendingSend() != "" {
+	if s.selected == nil || !s.connected() || !s.draftReady() || s.pendingSend() != "" {
 		return
 	}
 	if method == "interrupt" && !s.agentCapability("interrupt") {
@@ -615,7 +662,7 @@ func (s *State) decision(a Object, decision string) {
 	s.approvalAction(a, Object{"decision": decision})
 }
 func (s *State) autoReconnect() {
-	if s.suspended || s.directoryChecking {
+	if s.ctx.Err() != nil || s.directoryChecking {
 		return
 	}
 	for _, d := range s.devices {

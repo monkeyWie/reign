@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/monkeyWie/reignhub/internal/codexipc"
+	"github.com/monkeyWie/reignhub/internal/provider"
 	"github.com/monkeyWie/reignhub/internal/rpc"
 )
 
@@ -312,6 +313,9 @@ func (b *appIPC) queueChanged(id string) {
 	if o != nil {
 		messages = append(messages, o.queue...)
 	}
+	if o != nil {
+		b.p.stream().log.Publish(provider.StreamEvent{Kind: "queue", SessionID: id, Queue: combineQueues(ownedMessageQueue(o), o.serverQueue)})
+	}
 	b.mu.Unlock()
 	ctx, stop := context.WithTimeout(b.ctx, 3*time.Second)
 	defer stop()
@@ -336,6 +340,7 @@ func (b *appIPC) drainQueue(id string) {
 	o.draining = true
 	o.inflight = stringValue(message["id"])
 	b.mu.Unlock()
+	b.queueChanged(id)
 	defer func() {
 		b.mu.Lock()
 		o.draining = false
@@ -400,6 +405,7 @@ func (b *appIPC) drainQueue(id string) {
 	o.uncertain = true
 	o.blocked = stringValue(message["id"])
 	b.mu.Unlock()
+	b.queueChanged(id)
 	b.p.mu.Lock()
 	b.p.lastError = "Codex App 排队消息未确认，保留队列且不自动重发: " + err.Error()
 	b.p.mu.Unlock()

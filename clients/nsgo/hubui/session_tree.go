@@ -109,9 +109,6 @@ func sessionRecency(session Object) int64 {
 // remote conversation with the same vendor ID is still a different session.
 func uniqueSessions(sessions []Object) []Object {
 	unique := map[string]Object{}
-	preferred := func(s Object) bool {
-		return str(s, "providerId") == "codex-app" && str(s, "sourceKind") == "app" || str(s, "providerId") == "codex-cli" && str(s, "sourceKind") == "cli"
-	}
 	for _, session := range sessions {
 		if !visibleSession(session) {
 			continue
@@ -119,7 +116,7 @@ func uniqueSessions(sessions []Object) []Object {
 		b, _ := json.Marshal([]string{str(session, "deviceId"), agentFamily(str(session, "providerId")), str(session, "id")})
 		key := string(b)
 		old := unique[key]
-		if old == nil || preferred(session) && !preferred(old) || preferred(session) == preferred(old) && sessionUpdated(session) > sessionUpdated(old) {
+		if old == nil || sessionUpdated(session) > sessionUpdated(old) {
 			unique[key] = session
 		}
 	}
@@ -156,6 +153,9 @@ func (s *State) environmentName(target string) string {
 	return "未命名设备"
 }
 func (s *State) providerName(target, id string) string {
+	if id == "codex-app" {
+		return "Codex"
+	}
 	for _, p := range s.workspaces[target].providers {
 		if str(p, "id") == id && str(p, "name") != "" {
 			return str(p, "name")
@@ -169,6 +169,9 @@ func (s *State) providerName(target, id string) string {
 	return id
 }
 func (s *State) sessionActive(session Object) bool {
+	if !sessionRunning(session) {
+		return false
+	}
 	target := str(session, "deviceId")
 	if target == "" {
 		target = s.target
@@ -176,17 +179,21 @@ func (s *State) sessionActive(session Object) bool {
 	if !s.connectionReady(target) {
 		return false
 	}
-	return sessionRunning(session)
+	return true
 }
 
 type sessionTreeNode struct {
-	Key, Title, Kind, Path, Target, Provider string
-	Sessions                                 []Object
-	Children                                 []*sessionTreeNode
-	childrenByKey                            map[string]*sessionTreeNode
-	Created                                  int64
-	Count                                    int
-	named                                    bool
+	Key, Title, Kind, Path, Target, Provider, Project string
+	Sessions                                          []Object
+	Children                                          []*sessionTreeNode
+	childrenByKey                                     map[string]*sessionTreeNode
+	Created                                           int64
+	Count                                             int
+	named                                             bool
+	Unread                                            bool
+	Active                                            int
+	Repositories                                      []string
+	Directories                                       []groupDirectory
 }
 
 func (s *State) sessionTree(sessions []Object) []*sessionTreeNode {
@@ -202,7 +209,7 @@ func (s *State) sessionTree(sessions []Object) []*sessionTreeNode {
 		if s.grouping == groupAgent {
 			levels = append(levels, sessionTreeNode{Key: p, Title: s.providerName(target, p), Kind: "agent", Target: target, Provider: p})
 		}
-		levels = append(levels, sessionTreeNode{Key: project, Title: dir.Title, Kind: "project", Path: dir.Path, Target: target, Provider: p})
+		levels = append(levels, sessionTreeNode{Key: project, Project: project, Title: dir.Title, Kind: "project", Path: dir.Path, Target: target, Provider: p})
 		parent := root
 		for _, level := range levels {
 			encoded, _ := json.Marshal([]string{parent.Key, level.Kind, level.Key})
@@ -222,7 +229,17 @@ func (s *State) sessionTree(sessions []Object) []*sessionTreeNode {
 				found.named = true
 			}
 			found.Count++
+			if s.sessionActive(ss) {
+				found.Active++
+			}
+			if level.Kind == "project" {
+				found.Repositories, found.Directories = appendProjectDetails(found.Repositories, found.Directories, ss)
+			}
+			found.Unread = found.Unread || s.sessionUnread(ss)
 			found.Created = max(found.Created, sessionCreated(ss))
+			if found.Provider != p {
+				found.Provider = ""
+			}
 			if found.Target != target {
 				found.Target = ""
 				found.Provider = ""
@@ -254,10 +271,14 @@ func (s *State) sessionTree(sessions []Object) []*sessionTreeNode {
 }
 
 type directoryRow struct {
-	ID, Title, Path, Group, Kind, Section, Target, Provider string
-	Session                                                 Object
-	Header, More                                            bool
-	Depth, Count                                            int
+	ID, Title, Path, Group, Kind, Section, Target, Provider, Project string
+	Session                                                          Object
+	Header, More                                                     bool
+	Unread                                                           bool
+	Depth, Count                                                     int
+	Active                                                           int
+	Repositories                                                     []string
+	Directories                                                      []groupDirectory
 }
 
 func (s *State) directoryRows() []directoryRow {
@@ -270,7 +291,11 @@ func (s *State) directoryRows() []directoryRow {
 	}
 	rows := []directoryRow{}
 	pinned, projects, recent := []Object{}, []Object{}, []Object{}
+	hasPins := false
 	for _, ss := range sessions {
+		hasPins = hasPins || s.pinned[sessionIdentity(ss)] != 0
+	}
+	for _, ss := range s.sessionsMatching(s.pinnedFilters) {
 		if s.pinned[sessionIdentity(ss)] != 0 {
 			pinned = append(pinned, ss)
 		}
@@ -302,19 +327,22 @@ func (s *State) directoryRows() []directoryRow {
 	addSession := func(section string, ss Object, depth int) {
 		rows = append(rows, directoryRow{ID: section + ":" + sessionIdentity(ss), Title: str(ss, "title"), Path: str(ss, "cwd"), Session: ss, Section: section, Depth: depth})
 	}
-	if len(pinned) > 0 {
-		rows = append(rows, directoryRow{ID: "section:pinned", Title: locales.For(s.cx).PinnedSessions(), Kind: "section", Section: "pinned", Count: len(pinned), Header: true})
+	if hasPins {
+		rows = append(rows, directoryRow{ID: "section:pinned", Title: locales.For(s.cx).PinnedSessions(), Kind: "section", Section: "pinned", Count: len(pinned), Header: true, Unread: s.anySessionUnread(pinned)})
 		if !s.collapsed["section:pinned"] {
+			if s.pinnedFilters.count() > 0 {
+				rows = append(rows, directoryRow{ID: "filters:pinned", Kind: "filters", Section: "pinned", Header: true})
+			}
 			for _, ss := range pinned {
 				addSession("pinned", ss, 0)
 			}
 		}
 	}
-	rows = append(rows, directoryRow{ID: "section:all", Title: locales.For(s.cx).Projects(), Kind: "section", Section: "all", Count: len(projects), Header: true})
+	rows = append(rows, directoryRow{ID: "section:all", Title: locales.For(s.cx).Projects(), Kind: "section", Section: "all", Count: len(projects), Header: true, Unread: s.anySessionUnread(projects)})
 	var walk func([]*sessionTreeNode, int)
 	walk = func(nodes []*sessionTreeNode, depth int) {
 		for _, node := range nodes {
-			rows = append(rows, directoryRow{ID: "tree:" + node.Key, Group: node.Key, Title: node.Title, Path: node.Path, Target: node.Target, Provider: node.Provider, Kind: node.Kind, Count: node.Count, Depth: depth, Header: true})
+			rows = append(rows, directoryRow{ID: "tree:" + node.Key, Group: node.Key, Title: node.Title, Path: node.Path, Target: node.Target, Provider: node.Provider, Project: node.Project, Kind: node.Kind, Count: node.Count, Depth: depth, Header: true, Unread: node.Unread, Active: node.Active, Repositories: node.Repositories, Directories: node.Directories})
 			if s.collapsed[node.Key] {
 				continue
 			}
@@ -330,21 +358,21 @@ func (s *State) directoryRows() []directoryRow {
 		}
 		if len(projects) == 0 && s.filters.count() == 0 {
 			title := locales.For(s.cx).NoProjectSessions()
-			if len(pinned) > 0 {
+			if hasPins {
 				title = locales.For(s.cx).AllSessionsPinned()
 			}
 			rows = append(rows, directoryRow{ID: "empty:projects", Kind: "empty", Section: "all", Header: true, Title: title})
 		}
 		walk(s.sessionTree(projects), 0)
 	}
-	rows = append(rows, directoryRow{ID: "section:recent", Title: locales.For(s.cx).RecentSessions(), Kind: "section", Section: "recent", Count: len(recent), Header: true})
+	rows = append(rows, directoryRow{ID: "section:recent", Title: locales.For(s.cx).RecentSessions(), Kind: "section", Section: "recent", Count: len(recent), Header: true, Unread: s.anySessionUnread(recent)})
 	if !s.collapsed["section:recent"] {
 		if s.recentFilters.count() > 0 {
 			rows = append(rows, directoryRow{ID: "filters:recent", Kind: "filters", Section: "recent", Header: true})
 		}
 		if len(recent) == 0 && s.recentFilters.count() == 0 {
 			title := locales.For(s.cx).NoRecentSessions()
-			if len(pinned) > 0 {
+			if hasPins {
 				title = locales.For(s.cx).AllSessionsPinned()
 			}
 			rows = append(rows, directoryRow{ID: "empty:recent", Kind: "empty", Section: "recent", Header: true, Title: title})

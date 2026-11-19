@@ -160,7 +160,7 @@ func (s *State) agentSettings(cx *core.Scope) core.Node {
 			cx.Cleanup(func() { mounted = false })
 			info := row(agentGlyph(cx, str(p(), "id"), 22), agentLabel(cx, p), s.agentControls(cx, "settings-", p, s.openSettingsDialog))
 			actions := core.View{Style: core.Style{Direction: core.Row, Gap: 8, JustifyContent: core.JustifyEnd, Wrap: core.Wrap}, Children: []core.Node{
-				core.Show{When: func() bool { return str(p(), "id") != "codex-app" && str(p(), "id") != "codex-cli" }, Then: func(cx *core.Scope) core.Node {
+				core.Show{When: func() bool { return str(p(), "id") != "codex-app" }, Then: func(cx *core.Scope) core.Node {
 					return s.actionButton(cx, "configure-agent-"+str(p(), "id"), "配置", lucide.SlidersHorizontal, "ghost", func() {
 						providerID := str(p(), "id")
 						s.call("configure-agent-"+providerID, "host.agents", nil, func(v any) {

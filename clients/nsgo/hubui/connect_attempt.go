@@ -45,7 +45,8 @@ func (s *State) connect(p Object) {
 	}
 	a.record(a.step)
 	s.connectAttempt = a
-	s.error, s.notice = "", ""
+	s.error = ""
+	s.showNotice("")
 	s.dialog.Set("connecting")
 	s.changed()
 	ctx = connectivity.WithProgress(ctx, func(p connectivity.Progress) {

@@ -47,7 +47,7 @@ func TestAppIPCConnectionErrorPreservesCauseAndGuidance(t *testing.T) {
 		hint  string
 	}{
 		{os.ErrPermission, "相同权限级别"}, {os.ErrNotExist, "先打开"},
-		{context.DeadlineExceeded, "超时"}, {errors.New("fixture failure"), "连接 Codex App IPC 失败"},
+		{context.DeadlineExceeded, "超时"}, {errors.New("fixture failure"), "连接 Codex 失败"},
 	} {
 		err := appIPCConnectionError(fmt.Errorf("fixture: %w", tc.cause))
 		if !errors.Is(err, tc.cause) || !strings.Contains(err.Error(), tc.hint) {

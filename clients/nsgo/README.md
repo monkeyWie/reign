@@ -4,7 +4,7 @@
 
 ## 技术与目录
 
-按照 [NSGo 官方文档](https://nsgo.dev/zh/docs/) 开发，依赖版本以本目录 [go.mod](go.mod) 和 `go.sum` 为准。NSGo 尚无稳定版本，升级应单独做平台和界面回归。
+按照 [NSGo 官方文档](https://nsgo.dev/zh/docs/) 开发，依赖版本以本目录 [go.mod](go.mod) 和 `go.sum` 为准。当前使用 NSGo `v0.2.0`，其 API 仍在演进，升级应单独做平台和界面回归。
 
 - 原生平台使用 NSGo 平台视图，无 WebView；浏览器使用官方 Go WASM + DOM 后端。
 - `hubui/`：统一设备与会话侧栏、本机 Agent 面板、可配置项目树、聊天、模型选择、授权、图片附件及响应式布局。
@@ -76,7 +76,7 @@ Android 构建中，现有 Pion 依赖 `anet` 引用 Go 私有 zone cache，需�
 
 ### Android 后台连接与通知
 
-Android 通过 NSGo 的公开 Host API 调用 `ConnectionService`。有连接或用户发起的连接尝试时启用 `connectedDevice` 前台服务，通知栏显示连接状态；没有连接时停止服务。切后台时，确认服务已启动才保留 Go 订阅和网络连接；没有服务保护则使用暂停、恢复及补同步流程。回到前台不会重建仍健康的连接。
+Android 通过 NSGo 的公开 Host API 调用 `ConnectionService`。有连接或用户发起的连接尝试时启用 `connectedDevice` 前台服务，通知栏显示连接状态；没有连接时停止服务。所有端切后台后都继续同步，前台服务启动失败或停止也不会主动取消 Go 订阅和网络连接。系统实际挂起进程或中断连接后，恢复运行时自动补同步；回到前台不会重建仍健康的连接，也不会重发消息。
 
 实时观察到的任务按设备、Provider、会话和 turn 隔离通知；运行中显示进度，完成、失败或停止会更新通知。切到其他会话后，独立的 watch 继续跟踪已观察到的运行任务；历史缓存不会触发通知。点击任务通知重新打开对应会话。活动任务在线时持有带超时、定期续期的 partial WakeLock，结束、离线或服务停止时释放。
 

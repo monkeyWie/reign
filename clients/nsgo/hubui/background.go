@@ -9,9 +9,8 @@ import (
 	"github.com/nsgo-dev/nsgo/core"
 )
 
-// The native host supplies foreground-service lifetime; Go retains the same
-// transport, replay cursor and cache writer instead of restarting connections
-// when an Android activity becomes invisible.
+// The native host requests Android foreground-service protection. A denied or
+// stopped service does not cancel Go synchronization while execution continues.
 func (s *State) observeNativeBackground() {
 	if isWeb() || s.cx.Env().OS() != core.OSAndroid {
 		return
@@ -29,11 +28,7 @@ func (s *State) observeNativeBackground() {
 			if s.ctx.Err() != nil || s.nativeBackgroundState != string(encoded) {
 				return
 			}
-			wasKept := s.keepAlive
 			s.keepAlive = err == nil && flag(object(v), "running")
-			if wasKept != s.keepAlive {
-				s.setBackground(s.backgrounded)
-			}
 			if s.keepAlive && !s.notificationAsked {
 				s.notificationAsked = true
 				s.cx.RequestNotificationPermission(func(core.NotificationPermission) {
@@ -45,7 +40,6 @@ func (s *State) observeNativeBackground() {
 	})
 	s.cx.OnHostEvent("ras.background-state", func(v any) {
 		s.keepAlive = flag(object(v), "running")
-		s.setBackground(s.backgrounded)
 	})
 	s.cx.OnHostEvent("ras.network-change", func(any) {
 		// A network change ends the recovery pause, never a healthy data path.

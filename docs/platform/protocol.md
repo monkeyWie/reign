@@ -108,6 +108,19 @@ replies. Once a baseline exists, live watch events remain independent of
 background snapshot refreshes. Assistant commentary is retained in completed
 history, in its source order; completion does not hide prior visible replies.
 
+Transcript snapshots optionally include `queue: { state, messages }`; a `queue`
+watch event carries the same object without a turn ID. `state` is `ready` or
+`unknown`. Ready lists replace the queue in source order, including an empty
+list; unknown state retains prior messages as stale. Omission means no queue
+projection is provided. Each entry has its own `id`, `text`, normalized `status`
+(`queued`, `preparing`, `paused`, `uncertain`) and optional attachment previews
+(`name`, `kind`). Previews are not download resources. Queued messages are not
+turns and do not advance execution status or recency. Initial progressive
+metadata carries the queue once; subsequent text fragments may omit it.
+Assemblers preserve it, cache content with its watch cursor, and replay newer
+queue events over a delayed history snapshot. No new mutation or public service
+route is introduced. Go relay and Worker room continue forwarding opaque frames.
+
 ## Session directory metadata
 
 Session metadata includes `projectDir`, optional opaque `projectKey`, `cwd`,
@@ -116,6 +129,14 @@ Project identity is resolved on the owning host and shared by first pages,
 complete delta reconciliation, creation and transcript snapshots. The controller
 adds its environment ID locally for routing and grouping; it is not a Provider ID
 or a caller-selected replacement for the authenticated remote host.
+
+Optional `project` metadata includes `id`, `name`, primary `root` and associated
+`roots` (absolute directory strings on the owning device). Optional `gitInfo`
+contains `repository` (sanitized host/path, without credentials/query/fragment),
+`branch` (actual execution checkout's local branch), or `commit` (full detached
+HEAD object ID). Unknown values are omitted. These are display metadata, not
+new grouping identities or activity timestamps. Older hosts omit them; clients
+hide unavailable details and never inspect local paths for remote sessions.
 
 Local controllers use the same request and receipt semantics through an in-process
 Caller. Remote callers add authentication and encrypted transport and cannot use

@@ -44,9 +44,8 @@ func StartEmbedded(ctx context.Context, c config.Config) (*Embedded, error) {
 	}
 	attachments := assets.New(filepath.Join(c.DataDir, "attachments"))
 	backend := codex.New(c, key, events.New(), attachments)
-	cli := codex.NewCLI(c, events.New(), attachments)
-	providers := map[string]provider.Provider{"codex-app": backend, "codex-cli": cli}
-	closers := []func() error{backend.Close, cli.Close}
+	providers := map[string]provider.Provider{"codex-app": backend}
+	closers := []func() error{backend.Close}
 	for id, def := range agents.Catalog(c.Agents) {
 		if err := agents.Validate(id, def); err != nil {
 			log.Printf("Agent %s: %v", id, err)

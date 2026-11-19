@@ -35,7 +35,7 @@ func TestDeployedWorkerNativeRelay(t *testing.T) {
 	agent := testagent.New()
 	text := strings.Repeat("隔离测试历史消息🙂 with repeated JSON content.\n", 20000)
 	agent.Turns["existing"] = []provider.Turn{{ID: "history", Status: "completed", Items: []provider.Item{{ID: "message", Role: "assistant", Text: text}}}}
-	d := &control.Dispatcher{Providers: map[string]provider.Provider{"codex-cli": agent}}
+	d := &control.Dispatcher{Providers: map[string]provider.Provider{"codex-app": agent}}
 	m := host.New(cfg, d, func(config.Config) remote.Options { return remote.Options{RelayOnly: true} })
 	done := make(chan struct{})
 	go func() { defer close(done); m.Run(ctx) }()
@@ -59,7 +59,7 @@ func TestDeployedWorkerNativeRelay(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, req := range []control.Request{{Method: "providers"}, {Method: "sessions", Provider: "codex-cli"}, {Method: "transcript", Provider: "codex-cli", Session: "existing"}} {
+	for _, req := range []control.Request{{Method: "providers"}, {Method: "sessions", Provider: "codex-app"}, {Method: "transcript", Provider: "codex-app", Session: "existing"}} {
 		started := time.Now()
 		result, err := hub.Call(ctx, saved.ID, req)
 		if err != nil {

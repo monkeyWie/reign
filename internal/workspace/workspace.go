@@ -4,7 +4,6 @@ package workspace
 import (
 	"crypto/sha256"
 	"fmt"
-	"io"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -20,13 +19,15 @@ func CanonicalPath(path string) string {
 	return filepath.Clean(path)
 }
 
-type checkout struct{ root, repository, gitDir string }
+type checkout struct{ root, repository, gitDir, headDir string }
 
 // Resolver caches filesystem reads for one catalogue snapshot/request. Nothing
 // is persisted: newly created projects and worktrees are picked up next time.
 type Resolver struct {
 	paths        map[string]checkout
 	repositories map[string]string
+	origins      map[string]string
+	heads        map[string]provider.GitInfo
 }
 
 func (r *Resolver) directory(path string) checkout {
@@ -50,12 +51,14 @@ func (r *Resolver) directory(path string) checkout {
 			result = checkout{root: dir, repository: dir}
 			if info.IsDir() {
 				result.gitDir = CanonicalPath(marker)
-			} else if raw, err := os.ReadFile(marker); err == nil && strings.HasPrefix(strings.TrimSpace(string(raw)), "gitdir:") {
+				result.headDir = result.gitDir
+			} else if raw, err := readGitFile(marker, 4096); err == nil && strings.HasPrefix(strings.TrimSpace(string(raw)), "gitdir:") {
 				gitDir := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(string(raw)), "gitdir:"))
 				if !filepath.IsAbs(gitDir) {
 					gitDir = filepath.Join(dir, gitDir)
 				}
-				if raw, err := os.ReadFile(filepath.Join(gitDir, "commondir")); err == nil {
+				result.headDir = CanonicalPath(gitDir)
+				if raw, err := readGitFile(filepath.Join(gitDir, "commondir"), 4096); err == nil {
 					common := strings.TrimSpace(string(raw))
 					if !filepath.IsAbs(common) {
 						common = filepath.Join(gitDir, common)
@@ -91,6 +94,9 @@ func GitCommonDir(path string) string {
 }
 
 func (r *Resolver) Session(session provider.Session) provider.Session {
+	if session.CWD != "" {
+		session.GitInfo = r.gitInfo(r.directory(session.CWD))
+	}
 	if session.ProjectDir != "" {
 		session.ProjectDir = CanonicalPath(session.ProjectDir)
 	} else if session.Project != nil && session.Project.Root != "" {
@@ -123,12 +129,7 @@ func (r *Resolver) repositoryKey(gitDir string) string {
 		r.repositories = map[string]string{}
 	}
 	r.repositories[gitDir] = ""
-	f, err := os.Open(filepath.Join(gitDir, "config"))
-	if err != nil {
-		return ""
-	}
-	defer f.Close()
-	raw, err := io.ReadAll(io.LimitReader(f, 128<<10))
+	raw, err := readGitFile(filepath.Join(gitDir, "config"), 128<<10)
 	if err != nil {
 		return ""
 	}
@@ -146,8 +147,13 @@ func (r *Resolver) repositoryKey(gitDir string) string {
 		if len(parts) != 2 || strings.TrimSpace(parts[0]) != "url" {
 			continue
 		}
-		key := repositoryIdentity(strings.Trim(strings.TrimSpace(parts[1]), `"`))
+		remote := strings.Trim(strings.TrimSpace(parts[1]), `"`)
+		key := repositoryIdentity(remote)
 		r.repositories[gitDir] = key
+		if r.origins == nil {
+			r.origins = map[string]string{}
+		}
+		r.origins[gitDir] = repositoryAddress(remote)
 		return key
 	}
 	return ""
@@ -156,6 +162,14 @@ func (r *Resolver) repositoryKey(gitDir string) string {
 // Credentials, query parameters and fragments never leave the owning host.
 // SSH and HTTPS routes to the same repository share an opaque identity.
 func repositoryIdentity(remote string) string {
+	address := repositoryAddress(remote)
+	if address == "" {
+		return ""
+	}
+	return fmt.Sprintf("git:%x", sha256.Sum256([]byte(address)))
+}
+
+func repositoryAddress(remote string) string {
 	if !strings.Contains(remote, "://") {
 		if at := strings.Index(remote, "@"); at >= 0 {
 			remote = remote[at+1:]
@@ -169,14 +183,14 @@ func repositoryIdentity(remote string) string {
 		return ""
 	}
 	path := strings.TrimSuffix(strings.Trim(u.Path, "/"), ".git")
-	if path == "" {
+	if path == "" || strings.ContainsAny(path, "\r\n\t") {
 		return ""
 	}
 	host := strings.ToLower(u.Hostname())
 	if port := u.Port(); port != "" && !(u.Scheme == "ssh" && port == "22" || u.Scheme == "https" && port == "443" || u.Scheme == "http" && port == "80") {
 		host += ":" + port
 	}
-	return fmt.Sprintf("git:%x", sha256.Sum256([]byte(host+"/"+path)))
+	return host + "/" + path
 }
 
 // Result enriches the common API boundary without mutating provider snapshots.

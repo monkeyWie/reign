@@ -1,6 +1,7 @@
 package hubui
 
 import (
+	"context"
 	"math"
 	"testing"
 	"time"
@@ -9,9 +10,23 @@ import (
 	"github.com/nsgo-dev/nsgo/nsgotest"
 )
 
+type staticWorkspaceAPI struct{ API }
+
+func (f *staticWorkspaceAPI) Call(ctx context.Context, method string, p Object, target string, r Object) (any, error) {
+	// Layout fixtures supply their own directory and conversation. Pending reads
+	// must not replace those with the unrelated demo catalogue during navigation.
+	switch method {
+	case "client.list", "client.cached", "client.sync", "client.call", "host.info", "providers":
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	return f.API.Call(ctx, method, p, target, r)
+}
+
 func workspaceLayoutFixture(cx *core.Scope) *State {
 	s := sidebarInteractionFixture(cx)
-	s.ready, s.suspended = true, true
+	s.api = &staticWorkspaceAPI{s.api}
+	s.ready = true
 	s.target, s.selected = "local", s.sessions[2]
 	for _, ss := range s.sessions {
 		id := str(ss, "deviceId")

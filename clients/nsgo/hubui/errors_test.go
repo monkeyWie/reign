@@ -17,15 +17,15 @@ const writerConflict = "无法接续原会话（不会另建会话）: thread fi
 func TestSessionErrorClassification(t *testing.T) {
 	for _, tc := range []struct {
 		name, raw, provider, source, method string
-		guided, app                         bool
+		guided                              bool
 	}{
-		{"app", writerConflict, "codex-app", "app", "send", true, true},
-		{"app over CLI route", writerConflict, "codex-cli", "app", "send", true, true},
-		{"CLI", writerConflict, "codex-cli", "cli", "send", true, false},
-		{"other provider", writerConflict, "claude-code", "custom", "send", false, false},
-		{"generic invalid request", "invalid request (RPC -32600)", "codex-app", "app", "send", false, false},
-		{"network error", "device offline", "codex-app", "app", "send", false, false},
-		{"interrupt", writerConflict, "codex-app", "app", "interrupt", false, false},
+		{"app", writerConflict, "codex-app", "app", "send", true},
+		{"VS Code", writerConflict, "codex-app", "vscode", "send", true},
+		{"CLI", writerConflict, "codex-app", "cli", "send", true},
+		{"other provider", writerConflict, "claude-code", "custom", "send", false},
+		{"generic invalid request", "invalid request (RPC -32600)", "codex-app", "app", "send", false},
+		{"network error", "device offline", "codex-app", "app", "send", false},
+		{"interrupt", writerConflict, "codex-app", "app", "interrupt", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := &sessionOperationError{cause: errors.New(tc.raw), target: "remote", device: "工作电脑", provider: tc.provider, source: tc.source, method: tc.method}
@@ -33,7 +33,7 @@ func TestSessionErrorClassification(t *testing.T) {
 			if (h.Title != "") != tc.guided {
 				t.Fatalf("unexpected guidance: %#v", h)
 			}
-			if tc.guided && (!strings.Contains(h.Steps[0], "工作电脑") || (len(h.Steps) == 3) != tc.app) {
+			if tc.guided && (!strings.Contains(h.Steps[0], "工作电脑") || len(h.Steps) != 3) {
 				t.Fatalf("wrong device or source guidance: %#v", h)
 			}
 		})
@@ -107,7 +107,7 @@ func testSessionWriterConflictGuidance(t *testing.T, width, height core.Points) 
 	app.Press("id:session-error-details")
 	app.Press("id:session-access-help")
 	app.Find("id:dialog-session-access-help")
-	app.Find("text:2. 保持 Codex App 运行，在「设置 → Agent」的「Codex App」卡片点击「启用」，通过本地 IPC 接入。")
+	app.Find("text:2. 在 ReignHub「设置 → Agent」确认「Codex」已启用并显示「已就绪」；如有连接错误，请查看处理指引。")
 	app.Screenshot(choose(width < 650, "phone-session-access-guidance", "session-access-guidance"))
 	app.Press("id:session-help-done")
 	if f.sends.Load() != 1 || f.activations.Load() != 0 {

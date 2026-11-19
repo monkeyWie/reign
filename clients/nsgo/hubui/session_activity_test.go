@@ -75,11 +75,11 @@ func TestSessionActivityIndicatorsAndCompletion(t *testing.T) {
 		row = sessionRowID("pinned", running)
 		app.HoverOut()
 	}
-	// The CLI reader exposes the same native ID but cannot settle App execution.
+	// Another Agent with the same native ID cannot settle Codex execution.
 	app.Post(func() {
 		s.cx.Post(func() {
 			alias := copyObject(running)
-			alias["providerId"], alias["status"] = "codex-cli", "idle"
+			alias["providerId"], alias["status"] = "pi", "idle"
 			s.observeSessionActivity("local", []Object{alias})
 			unknown := copyObject(running)
 			unknown["status"] = "unknown"

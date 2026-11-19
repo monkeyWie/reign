@@ -8,9 +8,9 @@ import (
 )
 
 // Directory presence is independent of this controller's peer transports.
-// One batch per service every 30 seconds, only while the UI is in foreground.
+// One batch per service every 30 seconds, while the controller is running.
 func (s *State) refreshDevicePresence() {
-	if s.suspended || s.directoryChecking || len(s.devices) == 0 || time.Since(s.directoryChecked) < 30*time.Second {
+	if s.ctx.Err() != nil || s.directoryChecking || len(s.devices) == 0 || time.Since(s.directoryChecked) < 30*time.Second {
 		return
 	}
 	s.directoryGeneration++
@@ -28,7 +28,7 @@ func (s *State) refreshDevicePresence() {
 			}
 			s.directoryChecking = false
 			s.directoryCancel = nil
-			if s.ctx.Err() != nil || s.suspended {
+			if s.ctx.Err() != nil {
 				return
 			}
 			if err == nil {

@@ -93,7 +93,7 @@ func TestAutomaticConnectionErrorsUseStatusInsteadOfOverlay(t *testing.T) {
 	}
 }
 
-func TestMobileBackgroundResumeResyncsWithoutReplayingCommands(t *testing.T) {
+func TestMobileBackgroundRetainsWatchAndForegroundRecoversDisconnect(t *testing.T) {
 	if nsgotest.Target() != "" {
 		t.Skip("native test host cannot pin lifecycle; lifecycle injection runs headlessly")
 	}
@@ -108,7 +108,9 @@ func TestMobileBackgroundResumeResyncsWithoutReplayingCommands(t *testing.T) {
 	input := app.Find("id:chat-input").ID
 	env.Lifecycle = core.LifecycleBackground
 	app.SetEnvironment(env)
-	app.WaitUntil(time.Second, func() bool { return f.watchCancels.Load() > 0 })
+	if f.watchCancels.Load() != 0 {
+		t.Fatal("background visibility cancelled a healthy watch")
+	}
 	before := f.snapshots.Load()
 	f.version.Store(1)
 	f.offline.Store(true)
@@ -120,6 +122,30 @@ func TestMobileBackgroundResumeResyncsWithoutReplayingCommands(t *testing.T) {
 		t.Fatal("resume showed a popup, rebuilt the editor or replayed a command")
 	}
 	app.Screenshot("phone-resumed-conversation")
+}
+
+func TestBackgroundDisconnectRecoversWithoutForeground(t *testing.T) {
+	f := &connectionFixture{demoAPI: newDemoAPI()}
+	f.blockWatch.Store(true)
+	f.autoReconnect.Store(true)
+	app, s := conversationFixture(t, f, 390, Object{}, true)
+	app.Type("id:chat-input", "保留后台恢复草稿")
+	input := app.Find("id:chat-input").ID
+	app.Post(func() { s.cx.Post(s.startSessionWatch) })
+	app.WaitUntil(time.Second, func() bool { return f.watchStarts.Load() > 0 })
+	app.Post(func() {
+		s.cx.Post(func() {
+			s.connection("demo-device").established = true
+			s.setBackground(true)
+			f.offline.Store(true)
+			f.version.Store(1)
+			s.poll()
+		})
+	})
+	app.WaitFor("id:message-resumed|latest", 4*time.Second)
+	if !s.backgrounded || f.reconnects.Load() != 1 || f.sends.Load() != 0 || app.Find("id:chat-input").ID != input || app.Find("id:chat-input").Text != "保留后台恢复草稿" {
+		t.Fatal("background recovery waited for foreground, replayed commands or changed the draft")
+	}
 }
 
 func TestOperationErrorDetailsDoNotRepeatSummary(t *testing.T) {

@@ -18,6 +18,104 @@ A live subscription failure must not gate initial history or erase cached conten
 
 **Evidence:** [History failure tests](../../clients/nsgo/hubui/session_failure_test.go), [controller stream tests](../../clients/nsgo/hubui/session_stream_test.go).
 
+If switching away and back restores stale local Codex messages, inspect the
+follower as well as the saved replay cursor. The cursor can remain valid after
+the upstream subscription disappears, or a directory-only follower can be
+released between turns. Watch/probe must restore a missing follower and retain
+an explicitly opened one through directory cleanup. All controllers retain
+synchronization while their window, activity or tab is hidden and execution is
+still allowed. Distinguish OS/browser freezing from an application cancelling its
+own work; check visibility transitions as well as upstream ownership before
+treating stale content as a transport failure.
+See [Codex follower recovery](../../internal/codex/ipc_follow_test.go).
+
+If the directory spins but the conversation has no running controls or progress
+until completion, compare the transcript's turn status with the current owner.
+The controller previously retained any cached terminal turn over an incoming
+running snapshot and ignored explicit running turn events. This permanently
+rejected subsequent live items/text until a final snapshot arrived. Accept the
+current snapshot and ordered lifecycle transition; retain the terminal guard for
+unsolicited late item/text deltas. The stream must replay newer completion events
+over a delayed history response before merging it.
+
+`TestRunningOwnerReplacesTerminalCacheBeforeCompletion` reproduces both snapshot
+and event recovery through visible UI; `TestDelayedRunningSnapshotReplaysCompletionBeforeMerging`
+checks that old history and late deltas do not resurrect a finished reply. These
+isolated regressions establish the failure mode, not the provenance of a real
+cached terminal status. Read-only live diagnostics after reopening confirmed
+incremental delivery; the original stalled state was not captured end to end.
+
+## Desktop remains on an old running reply after Codex finishes
+
+Window occlusion is a background lifecycle transition on macOS. Previously the
+controller applied the mobile suspend policy to desktops too, cancelling watch,
+reads and cache progress while the host Provider kept running. The UI could keep
+partial commentary and an old running state even after a fresh history read had
+already returned the final answer; resuming only a valid replay cursor was not
+an independent freshness check.
+
+In a 2026-11-19 read-only diagnosis, the controller's saved UI snapshot retained
+an in-progress turn while its latest RPC history and a fresh IPC owner snapshot
+contained the completed answer. Bringing ReignHub forward resumed synchronization.
+The shared policy now retains subscriptions on desktop, mobile and Web while
+hidden and coalesces one history refresh on foreground return, preserving the
+watch, editor and draft. Android foreground-service denial or loss does not
+cancel healthy subscriptions. This fixes the reproduced lifecycle path; it is
+not evidence that every upstream synchronization failure has the same cause.
+
+[Lifecycle regressions](../../clients/nsgo/hubui/lifecycle_sync_test.go) deliver
+completion while hidden, verify final text/status and persisted cursor for
+local/remote routes, retain directory/approval reads, and recover a silent
+completion on foreground return without restarting the watch or replaying
+commands. [Connection recovery](../../clients/nsgo/hubui/connections_test.go)
+also completes while backgrounded; [Android service tests](../../clients/nsgo/hubui/background_test.go)
+cover absent/denied/lost protection. Application cancellation still ends work.
+These isolated fixtures inject lifecycle transitions; they do not establish
+physical-device background execution under iOS/Android power management or
+browser tab freezing. No user conversation is operated as a test.
+
+A later lock/unlock report also showed an already submitted message in the
+pending queue. The scoped read-only cache inspection happened after recovery:
+both UI and RPC caches then contained the final answer and an empty queue. That
+does not capture the original stalled state or prove which notification was
+missed. Isolated fixtures did reproduce another gap: a populated, silent IPC
+follower could indefinitely satisfy both a valid watch cursor and a supposedly
+fresh transcript read using old memory.
+
+Repair uses a fresh-snapshot barrier and queue delivery receipts; old cached state
+alone cannot establish a completed repair. Failed reads retain the persisted
+history fallback without acquiring a writer or replaying a send. See
+[Codex state recovery](../../internal/codex/README.md#state-and-history-diagnosis).
+
+A subsequent report recovered automatically without session switching. Its
+screenshot was taken about six minutes after recorded completion, but the first
+cache inspection was after recovery. That did not capture the original failure.
+A temporary 30-second history/full-state check covered missed updates but did not
+explain their cause; it has been removed from the normal synchronization path.
+
+Further inspection found two concrete protocol mismatches. First, the installed
+Codex producer resets stream revisions on backend reconnect while retaining its
+IPC client. ReignHub discarded the resulting lower-revision snapshots and all
+subsequent lower patches as old, leaving a connected stream visibly frozen.
+Second, a new owner's following-status announcement was filtered against the old
+owner, preventing prompt subscription handoff. Full snapshots now establish a new
+revision base, and owner announcements invalidate the subscription and wake its
+watch for verified rediscovery immediately. Neither repair waits for a periodic
+history scan. An announcement is only a hint, never permission to route writes.
+
+[Stream lifecycle tests](../../internal/codex/ipc_lifecycle_test.go) failed before
+the fix and now recover through notifications alone. A read-only
+[installed producer check](../research/verification/codex-stream-2026-11-19/validate.cjs)
+executes the packaged producer on synthetic state and confirms a reset from
+revision 500 to snapshot 1, followed by patch 2. This establishes an actual
+vendor-contract mismatch, not the provenance of the original live screenshot.
+[Controller tests](../../clients/nsgo/hubui/session_reconcile_test.go) cover
+notification-driven recovery, ordinary heartbeats without history downloads,
+local/remote and hidden views, failed subscriptions, backoff, concurrent live
+updates, preserved drafts and cancelled navigation. First open, foreground
+return and detected subscription errors still reconcile; healthy steady-state
+subscriptions do not poll full history.
+
 ## Completed answer buried under progress or missing its final text
 
 Inspect message phase and event order separately. Rendering every assistant item
@@ -34,16 +132,14 @@ and [Codex IPC completion regression](../../internal/codex/ipc_messages_test.go)
 
 ## Repeated Agent errors on a connected device
 
-An installed CLI with no shared daemon can report unavailable while Codex App is
-healthy. Reading every history-capable Provider can repeatedly request that
-unavailable CLI even though the network is working. Check Provider availability
-before directory reads; preserve cached sessions and rediscover readiness on the
-next refresh. Do not start the CLI daemon to make unrelated App synchronization
-succeed. Real failures from ready Providers remain errors and identify their
-Provider ID.
+An installed Agent can be unavailable while other Agents on the device are
+healthy. Reading every history-capable Provider repeatedly requests unavailable
+Agents even though the network works. Check readiness before directory reads;
+preserve cached sessions and rediscover readiness on the next refresh. Never
+start unrelated Agent processes to repair another Provider's synchronization.
+Real failures from ready Providers remain errors and identify their Provider ID.
 
-**Evidence:** [Catalogue recovery regression](../../clients/nsgo/hubui/catalogue_test.go),
-[CLI discovery](../../internal/codex/cli.go).
+**Evidence:** [Catalogue recovery regression](../../clients/nsgo/hubui/catalogue_test.go).
 
 ## Windows console flashes or App access denied
 
@@ -140,9 +236,9 @@ view in NSGo's macOS `surface.apply`, handling `ItemStickyCells`.
 
 Retained scroll content can update after leaving the mounted tree. The previous
 NSGo pin could emit sticky/scroll commands for an unplaced view, and the native
-backend dereferenced the absent view. The client now pins upstream
-[`7774099b6513`](https://github.com/nsgo-dev/nsgo/commit/7774099b6513a61f33199764420d3372859cdfe6),
-which drops unplaced commands and guards missing native views. Keep the fix in
+backend dereferenced the absent view. The client pins NSGo `v0.2.0`, which includes
+upstream fix [`7774099b6513`](https://github.com/nsgo-dev/nsgo/commit/7774099b6513a61f33199764420d3372859cdfe6)
+to drop unplaced commands and guard missing native views. Keep the fix in
 the pinned dependency; do not patch the module cache or hide the panic with a
 global recovery handler.
 
@@ -177,6 +273,24 @@ the host confirms integrity. Four-file, lost-ACK and cancellation fixtures live
 in [upload tests](../../clients/nsgo/hubui/attachments_native_test.go); these do
 not establish cellular-network throughput.
 
+## File links have no download information
+
+The controller can download a remote Markdown file link only when its message
+contains a matching exported attachment. A missing record does not prove the
+file is missing. Older hosts do not export all Windows paths or source-location
+links; update ReignHub on the executing device as well as the controller, then
+reopen the conversation to refresh its transcript. Files outside the session
+workspace and Hub attachment directory remain unexported by design. A matched
+attachment marked unavailable is a different case: check the file on its device.
+Never resolve a remote path against the controller's filesystem or bypass the
+scoped download API. See [Codex file links](../../internal/codex/README.md#file-links)
+and [routing tests](../../clients/nsgo/hubui/message_links_test.go).
+
+Informational feedback must use the shared notice helper, rather than directly
+assigning display text. Otherwise a missing-download hint or success message can
+remain indefinitely. [Notice regressions](../../clients/nsgo/hubui/notices_test.go)
+cover expiry, replacement, disposal, narrow layouts and dismissal above a modal.
+
 ## Add a lesson
 
 Record trigger, evidence, cause, recovery, regression entry and unverified conditions. Mark hypotheses explicitly. Link implementation/tests rather than copy them. Dated investigations belong in `docs/research`; reusable lessons belong here. Do not grow global instructions with individual bug rules.
@@ -198,3 +312,17 @@ remeasurement as well as manual virtual-list jumps: a bottom-anchor fix must not
 undo explicit history navigation. Failed local overlays need stable predecessor
 positions across streaming, cache restore and remote echo replacement. A partial
 history page cannot authorize deletion of an absent message.
+
+## Submitted text reappears in the composer
+
+The delivery row and input field are separate state. A delayed native change
+notification carrying the exact submitted value must not resurrect the consumed
+draft. Track the submitted value and route only until a fresh editing action;
+keyboard, paste and composition actions permit entering the same text again.
+Consume Return's final editor value and never clear a newer draft when the
+network acknowledgement arrives. Do not remount the editor to force a reset.
+
+**Evidence:** [Composer submission tests](../../clients/nsgo/hubui/composer_submit_test.go)
+cover late echoes, identical new drafts, repeated native Return and offline
+submission. The original intermittent report has not been captured with a native
+event trace; these fixtures verify the guarded failure mode, not its prevalence.

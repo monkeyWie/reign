@@ -1,4 +1,4 @@
 {
   "title": "Agents",
-  "pages": ["index", "codex-app", "codex-cli", "acp", "pi"]
+  "pages": ["index", "codex", "acp", "pi"]
 }
