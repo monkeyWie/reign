@@ -32,33 +32,29 @@ def check_probes(tcp_host, tcp_port, udp_host, udp_port):
 
 
 def check_probe_mode(executable, work):
-    # Both protocols share the specified port, while the HTTP port is occupied.
-    with socket.socket() as occupied:
-        occupied.bind(('127.0.0.1', 0))
-        occupied.listen()
-        with socket.socket() as free:
-            free.bind(('127.0.0.1', 0))
-            port = free.getsockname()[1]
-        state = work / 'probe-state.db'
-        file = work / 'probe.json'
-        file.write_text(json.dumps({'http': False, 'listen': f'127.0.0.1:{occupied.getsockname()[1]}',
-            'stunListen': f'127.0.0.1:{port}', 'tcpStunListen': f'127.0.0.1:{port}', 'state': state.name}))
-        with subprocess.Popen([str(executable), '--config', str(file)]) as process:
+    work = work / 'probe-only'
+    work.mkdir()
+    with socket.socket() as free:
+        free.bind(('127.0.0.1', 0))
+        port = free.getsockname()[1]
+    file = work / 'config.json'
+    file.write_text(json.dumps({'services': {'stun': {'listen': f'127.0.0.1:{port}'}}}))
+    process = subprocess.Popen([str(executable)], cwd=work)
+    try:
+        deadline = time.monotonic() + 10
+        while True:
             try:
-                deadline = time.monotonic() + 10
-                while True:
-                    try:
-                        check_probes('127.0.0.1', port, '127.0.0.1', port)
-                        break
-                    except ConnectionRefusedError:
-                        if process.poll() is not None or time.monotonic() >= deadline:
-                            raise
-                        time.sleep(0.05)
-                assert not state.exists()
-                print('Packaged server: TCP and UDP STUN passed in probe-only mode')
-            finally:
-                process.terminate()
-                process.wait(timeout=5)
+                check_probes('127.0.0.1', port, '127.0.0.1', port)
+                break
+            except ConnectionRefusedError:
+                if process.poll() is not None or time.monotonic() >= deadline:
+                    raise
+                time.sleep(0.05)
+        assert not (work / 'data').exists()
+        print('Packaged server: TCP and UDP STUN passed in probe-only mode')
+    finally:
+        process.terminate()
+        process.wait(timeout=5)
 
 
 def main():
@@ -71,7 +67,9 @@ def main():
             binaries = [m for m in tar.getmembers() if m.isfile() and Path(m.name).name == 'reignhub-server']
             if len(binaries) != 1:
                 raise SystemExit('Expected one packaged server binary')
-            bundled_config = json.load(tar.extractfile(str(Path(binaries[0].name).parent / 'config.json')))
+            config_member = str(Path(binaries[0].name).parent / 'config.json')
+            assert sorted(m.name for m in tar if not m.isdir()) == sorted([binaries[0].name, config_member])
+            bundled_config = json.load(tar.extractfile(config_member))
             executable = work / 'reignhub-server'
             executable.write_bytes(tar.extractfile(binaries[0]).read())
             executable.chmod(0o755)
@@ -81,7 +79,7 @@ def main():
         config = work / 'config.json'
         initial = config.read_bytes()
         assert json.loads(initial) == bundled_config, 'archive and --init defaults differ'
-        assert bundled_config['externalStun'] == []
+        assert bundled_config == {'services': {'control': {}, 'stun': {}, 'relay': {}}}
         assert subprocess.run([str(executable), '--init'], cwd=work).returncode != 0
         assert config.read_bytes() == initial and not (work / 'data').exists()
         check_probe_mode(executable, work)
@@ -91,8 +89,10 @@ def main():
         base = f'http://127.0.0.1:{port}'
         with (work / 'server.log').open('w+') as log:
             cfg = json.loads(initial)
-            cfg.update(listen=f'127.0.0.1:{port}', state='state/reignhub.db', stunListen='127.0.0.1:0',
-                       tcpStunListen='127.0.0.1:0', nativeRelayListen='127.0.0.1:0')
+            services = cfg['services']
+            services['control'].update(listen=f'127.0.0.1:{port}', database='state/reignhub.db')
+            services['stun']['listen'] = '127.0.0.1:0'
+            services['relay'].update(websocket=True, native={'listen': '127.0.0.1:0'})
             config.write_text(json.dumps(cfg))
             process = subprocess.Popen([str(executable)], cwd=work, stdout=log, stderr=log)
             try:
@@ -137,8 +137,8 @@ def main():
                 udp_host, udp_port = network['selfStun'][0].removeprefix('stun:').rsplit(':', 1)
                 check_probes(tcp_host, tcp_port, udp_host, udp_port)
                 assert (work / 'state/reignhub.db').read_bytes()[:16] == b'SQLite format 3\x00'
-                pin = subprocess.check_output([str(executable), '--print-relay-pin', '--config', str(config)], text=True).strip()
-                assert len(pin) == 43
+                credential = subprocess.check_output([str(executable), '--print-relay-credential', '--config', str(config)], text=True).strip()
+                assert credential.startswith("rh1.") and [len(part) for part in credential.split(".")[1:]] == [43, 43]
                 print('Packaged server: HTTP, embedded Web, SQLite and STUN discovery passed')
             finally:
                 process.terminate()

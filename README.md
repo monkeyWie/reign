@@ -67,7 +67,7 @@ For a Worker deployment, the same server can run only TCP/UDP discovery (no HTTP
 
 ```sh
 go build -o reignhub-server ./cmd/reignhub-server
-# Set config.json to {"http":false} before starting.
+# Set config.json to {"services":{"stun":{}}} before starting.
 ./reignhub-server
 ```
 

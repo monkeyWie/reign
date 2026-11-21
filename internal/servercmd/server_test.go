@@ -4,13 +4,13 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
-	"encoding/json"
 	"errors"
 	"io"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -26,7 +26,10 @@ import (
 
 func testConfig(t *testing.T) Config {
 	t.Helper()
-	c := DefaultConfig()
+	c, err := allServices().resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
 	c.NativeListen = "127.0.0.1:0"
 	c.Listen = "127.0.0.1:0"
 	c.STUNListen = "127.0.0.1:0"
@@ -48,14 +51,14 @@ func TestConfigFileLifecycle(t *testing.T) {
 	}
 	c, err := loadConfig(cmd.file)
 	cwd, _ := os.Getwd()
-	if err != nil || !c.HTTP || c.State != filepath.Join(cwd, "data", "reignhub.db") {
+	if err != nil || !c.Control || c.State != filepath.Join(cwd, "data", "reignhub.db") {
 		t.Fatal(c, err)
 	}
 	if _, err := os.Stat("data"); !os.IsNotExist(err) {
 		t.Fatal("init created state")
 	}
 	file := filepath.Join(t.TempDir(), "custom.json")
-	custom := []byte(`{"http":false,"tcpStun":false,"stunListen":"[::1]:40001","web":"console","tlsCert":"cert","tlsKey":"key"}`)
+	custom := []byte(`{"services":{"control":{"webDir":"console","tls":{"certFile":"cert","keyFile":"key"}},"stun":{"udp":{"listen":"[::1]:40001"}}}}`)
 	if err := os.WriteFile(file, custom, 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -67,10 +70,10 @@ func TestConfigFileLifecycle(t *testing.T) {
 		t.Fatal("changed existing config")
 	}
 	c, err = loadConfig(file)
-	if err != nil || c.HTTP || c.TCPSTUN || !c.STUN || c.STUNListen != "[::1]:40001" || c.Web != filepath.Join(filepath.Dir(file), "console") || c.TLSKey != filepath.Join(filepath.Dir(file), "key") {
+	if err != nil || !c.Control || c.TCPSTUNListen != "" || c.STUNListen != "[::1]:40001" || c.Web != filepath.Join(filepath.Dir(file), "console") || c.TLSKey != filepath.Join(filepath.Dir(file), "key") {
 		t.Fatal(c, err)
 	}
-	for _, value := range []string{`{"typo":true}`, `null`, `{}` + " {}", `{"relay":true,"signal":false}`, `{"relayControl":"http://remote.example"}`, `{}` + strings.Repeat(" ", 1<<20)} {
+	for _, value := range []string{`{"typo":true}`, `null`, `{}` + " {}", `{"relay":true,"signal":false}`, `{"services":{"relay":{"controlUrl":"http://remote.example"}}}`, `{}` + strings.Repeat(" ", 1<<20), `{"services":{}}`, `{"services":null}`, `{"services":{"control":{"stunServers":null}}}`, `{"services":{"control":{"stunServers":["bad"]}}}`, `{"services":{"control":{"signal":false}}}`} {
 		if err := os.WriteFile(file, []byte(value), 0600); err != nil {
 			t.Fatal(err)
 		}
@@ -78,7 +81,7 @@ func TestConfigFileLifecycle(t *testing.T) {
 			t.Fatal("accepted invalid config")
 		}
 	}
-	for _, args := range [][]string{{"--only", "stun"}, {"--state", "file"}, {"--init", "--print-relay-pin"}, {"--listen", ":8080"}, {"extra"}} {
+	for _, args := range [][]string{{"--only", "stun"}, {"--state", "file"}, {"--init", "--print-relay-credential"}, {"--listen", ":8080"}, {"extra"}} {
 		if _, err := parseCommand(args, io.Discard); err == nil {
 			t.Fatal("accepted", args)
 		}
@@ -125,7 +128,7 @@ func checkProbes(t *testing.T, r *Runtime) {
 func fmtPort(port int) string { return strconv.Itoa(port) }
 func TestProbeOnlyDoesNotCreateDatabase(t *testing.T) {
 	c := testConfig(t)
-	c.HTTP = false
+	c.Control, c.NativeListen = false, ""
 	r, err := Start(c)
 	if err != nil {
 		t.Fatal(err)
@@ -228,120 +231,99 @@ func TestBindFailureRollsBackOtherListeners(t *testing.T) {
 	}
 	listener.Close()
 }
-func TestDisabledRoutesAndConfigContract(t *testing.T) {
-	c := testConfig(t)
-	c.Signal = false
-	c.Relay = false
-	c.WebEnabled = false
-	c.STUN = false
-	c.TCPSTUN = false
-	r, err := Start(c)
+func readTestConfig(t *testing.T, services string) Config {
+	t.Helper()
+	file := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(file, []byte(`{"services":`+services+`}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := loadConfig(file)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer r.Close()
-	base := "http://" + r.HTTPAddr.String()
-	res, err := http.Post(base+"/p2p/config", "application/json", bytes.NewBufferString("{}"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer res.Body.Close()
-	var cfg map[string]any
-	if err = json.NewDecoder(res.Body).Decode(&cfg); err != nil {
-		t.Fatal(err)
-	}
-	if cfg["protocol"] != float64(1) || cfg["accountRequired"] != false || len(cfg["loginProviders"].([]any)) != 0 || len(cfg["selfStun"].([]any)) != 0 {
-		t.Fatal(cfg)
-	}
-	for _, path := range []string{"/chat/", "/p2p/signal", "/p2p/relay"} {
-		res, err := http.Get(base + path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		res.Body.Close()
-		if res.StatusCode != 404 {
-			t.Fatal("disabled feature exposed", path, res.StatusCode)
-		}
-	}
+	return c
 }
 
 func TestConfiguredListenersAndRoutes(t *testing.T) {
-	type expected struct{ api, web, signal, relay, udp, tcp bool }
-	tests := []struct {
-		name string
-		want expected
+	const loop = "127.0.0.1:0"
+	for _, tc := range []struct {
+		name, services                       string
+		control, udp, tcp, native, websocket bool
 	}{
-		{"all", expected{true, true, true, true, true, true}},
-		{"dual STUN", expected{udp: true, tcp: true}},
-		{"UDP only", expected{udp: true}},
-		{"TCP only", expected{tcp: true}},
-		{"static web", expected{web: true}},
-		{"API and probe", expected{api: true, tcp: true}},
-		{"signaling", expected{api: true, signal: true}},
-		{"relays", expected{api: true, signal: true, relay: true}},
-	}
-	for _, tc := range tests {
+		{"control only", `{"control":{}}`, true, false, false, false, false},
+		{"dual STUN", `{"stun":{}}`, false, true, true, false, false},
+		{"UDP only", `{"stun":{"udp":{}}}`, false, true, false, false, false},
+		{"TCP only", `{"stun":{"tcp":{}}}`, false, false, true, false, false},
+		{"local native", `{"control":{},"relay":{"native":{}}}`, true, false, false, true, false},
+		{"local WebSocket", `{"control":{},"relay":{"websocket":true}}`, true, false, false, false, true},
+		{"node", `{"stun":{},"relay":{}}`, false, true, true, true, false},
+	} {
 		t.Run(tc.name, func(t *testing.T) {
-			base := testConfig(t)
-			web := t.TempDir()
-			for name, data := range map[string]string{"index.html": "fixture console", "nsgo.json": "{}"} {
-				if err := os.WriteFile(filepath.Join(web, name), []byte(data), 0600); err != nil {
-					t.Fatal(err)
+			c := readTestConfig(t, tc.services)
+			for _, addr := range []*string{&c.Listen, &c.NativeListen, &c.STUNListen, &c.TCPSTUNListen} {
+				if *addr != "" {
+					*addr = loop
 				}
-			}
-			base.HTTP = tc.want.api || tc.want.web
-			base.API, base.WebEnabled, base.Web = tc.want.api, tc.want.web, web
-			base.Signal, base.Relay = tc.want.signal, tc.want.relay
-			base.STUN, base.TCPSTUN = tc.want.udp, tc.want.tcp
-			file := filepath.Join(t.TempDir(), "config.json")
-			raw, err := json.Marshal(base)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(file, raw, 0600); err != nil {
-				t.Fatal(err)
-			}
-			c, err := loadConfig(file)
-			if err != nil {
-				t.Fatal(err)
 			}
 			r, err := Start(c)
 			if err != nil {
 				t.Fatal(err)
 			}
 			defer r.Close()
-			if (r.UDPAddr != nil) != tc.want.udp || (r.TCPAddr != nil) != tc.want.tcp || (r.native != nil) != tc.want.relay || (r.HTTPAddr != nil) != (tc.want.api || tc.want.web) {
-				t.Fatal("unexpected listeners", r.UDPAddr, r.TCPAddr, r.HTTPAddr)
+			if (r.HTTPAddr != nil) != tc.control || (r.UDPAddr != nil) != tc.udp || (r.TCPAddr != nil) != tc.tcp || (r.native != nil) != tc.native {
+				t.Fatal("unexpected listeners", r.HTTPAddr, r.UDPAddr, r.TCPAddr)
 			}
 			_, err = os.Stat(c.State)
-			if (tc.want.api && err != nil) || (!tc.want.api && !os.IsNotExist(err)) {
-				t.Fatal("unexpected SQLite state", err)
+			if (tc.control || tc.native) != (err == nil) {
+				t.Fatal("unexpected database", err)
 			}
-			if r.HTTPAddr == nil {
+			if !tc.control {
 				return
 			}
-			for path, available := range map[string]bool{"/healthz": true, "/chat/": tc.want.web, "/api/account": tc.want.api, "/p2p/config": tc.want.api, "/p2p/signal": tc.want.signal, "/p2p/relay": tc.want.relay} {
-				resp, err := http.Get("http://" + r.HTTPAddr.String() + path)
+			for path, available := range map[string]bool{"/healthz": true, "/chat/": true, "/api/account": true, "/p2p/config": true, "/p2p/signal": true, "/p2p/relay": tc.websocket} {
+				res, err := http.Get("http://" + r.HTTPAddr.String() + path)
 				if err != nil {
 					t.Fatal(err)
 				}
-				resp.Body.Close()
-				// Enabled socket routes reject HTTP requests without a device credential.
-				if (resp.StatusCode != http.StatusNotFound) != available {
-					t.Errorf("%s: %d", path, resp.StatusCode)
+				res.Body.Close()
+				if (res.StatusCode != http.StatusNotFound) != available {
+					t.Errorf("%s: %d", path, res.StatusCode)
 				}
 			}
 		})
 	}
 }
 
-func TestPrintRelayPinMatchesRunningAndStoppedRelay(t *testing.T) {
+func TestControlSTUNServers(t *testing.T) {
+	for _, tc := range []struct {
+		control  string
+		udp, tcp []string
+	}{
+		{`{}`, []string{}, nil},
+		{`{"stunServers":[]}`, []string{}, nil},
+		{`{"stunServers":["udp:stun.cloudflare.com:3478","probe.example:26331","tcp:[::1]:3479","probe.example:26331"]}`, []string{"stun:probe.example:26331"}, []string{"probe.example:26331", "[::1]:3479"}},
+	} {
+		c := readTestConfig(t, `{"control":`+tc.control+`}`)
+		c.Listen = "127.0.0.1:0"
+		r, err := Start(c)
+		if err != nil {
+			t.Fatal(err)
+		}
+		policy := device.Network(t.Context(), "http://"+r.HTTPAddr.String())
+		r.Close()
+		if policy.ServiceID == "" || !slices.Equal(policy.PublicSTUN, []string{"stun:stun.cloudflare.com:3478", "stun:stun.l.google.com:19302", "stun:stun.chat.bilibili.com:3478"}) || !slices.Equal(policy.SelfSTUN, tc.udp) || !slices.Equal(policy.TCPSTUN, tc.tcp) {
+			t.Fatal(tc.control, policy)
+		}
+	}
+}
+
+func TestPrintRelayCredentialMatchesRunningAndStoppedRelay(t *testing.T) {
 	c := testConfig(t)
-	if _, err := deviceservice.ReadRelayPin(c.State); err == nil {
-		t.Fatal("missing state returned a pin")
+	if _, err := deviceservice.ReadRelayCredential(c.State); err == nil {
+		t.Fatal("missing state returned a credential")
 	}
 	if _, err := os.Stat(filepath.Dir(c.State)); !os.IsNotExist(err) {
-		t.Fatal("pin lookup created state", err)
+		t.Fatal("credential lookup created state", err)
 	}
 
 	r, err := Start(c)
@@ -349,13 +331,17 @@ func TestPrintRelayPinMatchesRunningAndStoppedRelay(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { r.Close() })
-	pin, err := deviceservice.ReadRelayPin(c.State)
+	credential, err := deviceservice.ReadRelayCredential(c.State)
 	if err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	dialer := tls.Dialer{Config: nativepath.ClientTLS(pin)}
+	parts := strings.Split(credential, ".")
+	if len(parts) != 3 || parts[0] != "rh1" {
+		t.Fatal("invalid node credential format")
+	}
+	dialer := tls.Dialer{Config: nativepath.ClientTLS(parts[1])}
 	conn, err := dialer.DialContext(ctx, "tcp", r.native.Addr().String())
 	if err != nil {
 		t.Fatal("printed pin did not authenticate the running relay", err)
@@ -363,8 +349,8 @@ func TestPrintRelayPinMatchesRunningAndStoppedRelay(t *testing.T) {
 	conn.Close()
 	r.Close()
 
-	offline, err := deviceservice.ReadRelayPin(c.State)
-	if err != nil || offline != pin {
-		t.Fatal("could not read the same public pin while stopped", err)
+	offline, err := deviceservice.ReadRelayCredential(c.State)
+	if err != nil || offline != credential {
+		t.Fatal("could not read the same node credential while stopped", err)
 	}
 }

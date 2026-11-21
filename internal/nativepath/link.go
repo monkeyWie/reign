@@ -21,6 +21,8 @@ import (
 	"github.com/quic-go/quic-go"
 )
 
+const LeaseLane byte = 2 // relay authorization control records share the interactive stream
+
 const ALPN = "reign-native/1"
 
 type Endpoint struct {
@@ -93,7 +95,7 @@ type Link struct {
 func (l *Link) Close() { l.once.Do(l.close) }
 
 func (l *Link) Send(ctx context.Context, lane byte, body []byte) error {
-	if lane > 1 || len(body) == 0 || len(body) > 32768 {
+	if lane > LeaseLane || len(body) == 0 || len(body) > 32768 {
 		return errors.New("invalid native record")
 	}
 	idx := int(lane) % len(l.lanes)
@@ -123,7 +125,7 @@ func (l *Link) read(idx int) (byte, []byte, error) {
 	}
 	size := int(binary.BigEndian.Uint16(header[1:]))
 	lane := header[0]
-	if size == 0 || size > 32768 || lane > 1 || int(lane)%len(l.lanes) != idx {
+	if size == 0 || size > 32768 || lane > LeaseLane || int(lane)%len(l.lanes) != idx {
 		return 0, nil, errors.New("invalid native record")
 	}
 	body := make([]byte, size)

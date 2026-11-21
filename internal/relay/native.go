@@ -8,8 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net"
-	"net/http"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -30,13 +28,12 @@ type NativeJoin struct {
 	Ticket string `json:"ticket"`
 }
 type nativePair struct {
-	tickets  [2]string
-	admitted chan struct{}
-	legs     [2]*nativepath.Link
-	ready    chan struct{}
-	ack      [2]chan struct{}
-	done     chan struct{}
-	once     sync.Once
+	generation string
+	legs       [2]*nativepath.Link
+	ready      chan struct{}
+	ack        [2]chan struct{}
+	done       chan struct{}
+	once       sync.Once
 }
 type NativeListener struct {
 	tcp    net.Listener
@@ -57,17 +54,9 @@ func (n *NativeListener) Close() {
 func (n *NativeListener) Addr() net.Addr { return n.tcp.Addr() }
 
 // ListenNative starts both data protocols on one numeric port. Call before
-// serving signaling. External admission uses the configured control origin.
+// serving signaling. External admission verifies tickets locally with the node key.
 func (s *Server) ListenNative(address, public string, key ed25519.PrivateKey) (*NativeListener, error) {
-	var authority *externalAuthority
-	if s.ControlOrigin != "" {
-		if !ValidControlOrigin(s.ControlOrigin) {
-			return nil, errors.New("invalid relay control origin")
-		}
-		authority = &externalAuthority{origin: s.ControlOrigin, key: key, pin: nativepath.Pin(key), client: http.Client{
-			Timeout: 5 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-		}}
-	}
+	secret := authorizationKey(key)
 	cfg, err := nativepath.ServerTLS(key)
 	if err != nil {
 		return nil, err
@@ -123,7 +112,7 @@ func (s *Server) ListenNative(address, public string, key ed25519.PrivateKey) (*
 				err := conn.HandshakeContext(setup)
 				cancel()
 				if err == nil && conn.ConnectionState().NegotiatedProtocol == nativepath.ALPN {
-					s.serveNative(ctx, nativepath.TCPLink(conn), authority)
+					s.serveNative(ctx, nativepath.TCPLink(conn), secret)
 				}
 			}, func() { _ = c.Close() })
 		}
@@ -139,7 +128,7 @@ func (s *Server) ListenNative(address, public string, key ed25519.PrivateKey) (*
 				l, err := nativepath.QUICLink(setup, c, true)
 				cancel()
 				if err == nil {
-					s.serveNative(ctx, l, authority)
+					s.serveNative(ctx, l, secret)
 				}
 			}, func() { _ = c.CloseWithError(1, "busy") })
 		}
@@ -147,7 +136,7 @@ func (s *Server) ListenNative(address, public string, key ed25519.PrivateKey) (*
 	return n, nil
 }
 
-func (s *Server) serveNative(ctx context.Context, l *nativepath.Link, authority *externalAuthority) {
+func (s *Server) serveNative(ctx context.Context, l *nativepath.Link, secret []byte) {
 	defer l.Close()
 	stop := context.AfterFunc(ctx, l.Close)
 	defer stop()
@@ -164,14 +153,19 @@ func (s *Server) serveNative(ctx context.Context, l *nativepath.Link, authority 
 	} else if join.Role != "client" {
 		return
 	}
-	external := strings.HasPrefix(join.Ticket, "ext1.")
+	external := IsExternalTicket(join.Ticket)
 	key := [2]string{join.Host, join.Peer}
 	var pair *nativePair
 	var client *connection
-	if external && (authority == nil || !idPattern.MatchString(join.Host) || !idPattern.MatchString(join.Peer) || !ticketPattern.MatchString(join.Ticket)) {
-		return
+	var generation string
+	var expiry time.Time
+	if external {
+		var valid bool
+		generation, expiry, valid = verifyTicket(secret, join, time.Now())
+		if !valid {
+			return
+		}
 	}
-
 	s.mu.Lock()
 	if external {
 		pair = s.externalPairs[key]
@@ -198,19 +192,18 @@ func (s *Server) serveNative(ctx context.Context, l *nativepath.Link, authority 
 		pair = client.native
 	}
 	if pair == nil {
-		pair = &nativePair{ready: make(chan struct{}), admitted: make(chan struct{}), ack: [2]chan struct{}{make(chan struct{}), make(chan struct{})}, done: make(chan struct{})}
+		pair = &nativePair{ready: make(chan struct{}), generation: generation, ack: [2]chan struct{}{make(chan struct{}), make(chan struct{})}, done: make(chan struct{})}
 		if external {
 			s.externalPairs[key] = pair
 		} else {
 			client.native = pair
 		}
 	}
-	if pair.legs[idx] != nil {
+	if pair.generation != generation || pair.legs[idx] != nil {
 		s.mu.Unlock()
 		return
 	}
 	pair.legs[idx] = l
-	pair.tickets[idx] = join.Ticket
 	if pair.legs[1-idx] != nil {
 		close(pair.ready)
 	}
@@ -238,26 +231,8 @@ func (s *Server) serveNative(ctx context.Context, l *nativepath.Link, authority 
 		return
 	case <-pair.ready:
 	}
-	if external {
-		if idx == 0 {
-			check := leaseCheck{Host: join.Host, Peer: join.Peer, HostTicket: pair.tickets[1], ClientTicket: pair.tickets[0]}
-			until, err := authority.lease(setup, check)
-			if err != nil || !until.After(time.Now()) {
-				return
-			}
-			life, end := context.WithCancel(ctx)
-			defer end()
-			go authority.maintain(life, check, until, l.Close)
-			close(pair.admitted)
-		} else {
-			select {
-			case <-setup.Done():
-				return
-			case <-pair.done:
-				return
-			case <-pair.admitted:
-			}
-		}
+	if external && !time.Now().Before(expiry) {
+		return
 	}
 	other := pair.legs[1-idx]
 	// Forward only after both ready messages have been written, otherwise the
@@ -273,7 +248,32 @@ func (s *Server) serveNative(ctx context.Context, l *nativepath.Link, authority 
 	case <-setup.Done():
 		return
 	}
+	// Each leg must keep its own authorization current. Link.Close interrupts
+	// blocked reads and writes even while the connection is otherwise idle.
+	var expiryTimer *time.Timer
+	if external {
+		expiryTimer = time.AfterFunc(time.Until(expiry), l.Close)
+		defer expiryTimer.Stop()
+	}
 	l.Receive(func(lane byte, body []byte) error {
+		if lane == nativepath.LeaseLane {
+			if !external || len(body) > 512 || !time.Now().Before(expiry) {
+				return errors.New("unexpected native lease")
+			}
+			join.Ticket = string(body)
+			gen, next, valid := verifyTicket(secret, join, time.Now())
+			if !valid || gen != generation {
+				return errors.New("invalid native lease")
+			}
+			if next.After(expiry) {
+				if !expiryTimer.Stop() {
+					return errors.New("native lease expired")
+				}
+				expiry = next
+				expiryTimer.Reset(time.Until(expiry))
+			}
+			return nil
+		}
 		return other.Send(ctx, lane, body)
 	})
 }

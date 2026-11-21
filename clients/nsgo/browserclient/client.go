@@ -956,6 +956,11 @@ func (c *Client) signal(v Object) error {
 	return c.relaySend("signal", b)
 }
 func STUN(policy Object) []string {
+	_, hasPublic := policy["publicStun"]
+	_, hasConfigured := policy["selfStun"]
+	if !hasPublic && !hasConfigured {
+		return connectivity.DefaultPolicy().PublicSTUN
+	}
 	values := []string{}
 	seen := map[string]bool{}
 	for _, key := range []string{"publicStun", "selfStun"} {
@@ -975,9 +980,6 @@ func STUN(policy Object) []string {
 				}
 			}
 		}
-	}
-	if len(values) == 0 {
-		return []string{"stun:stun.cloudflare.com:3478", "stun:stun.l.google.com:19302"}
 	}
 	return values
 }

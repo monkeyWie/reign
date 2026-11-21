@@ -10,8 +10,8 @@ import {
   type Decision,
 } from "@reignhub/protocol";
 import { devices, type DeviceRow } from "./schema";
-import { externalRelays } from "./external-relay";
-import { id, issueGrant, random } from "./crypto";
+import { externalRelays, relayWelcome } from "./external-relay";
+import { id, issueGrant } from "./crypto";
 import { unrestricted, type CoreEnv, type Policy } from "./types";
 import { body, canAccess, fail, json } from "./index";
 interface SocketState {
@@ -134,39 +134,6 @@ export class ReignHubRoom extends DurableObject<CoreEnv> {
       const url = new URL(request.url);
       if (url.hostname === "room.internal") {
         const input = await body(request);
-        if (url.pathname === "/native-lease") {
-          const hostSocket = this.host();
-          const host = hostSocket && this.state(hostSocket);
-          const client = this.sockets("client")
-            .map((ws) => this.state(ws))
-            .find((c) => c?.peer === input.peer);
-          const now = Math.floor(Date.now() / 1000);
-          if (
-            !host?.nativeRelay ||
-            !client?.nativeRelay ||
-            host.host !== input.host ||
-            host.generation !== client.generation ||
-            !host.allowRelay ||
-            !client.allowRelay ||
-            Math.min(host.expires, client.expires) <= now ||
-            host.nativeRelay.pin !== input.pin ||
-            client.nativeRelay.pin !== input.pin ||
-            host.nativeRelay.ticket !== input.hostTicket ||
-            client.nativeRelay.ticket !== input.clientTicket
-          )
-            throw new APIError("RELAY_DENIED", "中继验证失败", 403);
-          if (this.policy !== unrestricted) {
-            const decisions = await Promise.all([
-              this.decision(host, "relay"),
-              this.decision(client, "relay"),
-            ]);
-            if (decisions.some((decision) => !decision.limits.allowRelay))
-              throw new APIError("RELAY_DENIED", "中继验证失败", 403);
-          }
-          return json({
-            validFor: Math.min(60, host.expires - now, client.expires - now),
-          });
-        }
         if (url.pathname === "/online") return json({ online: !!this.host() });
         if (url.pathname === "/revoke") {
           for (const ws of this.sockets("client"))
@@ -256,10 +223,19 @@ export class ReignHubRoom extends DurableObject<CoreEnv> {
                 ? nodes[parseInt(hostID.slice(0, 8), 16) % nodes.length]
                 : undefined
               : nodes.find(
-                  (n) => n.pin === this.state(currentHost!)?.nativeRelay?.pin,
+                  (n) =>
+                    n.endpoint.pin ===
+                    this.state(currentHost!)?.nativeRelay?.pin,
                 );
           if (selected)
-            nativeRelay = { ...selected, ticket: "ext1." + random() };
+            nativeRelay = await relayWelcome(
+              selected,
+              hostID,
+              role === "host" ? peer : this.state(currentHost!)!.generation,
+              peer,
+              role,
+              grant.expires,
+            );
         }
         // Only a fully authenticated and admitted owner may replace its own
         // lingering host socket. A lost close frame must not block restarts.
@@ -346,9 +322,27 @@ export class ReignHubRoom extends DurableObject<CoreEnv> {
         state.grant = next.ticket;
         state.expires = next.expires;
         state.allowRelay = decision.limits.allowRelay;
+        if (state.nativeRelay) {
+          const node =
+            state.allowRelay &&
+            externalRelays(this.env).find(
+              (n) => n.endpoint.pin === state.nativeRelay!.pin,
+            );
+          state.nativeRelay = node
+            ? await relayWelcome(
+                node,
+                state.host,
+                state.generation,
+                state.peer,
+                state.role,
+                state.expires,
+              )
+            : undefined;
+        }
         ws.serializeAttachment(state);
         this.send(ws, {
           kind: "lease",
+          nativeRelay: state.nativeRelay,
           peer: state.peer,
           grant: state.grant,
           allowRelay: state.allowRelay,

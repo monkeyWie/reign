@@ -1,6 +1,5 @@
 export { handleConsole } from "./console";
-import { externalStun } from "./external-stun";
-import { verifyRelayCheck } from "./external-relay";
+import { stunServers } from "./stun-servers";
 import { drizzle } from "drizzle-orm/d1";
 import { and, eq, gt, inArray } from "drizzle-orm";
 import { APIError, PROTOCOL, routes, type Device } from "@reignhub/protocol";
@@ -199,38 +198,7 @@ export async function handleCore(
         loginProviders: policy.loginProviders(env),
         serviceId: identity.serviceId,
         grantPublicKey: identity.public,
-        publicStun: (
-          env.PUBLIC_STUN ??
-          "stun:stun.cloudflare.com:3478,stun:stun.l.google.com:19302"
-        )
-          .split(",")
-          .filter(Boolean),
-        ...externalStun(env),
-      });
-    } else if (url.pathname === routes.nativeLease) {
-      if (request.method !== "POST")
-        throw new APIError("METHOD_NOT_ALLOWED", "请使用 POST", 405);
-      const raw = await bodyText(request, 1024);
-      const pin = await verifyRelayCheck(env, request.headers, raw);
-      let check;
-      try {
-        check = JSON.parse(raw);
-      } catch {
-        check = null;
-      }
-      if (
-        !check ||
-        typeof check.host !== "string" ||
-        !/^[a-f0-9]{32}$/.test(check.host) ||
-        typeof check.peer !== "string" ||
-        !/^[a-f0-9]{32}$/.test(check.peer) ||
-        typeof check.clientTicket !== "string" ||
-        typeof check.hostTicket !== "string"
-      )
-        throw new APIError("RELAY_DENIED", "中继验证失败", 403);
-      result = await roomCall(env, check.host, "/native-lease", {
-        ...check,
-        pin,
+        ...stunServers(env),
       });
     } else if (
       url.pathname === routes.signal ||

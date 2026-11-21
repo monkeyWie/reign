@@ -6,7 +6,7 @@ import {
 } from "cloudflare:test";
 import { beforeAll, describe, it, expect } from "vitest";
 import { externalRelays } from "../src/external-relay";
-import { bytes64 } from "../src/crypto";
+import { un64 } from "../src/crypto";
 import { routes, type Frame } from "@reignhub/protocol";
 import { handleCore, room, type CoreEnv } from "../src";
 const bindings = env as unknown as CoreEnv & {
@@ -70,26 +70,45 @@ describe("device authorization and separated ingress", () => {
     expect((await post("/v2/register", {})).status).toBe(404);
   });
   it("publishes the configured STUN transports and honors explicit empty lists", async () => {
-    async function config(value: CoreEnv["EXTERNAL_STUN"]) {
+    async function config(
+      value: CoreEnv["EXTERNAL_STUN"],
+      previous: Partial<CoreEnv> = {},
+    ) {
       const response = await handleCore(
         new Request("https://reignhub.test" + routes.config),
         {
           ...bindings,
-          SELF_STUN: "stun:old.example:3478",
-          TCP_STUN: "old.example:3478",
+          ...previous,
           EXTERNAL_STUN: value,
         },
       );
       return { status: response!.status, body: await response!.json() };
     }
+    const publicStun = [
+      "stun:stun.cloudflare.com:3478",
+      "stun:stun.l.google.com:19302",
+      "stun:stun.chat.bilibili.com:3478",
+    ];
     expect(await config(undefined)).toMatchObject({
       body: {
+        publicStun,
+        selfStun: [],
+        tcpStun: [],
+      },
+    });
+    expect(await config("[]")).toMatchObject({
+      body: { publicStun, selfStun: [], tcpStun: [] },
+    });
+    const previous = { PUBLIC_STUN: "", STUN_SERVERS: ["old.example:3478"] };
+    expect(await config(undefined, previous)).toMatchObject({
+      body: {
+        publicStun,
         selfStun: ["stun:old.example:3478"],
         tcpStun: ["old.example:3478"],
       },
     });
-    expect(await config("[]")).toMatchObject({
-      body: { selfStun: [], tcpStun: [] },
+    expect(await config([], previous)).toMatchObject({
+      body: { publicStun, selfStun: [], tcpStun: [] },
     });
     expect(await config('["[::1]:3478","[::1]:3478"]')).toMatchObject({
       body: { selfStun: ["stun:[::1]:3478"], tcpStun: ["[::1]:3478"] },
@@ -99,6 +118,20 @@ describe("device authorization and separated ingress", () => {
     });
     expect(await config(["tcp:tcp.example:3479"])).toMatchObject({
       body: { selfStun: [], tcpStun: ["tcp.example:3479"] },
+    });
+    expect(
+      await config(["udp:stun.cloudflare.com:3478", "probe.example:26331"]),
+    ).toMatchObject({
+      body: {
+        publicStun,
+        selfStun: ["stun:probe.example:26331"],
+        tcpStun: ["probe.example:26331"],
+      },
+    });
+    expect(
+      await config(undefined, { PUBLIC_STUN: "stun:old.example:3478" }),
+    ).toMatchObject({
+      body: { publicStun: [...publicStun, "stun:old.example:3478"] },
     });
     for (const value of [
       "{",
@@ -116,7 +149,15 @@ describe("device authorization and separated ingress", () => {
   it("resolves shared and single-transport relays and rejects conflicting addresses", () => {
     const pin = bindings.TEST_RELAY_SIGNER.x!;
     const resolve = (addresses: string[]) =>
-      externalRelays({ ...bindings, EXTERNAL_RELAYS: [{ addresses, pin }] });
+      externalRelays({
+        ...bindings,
+        EXTERNAL_RELAYS: [
+          {
+            addresses,
+            credential: `rh1.${pin}.${bindings.TEST_RELAY_SIGNER.d}`,
+          },
+        ],
+      }).map((n) => n.endpoint);
     expect(resolve(["relay.example:26332"])).toEqual([
       { address: "relay.example:26332", pin },
     ]);
@@ -243,39 +284,35 @@ describe("device authorization and separated ingress", () => {
     expect(clientNode.tcpAddress).toEqual(hostNode.tcpAddress);
     expect(clientNode.pin).toEqual(hostNode.pin);
     expect(clientNode.ticket).not.toEqual(hostNode.ticket);
-    const signer = await crypto.subtle.importKey(
-      "jwk",
-      bindings.TEST_RELAY_SIGNER,
-      "Ed25519",
+    expect(JSON.stringify(welcome)).not.toContain(bindings.TEST_RELAY_SIGNER.d);
+    const key = await crypto.subtle.importKey(
+      "raw",
+      un64(bindings.TEST_RELAY_SIGNER.d!),
+      { name: "HMAC", hash: "SHA-256" },
       false,
-      ["sign"],
+      ["verify"],
     );
-    async function checkLease(hostTicket: string) {
-      const body = JSON.stringify({
-        host: h.id,
-        peer: welcome.peer,
-        hostTicket,
-        clientTicket: clientNode.ticket,
-      });
-      const signature = await crypto.subtle.sign(
-        "Ed25519",
-        signer,
-        new TextEncoder().encode("reign/native-relay/lease/v1\n" + body),
-      );
-      return SELF.fetch("https://reignhub.test" + routes.nativeLease, {
-        method: "POST",
-        headers: {
-          "X-Reign-Relay-Pin": clientNode.pin,
-          "X-Reign-Relay-Signature": bytes64(new Uint8Array(signature)),
-        },
-        body,
-      });
+    for (const [node, role, peer] of [
+      [hostNode, "host", hostWelcome.peer],
+      [clientNode, "client", welcome.peer],
+    ] as const) {
+      const fields = node.ticket.split(".");
+      expect(fields.slice(0, 5)).toEqual([
+        "rh2",
+        h.id,
+        hostWelcome.peer,
+        peer,
+        role,
+      ]);
+      expect(
+        await crypto.subtle.verify(
+          "HMAC",
+          key,
+          un64(fields[6]),
+          new TextEncoder().encode(fields.slice(0, 6).join(".")),
+        ),
+      ).toBe(true);
     }
-    expect((await post(routes.nativeLease, {})).status).toBe(403);
-    expect((await checkLease(clientNode.ticket)).status).toBe(403);
-    expect(await (await checkLease(hostNode.ticket)).json()).toEqual({
-      validFor: 60,
-    });
     const dr = await socket(
       h.id,
       c.token,

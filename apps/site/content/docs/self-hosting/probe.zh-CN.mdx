@@ -5,7 +5,7 @@ description: 在一个公网 IP 上提供 TCP、UDP 探测和可选的 QUIC、TC
 
 ## 什么时候需要
 
-Worker 不能直接监听原始 UDP／TCP 探测 Socket。默认可以使用公共 UDP STUN；如果希望补充自己的候选地址发现、提高公共探测服务不可达时的覆盖，可在有公网地址的服务器将 `config.json` 中的 `http` 设为 `false` 并启动服务。
+Worker 不能直接监听原始 UDP／TCP 探测 Socket。默认可以使用公共 UDP STUN；如果希望补充自己的候选地址发现、提高公共探测服务不可达时的覆盖，可在有公网地址的服务器将 `config.json` 设为 `{"services":{"stun":{}}}` 并启动服务。
 
 探测器只返回地址映射，不保存设备目录、不运行 Agent、不托管网页，也不是业务中继。没有它也可以部署 Worker。
 
@@ -15,7 +15,7 @@ Go 版本以仓库 `go.mod` 为准，也可以使用对应平台的 Go 服务发
 
 ```sh
 go build -o reignhub-server ./cmd/reignhub-server
-# 将 config.json 设为 {"http":false} 后启动。
+# 将 config.json 设为 {"services":{"stun":{}}} 后启动。
 ./reignhub-server
 ```
 
@@ -38,32 +38,30 @@ EXTERNAL_STUN=["probe.example.com:26331"]
 
 客户端仍然只填 Worker 的 HTTPS 地址。服务会通过 `/p2p/config` 下发这些入口。
 
-公共与自建 STUN 并行尝试，优先得到可用的直连路径；浏览器没有原始 TCP 能力，TCP 探测主要用于原生端。
+公共和自建节点填在同一列表。中控始终下发内置的 Cloudflare、Google 和哔哩哔哩（`stun.chat.bilibili.com:3478`）UDP STUN。列表只填写要追加的节点，省略或写 `[]` 都会保留这三个公共节点。Go 中控用 `services.control.stunServers` 填相同的数组，并会额外下发本机已启用的 STUN 监听地址。浏览器没有原始 TCP 能力，TCP 探测主要用于原生端。
 
 ## 在同一台机器上提供原生中继
 
-在节点的 `config.json` 中填写 Go 或 Worker 中控的 HTTPS 地址。启动后在另一个终端读取 PIN。
+在节点的 `config.json` 里启用 STUN 和中继。启动后，在另一个终端进入同一目录，运行第二条命令读取节点凭据。
 
 ```json
 {
-  "http": false,
-  "relayControl": "https://control.example",
-  "state": "data/relay.db"
+  "services": { "stun": {}, "relay": {} }
 }
 ```
 
 ```sh
 ./reignhub-server
-./reignhub-server --print-relay-pin
+./reignhub-server --print-relay-credential
 ```
 
-中继另需放行 26332 的 UDP 和 TCP。升级时保留数据库，节点 PIN 就能保持稳定。在 Worker 的 `EXTERNAL_RELAYS` 或 Go 中控 JSON 的 `externalRelays` 里填下面的数组，将示例地址和 PIN 换成自己的。
+中继另需放行 26332 的 UDP 和 TCP。保留节点数据库，重启或升级后仍可使用同一份凭据。在 Worker 控制台新建名为 `EXTERNAL_RELAYS` 的 **Secret**，将下面数组中的地址和凭据换成自己的再粘贴。用 Wrangler 部署时，运行 `pnpm exec wrangler secret put EXTERNAL_RELAYS`，按提示粘贴即可。Go 中控在 `services.control.externalRelays` 填相同的数组，并限制配置文件的读取权限。客户端只收到用于校验中继身份的公钥指纹和短期连接票据。
 
 ```json
-[{ "addresses": ["203.0.113.10:26332"], "pin": "替换成命令输出的PIN" }]
+[{ "addresses": ["203.0.113.10:26332"], "credential": "替换成命令输出的节点凭据" }]
 ```
 
-多台中继各加一项。共用地址写一次即可。分端口时填 `["udp:probe.example.com:3478","tcp:probe.example.com:3479"]`。Go 与 Worker 都对 STUN 和每个中继的 `addresses` 数组使用这套规则，同一中继只需一个 PIN。配置修改后重新部署 Worker 或重启 Go 中控。
+多台中继各加一项。共用地址写一次即可。分端口时填 `["udp:probe.example.com:3478","tcp:probe.example.com:3479"]`。Go 与 Worker 都对 STUN 和每个中继的 `addresses` 数组使用这套规则，同一中继只需一份节点凭据。配置修改后重新部署 Worker 或重启 Go 中控。
 
 ## 运行边界
 

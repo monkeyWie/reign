@@ -29,6 +29,8 @@ func TestNativeDataPaths(t *testing.T) {
 			token := strings.Repeat("r", 32)
 			room := relay.New(token)
 			defer room.Close()
+			// Exercise native-only signaling as well as a failed WebSocket fallback.
+			room.DisableWebSocket = tc.name == "mixed relay"
 			if !tc.direct {
 				listener, err := room.ListenNative("127.0.0.1:0", "", nativepath.Key([]byte("fixture"), "server"))
 				if err != nil {

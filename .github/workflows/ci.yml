@@ -390,7 +390,7 @@ jobs:
           mkdir -p build/server-smoke
           tar -xzf "dist/release/reignhub-server-$VERSION-linux-amd64.tar.gz" -C build/server-smoke
           cat > build/server-smoke/config.json <<'JSON'
-          {"listen":"127.0.0.1:18788","state":"state.db","stunListen":"127.0.0.1:0","tcpStunListen":"127.0.0.1:0","nativeRelayListen":"127.0.0.1:0"}
+          {"services":{"control":{"listen":"127.0.0.1:18788","database":"state.db"},"stun":{"listen":"127.0.0.1:0"},"relay":{"websocket":true,"native":{"listen":"127.0.0.1:0"}}}}
           JSON
           "build/server-smoke/reignhub-server-$VERSION-linux-amd64/reignhub-server" \
             --config build/server-smoke/config.json > /tmp/reignhub-go-server.log 2>&1 &
@@ -405,7 +405,7 @@ jobs:
         run: |
           docker build --build-arg VERSION="$VERSION" -f deploy/service/Dockerfile -t reignhub-server:ci .
           cat > build/server-smoke/container.json <<'JSON'
-          {"state":"/data/reignhub.db","selfStun":"stun:127.0.0.1:19031","tcpStunPublic":"127.0.0.1:19031"}
+          {"services":{"control":{},"stun":{"publicAddress":"127.0.0.1:19031"},"relay":{}}}
           JSON
           docker run -d --rm --name reignhub-server-ci --read-only \
             --tmpfs /data:rw,noexec,nosuid,size=64m,uid=65532,gid=65532 \
@@ -482,7 +482,7 @@ jobs:
           - Upgrading from 0.x: the 1.0 clients start with fresh local storage. Save any unsent drafts and keep your current desktop data directory before upgrading. Plan to pair devices again.
           - Conversation history loads in pages as you scroll. Native and browser clients persist individual messages and keep a bounded window in memory.
           - Desktop sessions include terminal tabs. Hosts manage paired devices’ terminal access in Connection settings.
-          - Native peers can negotiate QUIC or TCP paths. The open-source Go server and Cloudflare Worker can advertise your own STUN and pinned relay nodes.
+          - Native peers can negotiate QUIC or TCP paths. The open-source Go server and Cloudflare Worker include Cloudflare, Google and Bilibili UDP discovery and can advertise additional STUN and native relay nodes.
 
           - macOS DMG: open and drag ReignHub into Applications. Builds are ad hoc signed and not notarized.
           - Windows setup EXE: includes installation, shortcuts and an uninstaller.
@@ -490,7 +490,7 @@ jobs:
           - Android packages ending in `-debug.apk` use a temporary development signing key and cannot update previous builds with another key. A configured persistent signing identity removes this suffix.
           - iOS `-unsigned.ipa` requires your own signing/provisioning before installation.
           - Standalone reignhub-server binaries embed Web, use SQLite, and enable TCP/UDP discovery by default. Edit the bundled config.json before starting. Package-manager definitions are included separately.
-          - To run a STUN and native relay node, set `http` to false and `relayControl` to your control service HTTPS origin. Open 26331 and 26332 on UDP and TCP. Follow the [open-source self-hosting guide](https://reignhub.app/docs/self-hosting).
+          - To run a STUN and native relay node, use `{"services":{"stun":{},"relay":{}}}`. Read the persistent node credential with `--print-relay-credential` and register it with the control service. Open 26331 and 26332 on UDP and TCP. Follow the [open-source self-hosting guide](https://reignhub.app/docs/self-hosting).
           - Verify downloads against `SHA256SUMS` or the individual `.sha256` files.
           - Native clients default to https://reignhub.app; self-hosted services can be configured in settings. Web uses its current origin.
           NOTES

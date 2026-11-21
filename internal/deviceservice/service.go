@@ -21,7 +21,6 @@ import (
 	"github.com/monkeyWie/reignhub/internal/connectivity"
 	"github.com/monkeyWie/reignhub/internal/device"
 
-	"github.com/monkeyWie/reignhub/internal/nativepath"
 	"github.com/monkeyWie/reignhub/internal/relay"
 	"github.com/monkeyWie/reignhub/pkg/database"
 	"gorm.io/gorm"
@@ -68,20 +67,19 @@ type Admission struct {
 type Server struct {
 	// Hooks are assigned before serving. Registration runs in the same database
 	// transaction, so a rejected allocation cannot leave an unowned device.
-	OnRegister   func(*gorm.DB, Device) error
-	Policy       func(context.Context, Admission) error
-	mu           sync.Mutex
-	DB           *gorm.DB
-	rates        map[string]bucket
-	nextCleanup  int64
-	RelayEnabled bool
-	relay        *relay.Server
-	nativeKey    ed25519.PrivateKey
-	ServiceID    string
-	Network      connectivity.Policy
-	STUNPort     string
-	TCPSTUNPort  string
-	ExternalSTUN connectivity.Endpoints
+	OnRegister     func(*gorm.DB, Device) error
+	Policy         func(context.Context, Admission) error
+	mu             sync.Mutex
+	DB             *gorm.DB
+	rates          map[string]bucket
+	nextCleanup    int64
+	relay          *relay.Server
+	nativeKey      ed25519.PrivateKey
+	ServiceID      string
+	Network        connectivity.Policy
+	STUNPort       string
+	TCPSTUNPort    string
+	ConfiguredSTUN connectivity.Endpoints
 }
 
 func hash(s string) string { v := sha256.Sum256([]byte(s)); return hex.EncodeToString(v[:]) }
@@ -111,10 +109,9 @@ func NewWithDB(db *gorm.DB, origins []string) (*Server, error) {
 	if err := db.First(&meta, "key = ?", "service_id").Error; err != nil {
 		return nil, err
 	}
-	s := &Server{RelayEnabled: true, DB: db, rates: map[string]bucket{}, Network: connectivity.DefaultPolicy(), ServiceID: meta.Value}
+	s := &Server{DB: db, rates: map[string]bucket{}, Network: connectivity.DefaultPolicy(), ServiceID: meta.Value}
 	s.relay = relay.New("")
 	s.relay.Origins = origins
-	s.relay.RelayAllowed = func(_, _, _ string) bool { return s.RelayEnabled }
 	// Persist the signing seed with the service ID; restarting must not invalidate leases.
 	_, generated, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -159,9 +156,9 @@ func NewWithDB(db *gorm.DB, origins []string) (*Server, error) {
 	}
 	return s, nil
 }
-func (s *Server) ConfigureNative(nodes []nativepath.Endpoint, controlOrigin string) {
+func (s *Server) ConfigureNative(nodes []relay.RelayNode, websocket bool) {
+	s.relay.DisableWebSocket = !websocket
 	s.relay.ExternalRelays = nodes
-	s.relay.ControlOrigin = controlOrigin
 }
 func (s *Server) ListenNative(address, public string) (*relay.NativeListener, error) {
 	return s.relay.ListenNative(address, public, s.nativeKey)
@@ -227,7 +224,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(204)
 		return
 	}
-	if r.URL.Path == "/p2p/signal" || r.URL.Path == "/p2p/relay" || r.URL.Path == relay.NativeLeasePath {
+	if r.URL.Path == "/p2p/signal" || r.URL.Path == "/p2p/relay" {
 		s.relay.ServeHTTP(w, r)
 		return
 	}
@@ -241,7 +238,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if len(policy.TCPSTUN) == 0 && s.TCPSTUNPort != "" {
 			policy.TCPSTUN = []string{strings.TrimPrefix(connectivity.STUNURL(r.Host, s.TCPSTUNPort), "stun:")}
 		}
-		s.ExternalSTUN.AppendSTUN(&policy)
+		s.ConfiguredSTUN.AppendSTUN(&policy)
 		writeJSON(w, 200, struct {
 			connectivity.Policy
 			Protocol        int      `json:"protocol"`

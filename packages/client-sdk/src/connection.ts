@@ -404,7 +404,7 @@ export class Connection extends EventTarget {
       this.report(
         "stun:" + url,
         "udp",
-        "自建 STUN 节点",
+        "配置的 STUN 节点",
         url + " · 并行探测",
         "info",
       );

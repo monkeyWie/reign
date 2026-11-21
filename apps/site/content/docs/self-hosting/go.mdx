@@ -12,7 +12,7 @@ Choose the `reignhub-server` archive for your OS and CPU from [server downloads]
 ./reignhub-server
 ```
 
-On Windows PowerShell, run `.\reignhub-server.exe`. Open `http://localhost:26330/chat/` on the server. For public browser access, proxy HTTPS to port 26330/TCP or configure `tlsCert` and `tlsKey`. Expose 26331/UDP and TCP for STUN and 26332/UDP and TCP for native relay. Behind NAT or a reverse proxy, set `selfStun`, `tcpStunPublic` and `nativeRelayPublic` to addresses reachable by clients.
+On Windows PowerShell, run `.\reignhub-server.exe`. Open `http://localhost:26330/chat/` on the server. For public browser access, proxy HTTPS to port 26330/TCP or set `certFile` and `keyFile` in `services.control.tls`. Expose 26331/UDP and TCP for STUN and 26332/UDP and TCP for native relay. Behind NAT or a reverse proxy, set `services.stun.publicAddress` and `services.relay.native.publicAddress` to addresses reachable by clients.
 
 To use Docker Compose, run this from the source repository:
 
@@ -24,22 +24,20 @@ docker compose -f deploy/service/compose.yaml up -d --build
 
 The server reads `config.json` in the working directory. Archives include the template. With a binary-only install, run `reignhub-server --init` once in your service directory, edit the file and run `reignhub-server`. Initialization preserves existing files. Use `--config PATH` to select a different file. Relative state, Web and TLS paths resolve from the config directory.
 
-This configuration runs TCP and UDP discovery on port 3478 on all interfaces.
+The default file includes three service groups: `control` (device directory, pairing, signaling and Web), `stun` and `relay`. When you specify groups, only those listed start. This configuration runs TCP and UDP discovery on port 3478 on all interfaces.
 
 ```json
 {
-  "http": false,
-  "stunListen": ":3478",
-  "tcpStunListen": ":3478"
+  "services": { "stun": { "listen": ":3478" } }
 }
 ```
 
-Restart the Go service after editing. A control service can use `externalStun` to append discovery nodes and `externalRelays` to register relay addresses and pins.
+Restart the Go service after editing. A control service can use `services.control.stunServers` to add discovery nodes alongside the built-in Cloudflare, Google and Bilibili (`stun.chat.bilibili.com:3478`) UDP nodes and `services.control.externalRelays` to register relay addresses and node credentials.
 
 ## Installation and upgrades
 
 The release packaging archive contains Homebrew and Scoop definitions with verified URLs/hashes. Homebrew requires a tap: create one with `brew tap-new reignhub/local`, copy `Formula/reignhub-server.rb` into `$(brew --repository reignhub/local)/Formula/`, then run `brew install reignhub/local/reignhub-server`. Windows can use `scoop install ./bucket/reignhub-server.json`. Homebrew supports `brew services start reignhub-server`. A short tap command requires a separately published tap; package registration is not part of a source build.
 
-For Linux, use the bundled systemd unit. Preserve the SQLite database when upgrading. Stop the service before copying the database and any WAL/SHM files, or use SQLite's backup API. The database contains the persistent service ID, signing key, device metadata, credential hashes and pairing permissions, but no chat plaintext. Check `/healthz`, `/p2p/config` and an actual paired connection after restarting.
+For Linux, use the systemd unit in the source repository’s `deploy/service/` directory. Preserve the SQLite database when upgrading. Stop the service before copying the database and any WAL/SHM files, or use SQLite's backup API. The database contains the persistent service ID, signing key, device metadata, credential hashes and pairing permissions, but no chat plaintext. Check `/healthz`, `/p2p/config` and an actual paired connection after restarting.
 
-The repository's `deploy/service/README.md` contains Docker, Nginx, systemd and installer details. Building from source with `go install` only embeds Web when release assets have been staged; use a release binary or set `web` in config.json.
+The repository's `deploy/service/README.md` contains Docker, Nginx, systemd and installer details. Building from source with `go install` only embeds Web when release assets have been staged; use a release binary or set `services.control.webDir` in config.json.

@@ -59,6 +59,7 @@ func serveHostObserved(ctx context.Context, p Pairing, opts Options, d *control.
 	life, cancel := context.WithCancel(ctx)
 	defer cancel()
 	heartbeat := newSocketHeartbeat()
+	heartbeat.nativeLease = welcome.Native != nil && relay.IsExternalTicket(welcome.Native.Ticket)
 	go heartbeat.run(life, ws, true, opts.Progress)
 	var replyRelay *relayLink
 	if allowRelay {
@@ -86,6 +87,15 @@ func serveHostObserved(ctx context.Context, p Pairing, opts Options, d *control.
 		heartbeat.received()
 		var f relay.Frame
 		if json.Unmarshal(raw, &f) != nil || f.Peer == "" {
+			continue
+		}
+		if f.Kind == "lease" && f.Peer == hostPeer {
+			if f.Native != nil && welcome.Native != nil && f.Native.Endpoint == welcome.Native.Endpoint {
+				welcome.Native = f.Native
+				for _, w := range peers {
+					w.refreshNativeTicket(f.Native)
+				}
+			}
 			continue
 		}
 		if f.Kind == "bye" {

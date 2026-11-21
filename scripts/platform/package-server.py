@@ -38,7 +38,7 @@ def package_managers(output, release_version, archives):
                 asset_url, digest = url(os_name, arch)
                 formula.extend([f'    if {condition}', f'      url "{asset_url}"', f'      sha256 "{digest}"', '    end'])
             formula.append('  end')
-        formula.extend(['  def install', '    bin.install "reignhub-server"', '    inreplace "config.json", "data/reignhub.db", (var/"lib/reignhub-server/reignhub.db").to_s', '    (etc/"reignhub-server").install "config.json" unless (etc/"reignhub-server/config.json").exist?',
+        formula.extend(['  def install', '    bin.install "reignhub-server"', '    require "json"', '    config = JSON.parse(File.read("config.json"))', '    config.fetch("services").fetch("control")["database"] = (var/"lib/reignhub-server/reignhub.db").to_s', '    File.write("config.json", JSON.pretty_generate(config))', '    (etc/"reignhub-server").install "config.json" unless (etc/"reignhub-server/config.json").exist?',
                         '  end', '  service do', '    run [opt_bin/"reignhub-server", "--config", etc/"reignhub-server/config.json"]',
                         '    keep_alive true', '    working_dir var', '    log_path var/"log/reignhub-server.log"', '    error_log_path var/"log/reignhub-server.log"', '  end',
                         '  test do', '    assert_match version.to_s, shell_output("#{bin}/reignhub-server --version")', '  end', 'end', ''])
@@ -107,10 +107,7 @@ def main():
             binary = 'reignhub-server' + ('.exe' if os_name == 'windows' else '')
             subprocess.run(['go', 'build', '-trimpath', f'-ldflags=-s -w -X github.com/monkeyWie/reignhub/internal/servercmd.Version={args.version}', '-o', str(bundle / binary), './cmd/reignhub-server'], cwd=stage,
                            env={**os.environ, 'GOWORK': 'off', 'GOOS': os_name, 'GOARCH': arch, 'CGO_ENABLED': '0'}, check=True)
-            for filename in ('README.md', 'config.json', 'reignhub-server.service', 'nginx.conf.example'):
-                shutil.copy2(ROOT / 'deploy/service' / filename, bundle / filename)
-            shutil.copy2(ROOT / 'LICENSE', bundle / 'LICENSE')
-            (bundle / 'release.json').write_text(json.dumps({'version': args.version, 'os': os_name, 'arch': arch, 'protocol': 1, 'webEmbedded': True, 'wasmParts': len(manifest['wasmParts'])}, indent=2) + '\n')
+            shutil.copy2(ROOT / 'deploy/service/config.json', bundle / 'config.json')
             archive = output / (name + ('.zip' if os_name == 'windows' else '.tar.gz'))
             if os_name == 'windows':
                 with zipfile.ZipFile(archive, 'w', compression=zipfile.ZIP_DEFLATED) as zip_file:

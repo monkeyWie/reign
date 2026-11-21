@@ -52,13 +52,16 @@ func (entries TransportAddresses) Resolve() (Endpoints, error) {
 }
 
 func (e Endpoints) AppendSTUN(p *Policy) {
-	p.SelfSTUN = slices.Clip(p.SelfSTUN)
+	p.SelfSTUN = slices.Clone(p.SelfSTUN)
 	for _, addr := range e.UDP {
 		url := "stun:" + addr
 		if !slices.Contains(p.SelfSTUN, url) {
 			p.SelfSTUN = append(p.SelfSTUN, url)
 		}
 	}
+	p.SelfSTUN = slices.DeleteFunc(p.SelfSTUN, func(url string) bool {
+		return slices.Contains(p.PublicSTUN, url)
+	})
 	p.TCPSTUN = slices.Clip(p.TCPSTUN)
 	for _, addr := range e.TCP {
 		if !slices.Contains(p.TCPSTUN, addr) {

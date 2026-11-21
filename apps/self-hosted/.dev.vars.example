@@ -1,4 +1,4 @@
 # Optional: permit a separately hosted ReignHub Web origin.
 ALLOWED_ORIGINS=http://localhost:3000
-# Optional Go probe endpoints. Do not use an orange-cloud proxied hostname.
-EXTERNAL_STUN='[]'
+# Optional additional UDP/TCP discovery servers.
+# EXTERNAL_STUN='["probe.example.com:26331"]'

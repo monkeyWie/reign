@@ -13,7 +13,6 @@ export const routes = {
   revoke: "/p2p/pairings/revoke",
   signal: "/p2p/signal",
   relay: "/p2p/relay",
-  nativeLease: "/p2p/native-relay/lease",
 } as const;
 export type Role = "host" | "client";
 export type ObjectValue = Record<string, unknown>;

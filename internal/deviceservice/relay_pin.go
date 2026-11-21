@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/monkeyWie/reignhub/internal/nativepath"
+	"github.com/monkeyWie/reignhub/internal/relay"
 	"github.com/monkeyWie/reignhub/pkg/database"
 	"gorm.io/gorm"
 )
@@ -27,8 +28,8 @@ func readSigningSeed(db *gorm.DB) ([]byte, error) {
 
 func relayTLSKey(seed []byte) ed25519.PrivateKey { return nativepath.Key(seed, "service-relay") }
 
-// ReadRelayPin returns the public pin used by both native relay transports.
-func ReadRelayPin(state string) (string, error) {
+// ReadRelayCredential reads an existing node identity without creating new state.
+func ReadRelayCredential(state string) (string, error) {
 	db, err := database.OpenSQLiteReadOnly(state)
 	if err != nil {
 		return "", fmt.Errorf("open existing service state %q: %w", state, err)
@@ -42,5 +43,5 @@ func ReadRelayPin(state string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("read relay identity from %q: %w", state, err)
 	}
-	return nativepath.Pin(relayTLSKey(seed)), nil
+	return relay.Credential(relayTLSKey(seed)), nil
 }

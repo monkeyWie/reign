@@ -1,6 +1,9 @@
 package browserclient
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 func TestLANHTTPPolicy(t *testing.T) {
 	previous := AllowLANHTTP
@@ -21,5 +24,17 @@ func TestLANHTTPPolicy(t *testing.T) {
 				t.Errorf("LAN=%s host=%q got %v want %v", enabled, tc.host, got, want)
 			}
 		}
+	}
+}
+
+func TestSTUNPolicyExplicitEmpty(t *testing.T) {
+	if len(STUN(nil)) == 0 {
+		t.Fatal("missing service configuration lost its fallback")
+	}
+	if got := STUN(Object{"publicStun": []any{}, "selfStun": []any{}, "tcpStun": []any{"probe.example:26331"}}); len(got) != 0 {
+		t.Fatal("browser added UDP probes to a TCP-only configuration", got)
+	}
+	if got := STUN(Object{"publicStun": []any{}, "selfStun": []any{"stun:probe.example:26331"}}); !slices.Equal(got, []string{"stun:probe.example:26331"}) {
+		t.Fatal("browser changed the configured probe list", got)
 	}
 }

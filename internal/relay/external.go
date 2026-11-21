@@ -1,20 +1,12 @@
-// Static external native relays authenticate against one operator-configured
-// control origin. Devices never choose the callback URL.
 package relay
 
 import (
-	"bytes"
-	"context"
 	"crypto/ed25519"
-	"crypto/subtle"
+	"crypto/hmac"
+	"crypto/sha256"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
-	"io"
 	"net"
-	"net/http"
-	"net/netip"
-	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -24,28 +16,47 @@ import (
 	"github.com/monkeyWie/reignhub/internal/nativepath"
 )
 
-const NativeLeasePath = "/p2p/native-relay/lease"
 const maxLeaseSeconds = 60
-const leaseDomain = "reign/native-relay/lease/v1\n"
 
 var idPattern = regexp.MustCompile(`^[a-f0-9]{32}$`)
-var ticketPattern = regexp.MustCompile(`^ext1\.[a-f0-9]{64}$`)
+var b64 = base64.RawURLEncoding.Strict()
 
-type NodeConfig struct {
-	Addresses connectivity.TransportAddresses `json:"addresses"`
-	Pin       string                          `json:"pin"`
+func authorizationKey(key ed25519.PrivateKey) []byte {
+	m := hmac.New(sha256.New, key.Seed())
+	m.Write([]byte("reign/relay/credential/v1"))
+	return m.Sum(nil)
 }
 
-func ResolveNodes(nodes []NodeConfig) ([]nativepath.Endpoint, error) {
+// Credential exports the public TLS pin and a domain-separated ticket signing key.
+func Credential(key ed25519.PrivateKey) string {
+	return "rh1." + nativepath.Pin(key) + "." + b64.EncodeToString(authorizationKey(key))
+}
+
+type RelayNode struct {
+	nativepath.Endpoint
+	secret []byte
+}
+type NodeConfig struct {
+	Addresses  connectivity.TransportAddresses `json:"addresses"`
+	Credential string                          `json:"credential"`
+}
+
+func ResolveNodes(nodes []NodeConfig) ([]RelayNode, error) {
 	if len(nodes) > 32 {
 		return nil, errors.New("at most 32 external relays are supported")
 	}
 	seen := make(map[string]bool)
-	out := make([]nativepath.Endpoint, 0, len(nodes))
+	out := make([]RelayNode, 0, len(nodes))
 	for _, node := range nodes {
-		key, err := base64.RawURLEncoding.Strict().DecodeString(node.Pin)
-		if err != nil || len(node.Pin) != 43 || len(key) != ed25519.PublicKeySize || seen[node.Pin] {
-			return nil, errors.New("external relays require a unique base64url Ed25519 pin")
+		parts := strings.Split(node.Credential, ".")
+		if len(parts) != 3 || parts[0] != "rh1" {
+			return nil, errors.New("invalid external relay credential")
+		}
+		pin := parts[1]
+		pub, err := b64.DecodeString(pin)
+		secret, keyErr := b64.DecodeString(parts[2])
+		if err != nil || keyErr != nil || len(pin) != 43 || len(parts[2]) != 43 || len(pub) != 32 || len(secret) != 32 || seen[pin] {
+			return nil, errors.New("invalid or duplicate external relay credential")
 		}
 		addrs, err := node.Addresses.Resolve()
 		if err != nil {
@@ -54,7 +65,7 @@ func ResolveNodes(nodes []NodeConfig) ([]nativepath.Endpoint, error) {
 		if len(addrs.UDP) > 1 || len(addrs.TCP) > 1 || len(addrs.UDP)+len(addrs.TCP) == 0 {
 			return nil, errors.New("each external relay requires an address and supports one endpoint per transport")
 		}
-		endpoint := nativepath.Endpoint{Pin: node.Pin}
+		endpoint := nativepath.Endpoint{Pin: pin}
 		if len(addrs.UDP) > 0 {
 			endpoint.UDPAddress = addrs.UDP[0]
 		}
@@ -65,30 +76,43 @@ func ResolveNodes(nodes []NodeConfig) ([]nativepath.Endpoint, error) {
 			endpoint.Address = endpoint.UDPAddress
 			endpoint.UDPAddress, endpoint.TCPAddress = "", ""
 		}
-		seen[node.Pin] = true
-		out = append(out, endpoint)
+		seen[pin] = true
+		out = append(out, RelayNode{endpoint, secret})
 	}
 	return out, nil
 }
 
-func ValidControlOrigin(origin string) bool {
-	u, err := url.Parse(origin)
-	if err != nil || u.Hostname() == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" {
-		return false
-	}
-	if p := u.Port(); p != "" {
-		n, err := strconv.ParseUint(p, 10, 16)
-		if err != nil || n == 0 {
-			return false
-		}
-	}
-	ip, _ := netip.ParseAddr(u.Hostname())
-	return u.Scheme == "https" || u.Scheme == "http" && (ip.IsLoopback() || u.Hostname() == "localhost")
+// The host leg belongs to its signal generation. The controller leg binds both
+// that generation and the controller peer allocated by the same control.
+func (node RelayNode) issue(host, generation, peer, role string, until time.Time) *NativeWelcome {
+	payload := strings.Join([]string{"rh2", host, generation, peer, role, strconv.FormatInt(until.Unix(), 10)}, ".")
+	mac := hmac.New(sha256.New, node.secret)
+	mac.Write([]byte(payload))
+	return &NativeWelcome{Endpoint: node.Endpoint, Ticket: payload + "." + b64.EncodeToString(mac.Sum(nil))}
 }
 
-// Reserve one slot for the colocated listener if present. The host ID is a
-// uniformly random directory identifier, common to all sockets in its room.
-func (s *Server) welcome(hostID, authority string) *NativeWelcome {
+func verifyTicket(secret []byte, join NativeJoin, now time.Time) (generation string, expiry time.Time, ok bool) {
+	fields := strings.Split(join.Ticket, ".")
+	if len(fields) != 7 || fields[0] != "rh2" || fields[1] != join.Host || fields[4] != join.Role || !idPattern.MatchString(join.Host) || !idPattern.MatchString(join.Peer) || !idPattern.MatchString(fields[2]) {
+		return
+	}
+	if (join.Role == "client" && fields[3] != join.Peer) || (join.Role == "host" && fields[3] != fields[2]) {
+		return
+	}
+	seconds, err := strconv.ParseInt(fields[5], 10, 64)
+	if err != nil || seconds <= now.Unix() || seconds > now.Unix()+maxLeaseSeconds+5 {
+		return
+	}
+	sig, err := b64.DecodeString(fields[6])
+	mac := hmac.New(sha256.New, secret)
+	mac.Write([]byte(strings.Join(fields[:6], ".")))
+	if err != nil || !hmac.Equal(sig, mac.Sum(nil)) {
+		return
+	}
+	return fields[2], time.Unix(seconds, 0), true
+}
+
+func (s *Server) welcome(hostID, authority, generation, peer, role string) *NativeWelcome {
 	count := len(s.ExternalRelays)
 	if s.nativePort != "" {
 		count++
@@ -99,7 +123,7 @@ func (s *Server) welcome(hostID, authority string) *NativeWelcome {
 	n, _ := strconv.ParseUint(hostID[:8], 16, 32)
 	idx := int(n % uint64(count))
 	if idx < len(s.ExternalRelays) {
-		return &NativeWelcome{Endpoint: s.ExternalRelays[idx], Ticket: "ext1." + ID() + ID()}
+		return s.ExternalRelays[idx].issue(hostID, generation, peer, role, time.Now().Add(maxLeaseSeconds*time.Second))
 	}
 	address := s.nativePublic
 	if address == "" {
@@ -107,115 +131,9 @@ func (s *Server) welcome(hostID, authority string) *NativeWelcome {
 		if h, _, err := net.SplitHostPort(host); err == nil {
 			host = h
 		}
-		address = net.JoinHostPort(strings.Trim(host, "[]"), s.nativePort)
+		address = net.JoinHostPort(host, s.nativePort)
 	}
 	return &NativeWelcome{Endpoint: nativepath.Endpoint{Address: address, Pin: s.nativePin}, Ticket: ID() + ID()}
 }
 
-type leaseCheck struct {
-	Host         string `json:"host"`
-	Peer         string `json:"peer"`
-	HostTicket   string `json:"hostTicket"`
-	ClientTicket string `json:"clientTicket"`
-}
-
-// The TLS pin doubles as a public verification key for domain-separated checks.
-func (s *Server) serveLease(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Cache-Control", "no-store")
-	if r.Method != http.MethodPost {
-		w.WriteHeader(405)
-		return
-	}
-	pin := r.Header.Get("X-Reign-Relay-Pin")
-	var allowed bool
-	for _, node := range s.ExternalRelays {
-		if node.Pin == pin {
-			allowed = true
-			break
-		}
-	}
-	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1024))
-	pub, _ := base64.RawURLEncoding.DecodeString(pin)
-	sig, _ := base64.RawURLEncoding.DecodeString(r.Header.Get("X-Reign-Relay-Signature"))
-	var check leaseCheck
-	if !allowed || err != nil || len(pub) != ed25519.PublicKeySize || !ed25519.Verify(pub, append([]byte(leaseDomain), raw...), sig) || json.Unmarshal(raw, &check) != nil {
-		w.WriteHeader(403)
-		return
-	}
-	s.mu.Lock()
-	room := s.rooms[check.Host]
-	valid := room != nil && room.clients[check.Peer] != nil && check.HostTicket != "" && check.ClientTicket != ""
-	if valid {
-		host, client := room.host, room.clients[check.Peer]
-		valid = host.nativePin == pin && client.nativePin == pin &&
-			subtle.ConstantTimeCompare([]byte(check.HostTicket), []byte(host.nativeTicket)) == 1 &&
-			subtle.ConstantTimeCompare([]byte(check.ClientTicket), []byte(client.nativeTicket)) == 1
-	}
-	s.mu.Unlock()
-	if !valid {
-		w.WriteHeader(403)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]int{"validFor": maxLeaseSeconds})
-}
-
-type externalAuthority struct {
-	origin string
-	key    ed25519.PrivateKey
-	pin    string
-	client http.Client
-}
-
-func (a *externalAuthority) lease(ctx context.Context, check leaseCheck) (time.Time, error) {
-	start := time.Now()
-	raw, err := json.Marshal(check)
-	if err != nil {
-		return time.Time{}, err
-	}
-	r, err := http.NewRequestWithContext(ctx, http.MethodPost, a.origin+NativeLeasePath, bytes.NewReader(raw))
-	if err != nil {
-		return time.Time{}, err
-	}
-	r.Header.Set("Content-Type", "application/json")
-	r.Header.Set("X-Reign-Relay-Pin", a.pin)
-	r.Header.Set("X-Reign-Relay-Signature", base64.RawURLEncoding.EncodeToString(ed25519.Sign(a.key, append([]byte(leaseDomain), raw...))))
-	resp, err := a.client.Do(r)
-	if err != nil {
-		return time.Time{}, err
-	}
-	defer resp.Body.Close()
-	var lease struct {
-		ValidFor int `json:"validFor"`
-	}
-	if resp.StatusCode != 200 || json.NewDecoder(io.LimitReader(resp.Body, 256)).Decode(&lease) != nil || lease.ValidFor <= 0 || lease.ValidFor > maxLeaseSeconds {
-		return time.Time{}, errors.New("external relay lease denied")
-	}
-	return start.Add(time.Duration(lease.ValidFor) * time.Second), nil
-}
-
-// Only one leg refreshes the pair. A slow or unavailable authority cannot
-// extend the last lease beyond its deadline.
-func (a *externalAuthority) maintain(ctx context.Context, check leaseCheck, until time.Time, closeLink func()) {
-	for {
-		delay := time.Until(until) - 5*time.Second
-		if delay <= 0 {
-			delay = max(0, time.Until(until)/2)
-		}
-		timer := time.NewTimer(delay)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return
-		case <-timer.C:
-		}
-		refresh, cancel := context.WithDeadline(ctx, until)
-		next, err := a.lease(refresh, check)
-		cancel()
-		if err != nil || !next.After(time.Now()) {
-			closeLink()
-			return
-		}
-		until = next
-	}
-}
+func IsExternalTicket(value string) bool { return strings.HasPrefix(value, "rh2.") }

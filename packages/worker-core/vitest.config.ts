@@ -23,7 +23,7 @@ export default defineConfig({
           EXTERNAL_RELAYS: [
             {
               addresses: ["udp:relay.example:26332", "tcp:relay.example:26333"],
-              pin: signer.x,
+              credential: `rh1.${signer.x}.${signer.d}`,
             },
           ],
         },

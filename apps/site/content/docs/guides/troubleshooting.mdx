@@ -23,7 +23,7 @@ Use HTTPS, or localhost for local development. Check clipboard and site-storage 
 
 ## Self-hosted probe has no effect
 
-Open both `26331/TCP` and `26331/UDP`, and use DNS-only records. Ordinary Nginx HTTP proxying does not support these probe protocols. Check the Worker `SELF_STUN` and `TCP_STUN` settings.
+Open both `26331/TCP` and `26331/UDP`, and use DNS-only records. Ordinary Nginx HTTP proxying does not support these probe protocols. Check the Worker `EXTERNAL_STUN` setting.
 
 ## Report an issue
 

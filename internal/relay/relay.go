@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
-	"github.com/monkeyWie/reignhub/internal/nativepath"
 )
 
 type Frame struct {
@@ -50,8 +49,7 @@ type relayRoom struct {
 	clients map[string]*connection
 }
 type Server struct {
-	ExternalRelays                      []nativepath.Endpoint
-	ControlOrigin                       string
+	ExternalRelays                      []RelayNode
 	externalPairs                       map[[2]string]*nativePair
 	nativePublic, nativePort, nativePin string
 	token                               string
@@ -60,6 +58,7 @@ type Server struct {
 	Authorize                           func(credential, host, role string) (string, bool)
 	AuthorizeContext                    func(context.Context, string, string, string) (string, bool)
 	Grant                               func(host, device, role string) string
+	DisableWebSocket                    bool
 	RelayAllowed                        func(host, device, role string) bool
 	Origins                             []string
 	closed                              bool
@@ -74,10 +73,6 @@ func New(token string) *Server {
 }
 func ID() string { var b [16]byte; _, _ = rand.Read(b[:]); return hex.EncodeToString(b[:]) }
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path == NativeLeasePath {
-		s.serveLease(w, r)
-		return
-	}
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
@@ -153,7 +148,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if s.RelayAllowed != nil {
 		allowedRelay = s.RelayAllowed(id, deviceID, role)
 	}
-	if r.URL.Path == "/p2p/relay" && !allowedRelay {
+	allowWebSocket := allowedRelay && !s.DisableWebSocket
+	if r.URL.Path == "/p2p/relay" && !allowWebSocket {
 		http.Error(w, "relay not allowed", 403)
 		return
 	}
@@ -194,7 +190,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			s.mu.Unlock()
 		}()
-		_ = (&connection{ws: ws}).send(Frame{Peer: peer, Kind: "welcome", Protocol: 1, AllowRelay: allowedRelay})
+		_ = (&connection{ws: ws}).send(Frame{Peer: peer, Kind: "welcome", Protocol: 1, AllowRelay: allowWebSocket})
 		for {
 			_, raw, err := ws.Read(r.Context())
 			if err != nil {
@@ -240,12 +236,6 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer end()
 	c := &connection{ws: ws, device: deviceID, life: life}
 	var native *NativeWelcome
-	if allowedRelay && r.Header.Get("Origin") == "" {
-		native = s.welcome(id, r.Host)
-		if native != nil {
-			c.nativeTicket, c.nativePin = native.Ticket, native.Pin
-		}
-	}
 	ticket := ""
 	if s.Grant != nil {
 		ticket = s.Grant(id, deviceID, role)
@@ -285,6 +275,13 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		room.clients[peer] = c
 	}
+	generation := room.host.peer
+	if allowedRelay && r.Header.Get("Origin") == "" {
+		native = s.welcome(id, r.Host, generation, peer, role)
+		if native != nil {
+			c.nativeTicket, c.nativePin = native.Ticket, native.Pin
+		}
+	}
 	s.mu.Unlock()
 	defer func() {
 		s.mu.Lock()
@@ -314,7 +311,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			_ = room.host.send(Frame{Peer: peer, Kind: "bye"})
 		}
 	}()
-	if err = c.send(Frame{Native: native, Peer: peer, Kind: "welcome", Protocol: 1, AllowRelay: allowedRelay}); err != nil {
+	if err = c.send(Frame{Native: native, Peer: peer, Kind: "welcome", Protocol: 1, AllowRelay: allowWebSocket}); err != nil {
 		return
 	}
 	// Ping bounds half-open connections and keeps common reverse proxies alive.
@@ -367,7 +364,20 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if s.Grant != nil {
 				ticket = s.Grant(id, deviceID, role)
 			}
-			if c.send(Frame{Kind: "lease", Peer: peer, Grant: ticket, AllowRelay: allowedRelay}) != nil {
+			var refreshed *NativeWelcome
+			if native != nil && IsExternalTicket(native.Ticket) {
+				permitted := true
+				if s.AuthorizeContext != nil {
+					_, permitted = s.AuthorizeContext(ctx, credential, id, role)
+				} else if s.Authorize != nil {
+					_, permitted = s.Authorize(credential, id, role)
+				}
+				if !permitted || (s.RelayAllowed != nil && !s.RelayAllowed(id, deviceID, role)) {
+					return
+				}
+				refreshed = s.welcome(id, r.Host, generation, peer, role)
+			}
+			if c.send(Frame{Native: refreshed, Kind: "lease", Peer: peer, Grant: ticket, AllowRelay: allowWebSocket}) != nil {
 				return
 			}
 			if role == "client" {

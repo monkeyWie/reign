@@ -95,6 +95,7 @@ func connectOnce(ctx context.Context, p Pairing, opts Options) (*Client, error) 
 		close(c.done)
 	}()
 	heartbeat := newSocketHeartbeat()
+	heartbeat.nativeLease = welcome.Native != nil && relay.IsExternalTicket(welcome.Native.Ticket)
 	go heartbeat.run(w.ctx, ws, true, opts.Progress)
 	if allowRelay {
 		// The pairing RPC's context ends after Connect returns. Optional relay
@@ -117,6 +118,9 @@ func connectOnce(ctx context.Context, p Pairing, opts Options) (*Client, error) 
 			heartbeat.received()
 			var f relay.Frame
 			if json.Unmarshal(raw, &f) == nil {
+				if f.Kind == "lease" && f.Peer == peer {
+					w.refreshNativeTicket(f.Native)
+				}
 				w.receive(f)
 			}
 		}
@@ -131,11 +135,12 @@ func connectOnce(ctx context.Context, p Pairing, opts Options) (*Client, error) 
 	}
 	connectivity.Note(ctx, "handshake", "handshake", "端到端加密握手完成", "已验证设备配对密钥", "success")
 	message := "正在尝试 P2P 直连；暂无可用的备用中继通道"
-	if allowRelay {
+	hasRelay := allowRelay || (welcome.Native != nil && !opts.DisableNative)
+	if hasRelay {
 		message = "优先尝试 P2P 直连，必要时自动使用中继"
 	}
 	if opts.RelayOnly {
-		if !allowRelay {
+		if !hasRelay {
 			c.Close()
 			return nil, errors.New("当前服务未提供中继权限，请关闭“仅用中继”后尝试直连，或使用支持中继的服务")
 		}

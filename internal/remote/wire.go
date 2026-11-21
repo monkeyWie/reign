@@ -503,9 +503,9 @@ func (w *wire) setup() (*webrtc.PeerConnection, error) {
 		w.progress("stun:"+url, "udp", "公共 STUN 节点", url+" · 并行探测", "info")
 	}
 	for _, url := range w.opts.SelfSTUN {
-		w.progress("stun:"+url, "udp", "自建 STUN 节点", url+" · 并行探测", "info")
+		w.progress("stun:"+url, "udp", "配置的 STUN 节点", url+" · 并行探测", "info")
 	}
-	w.progress("ice", "udp", "收集 UDP / IPv6 直连候选地址", "公共与自建节点同时参与探测", "running")
+	w.progress("ice", "udp", "收集 UDP / IPv6 直连候选地址", "并行探测可用地址", "running")
 	pc.OnICECandidate(func(candidate *webrtc.ICECandidate) {
 		if candidate == nil {
 			if candidateCount.Load() == 0 {

@@ -12,29 +12,27 @@ docker compose -f deploy/service/compose.yaml up -d --build
 
 Compose mounts `./config.json` at `/config.json` in the container. Edit the file beside `compose.yaml` and restart the service after changes. The default relative state path resolves to `/data/reignhub.db` in the persistent volume. The image also includes this config for standalone Docker runs.
 
-HTTP listens on 26330/TCP. Expose discovery on 26331/UDP and TCP and native relay on 26332/UDP and TCP. Compose's `REIGNHUB_HTTP_PORT`, `REIGNHUB_TCP_PORT`, `REIGNHUB_UDP_PORT` and `REIGNHUB_NATIVE_PORT` change the **published Docker ports**. Set `REIGNHUB_NATIVE_UDP_PORT` and `REIGNHUB_NATIVE_TCP_PORT` when the public relay ports differ. Behind NAT or an HTTP proxy, set `selfStun`, `tcpStunPublic` and `nativeRelayPublic` in the JSON to directly reachable advertised endpoints. Relay clients receive the public pin and connection ticket over signaling. Use HTTPS/WSS for public signaling.
+HTTP listens on 26330/TCP. Expose discovery on 26331/UDP and TCP and native relay on 26332/UDP and TCP. Compose's `REIGNHUB_HTTP_PORT`, `REIGNHUB_TCP_PORT`, `REIGNHUB_UDP_PORT` and `REIGNHUB_NATIVE_PORT` change the **published Docker ports**. Set `REIGNHUB_NATIVE_UDP_PORT` and `REIGNHUB_NATIVE_TCP_PORT` when the public relay ports differ. Behind NAT or an HTTP proxy, set `services.stun.publicAddress` and `services.relay.native.publicAddress` to directly reachable advertised endpoints. Relay clients receive the public pin and connection ticket over signaling. Use HTTPS/WSS for public signaling.
 
-After the first server start, print the native relay's public pin from its existing SQLite state. The command works while the server is running or stopped. Use the same state path or config file as the server. Standard output contains one unpadded base64url Ed25519 public key.
+After the first start, use the same config to print the secret node credential while the server is running or stopped. It contains the public TLS pin and the key used to authorize connections. Store it privately. Keeping the SQLite database preserves it across restarts.
 
 ```sh
-./reignhub-server --print-relay-pin
+./reignhub-server --print-relay-credential
 # With the supplied Docker Compose deployment, from the repository root
-docker compose -f deploy/service/compose.yaml exec -T reignhub-server /reignhub-server --print-relay-pin
+docker compose -f deploy/service/compose.yaml exec -T reignhub-server /reignhub-server --print-relay-credential
 ```
 
 ## Add an external node
 
-On the external Go node, edit `config.json` and start `./reignhub-server`. This example enables both discovery protocols and binds the native relay to its control service.
+On the external Go node, edit `config.json` and start `./reignhub-server`. This example enables both discovery protocols and starts a standalone native relay.
 
 ```json
 {
-  "http": false,
-  "state": "data/relay.db",
-  "relayControl": "https://control.example"
+  "services": { "stun": {}, "relay": {} }
 }
 ```
 
-Read its public pin with `./reignhub-server --print-relay-pin`. Register its address and pin with the control service. See the [Go and Worker configuration examples](../../docs/platform/self-hosting.md#add-external-native-relays-and-stun-servers).
+Read its node credential with `./reignhub-server --print-relay-credential`. Privately register its address and credential with the control service. See the [Go and Worker configuration examples](../../docs/platform/self-hosting.md#add-external-native-relays-and-stun-servers).
 
 ## Standalone binary
 
@@ -54,29 +52,39 @@ sh scripts/platform/install-server.sh --version X.Y.Z
 # Optional: --prefix /usr/local/bin
 ```
 
-The installer downloads the matching archive, verifies SHA-256 and installs to `~/.local/bin` by default. It does not configure a background service. Copy the bundled systemd unit for Linux, or use Homebrew services on macOS/Linux.
+The installer downloads the matching archive, verifies SHA-256 and installs to `~/.local/bin` by default. It does not configure a background service. Copy the systemd unit from this source directory for Linux, or use Homebrew services on macOS/Linux.
 
 ## Configuration and ports
 
-The server loads `config.json` from its working directory. Release archives include a ready-to-edit file. For a binary-only install, run `./reignhub-server --init` once. It creates the template exclusively and exits. To use another file, supply `--config PATH` to startup, initialization or the PIN command. File settings such as `state`, `web`, `tlsCert` and `tlsKey` resolve relative to the configuration file's directory. Keep the existing SQLite path when upgrading.
+The server loads `config.json` from its working directory. Release archives include a ready-to-edit file. For a binary-only install, run `./reignhub-server --init` once. It creates the template exclusively and exits. To use another file, supply `--config PATH` to startup, initialization or the credential command. Database, Web directory and TLS file paths resolve relative to the configuration file's directory. Keep the existing SQLite path when upgrading.
 
-Edit service switches and addresses in the JSON, then restart. Omitted fields take their built-in defaults. An unknown field or an invalid service combination reports a startup error. Use `--help` for management actions and `--version` for build identification.
+The supplied config starts all three services. Edit the file and restart the process. When you provide a `services` object, only the groups it contains start.
 
-| Deployment | Fields to set in config.json |
+```json
+{
+  "services": {
+    "control": {},
+    "stun": {},
+    "relay": {}
+  }
+}
+```
+
+| Group | Defaults and options |
 | --- | --- |
-| Full service with alternate HTTP port | `"listen": "0.0.0.0:8080"` |
-| TCP and UDP discovery only | `"http": false` |
-| UDP discovery only on port 3478 | `"http": false, "tcpStun": false, "stunListen": ":3478"` |
-| Directory with discovery, without signaling, relay or console | `"signal": false, "relay": false, "webEnabled": false` |
-| External relay without STUN | `"http": false, "stun": false, "tcpStun": false, "relayControl": "https://control.example"` |
+| `control` | Device API, pairing, signaling and Web console on `:26330`. Set `listen`, `database`, `allowedOrigins`, `webDir` or `tls` as needed. |
+| `stun` | UDP and TCP on `:26331`. Set `listen` or `publicAddress` once to share them. To select transports, include `udp` or `tcp` objects. Each can override the shared address. |
+| `relay` | With local control, an empty group enables WebSocket plus native QUIC and TLS/TCP on `:26332`. To select transports, set `websocket` or include `native`. Include both when overriding native settings and keeping WebSocket. A standalone relay accepts an optional `database` path for its persistent identity. |
 
-Use `externalStun` (an array of `host:port`, `udp:host:port` or `tcp:host:port` strings) to append discovery nodes, and `externalRelays` to register native relay addresses and pins. For a Worker deployment, publish its discovery nodes through the Worker variable `EXTERNAL_STUN`, for example `["203.0.113.10:26331"]`.
+For UDP discovery alone use `{"services":{"stun":{"udp":{"listen":"0.0.0.0:3478"}}}}`. Listener addresses can specify a network interface, for example `127.0.0.1:26330` or `[::1]:26330`.
+
+Use a single list for public and self-hosted STUN. Set `services.control.stunServers` on Go or `EXTERNAL_STUN` on Worker. Both services always advertise the built-in Cloudflare, Google and Bilibili (`stun.chat.bilibili.com:3478`) UDP nodes. Omit the array or set it to `[]` to add no other nodes. Go additionally advertises its own active STUN listeners. A shared `host:port` enables both transports. Prefix with `udp:` or `tcp:` when a node supports just one. Register a native relay under `services.control.externalRelays` on Go or `EXTERNAL_RELAYS` on Worker.
 
 ## HTTPS and service management
 
-Use the Nginx or Caddy example to terminate HTTPS/WSS, or set `tlsCert` and `tlsKey` in the JSON. Preserve WebSocket upgrades and the original Host. HTTP reverse proxies must not forward STUN. When DNS is proxied through Cloudflare, use a separate **DNS only** hostname for discovery. For TLS behind a proxy, listen on loopback/private interfaces and expose the proxy publicly.
+Use the Nginx or Caddy example to terminate HTTPS/WSS, or set `certFile` and `keyFile` in `services.control.tls` in the JSON. Preserve WebSocket upgrades and the original Host. HTTP reverse proxies must not forward STUN. When DNS is proxied through Cloudflare, use a separate **DNS only** hostname for discovery. For TLS behind a proxy, listen on loopback/private interfaces and expose the proxy publicly.
 
-For systemd, extract under `/opt/reignhub`, create `/etc/reignhub/config.json` containing at least `{"state":"/var/lib/reignhub/reignhub.db"}`, install `reignhub-server.service` to `/etc/systemd/system/`, then run:
+For systemd, extract under `/opt/reignhub`, create `/etc/reignhub/config.json` containing at least `{"services":{"control":{"database":"/var/lib/reignhub/reignhub.db"},"stun":{},"relay":{}}}`, install `reignhub-server.service` to `/etc/systemd/system/`, then run:
 
 ```sh
 sudo systemctl daemon-reload
@@ -104,8 +112,8 @@ A maintained tap/bucket must be published separately before a short command such
 # Fresh optimized Web + six server targets + Homebrew/Scoop definitions
 python3 scripts/platform/package-server.py --version X.Y.Z
 # Server development without embedded Web
-# Set "web" in config.json to the built console directory.
+# Set "services.control.webDir" in config.json to the built console directory.
 go run ./cmd/reignhub-server
 ```
 
-A source-only `go install github.com/monkeyWie/reignhub/cmd/reignhub-server@VERSION` works for API/probes, but Web assets are embedded only by the release builder; set `web` in the JSON or disable Web for such builds. Compilation uses `CGO_ENABLED=0`, including SQLite; no native SQLite library is needed.
+A source-only `go install github.com/monkeyWie/reignhub/cmd/reignhub-server@VERSION` works for API/probes, but Web assets are embedded only by the release builder; set `services.control.webDir` to a built console directory. Compilation uses `CGO_ENABLED=0`, including SQLite; no native SQLite library is needed.

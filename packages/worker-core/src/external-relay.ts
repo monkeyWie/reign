@@ -10,7 +10,7 @@ export interface RelayNode {
   pin: string;
 }
 
-export function externalRelays(env: CoreEnv): RelayNode[] {
+export function externalRelays(env: CoreEnv) {
   const error = () =>
     new APIError("INVALID_RELAY_CONFIG", "外部中继配置无效", 503);
   const entries = configArray(
@@ -23,12 +23,17 @@ export function externalRelays(env: CoreEnv): RelayNode[] {
       !entry ||
       typeof entry !== "object" ||
       !("addresses" in entry) ||
-      Object.keys(entry).some((k) => k !== "addresses" && k !== "pin") ||
-      !("pin" in entry) ||
-      typeof entry.pin !== "string"
+      Object.keys(entry).some((k) => k !== "addresses" && k !== "credential") ||
+      !("credential" in entry) ||
+      typeof entry.credential !== "string"
     )
       throw error();
-    const { addresses, pin } = entry;
+    const { addresses, credential } = entry;
+    const match = /^rh1\.([A-Za-z0-9_-]{43})\.([A-Za-z0-9_-]{43})$/.exec(
+      credential,
+    );
+    if (!match || bytes64(un64(match[2])) !== match[2]) throw error();
+    const [, pin, secret] = match;
     const { udp, tcp } = transportEndpoints(addresses, error);
     if (
       udp.length + tcp.length === 0 ||
@@ -40,40 +45,38 @@ export function externalRelays(env: CoreEnv): RelayNode[] {
     )
       throw error();
     seen.add(pin);
-    return udp[0] === tcp[0]
-      ? { address: udp[0], pin }
-      : { udpAddress: udp[0], tcpAddress: tcp[0], pin };
+    const endpoint: RelayNode =
+      udp[0] === tcp[0]
+        ? { address: udp[0], pin }
+        : { udpAddress: udp[0], tcpAddress: tcp[0], pin };
+    return { endpoint, secret };
   });
 }
 
-export async function verifyRelayCheck(
-  env: CoreEnv,
-  headers: Headers,
-  raw: string,
-): Promise<string> {
-  const pin = headers.get("X-Reign-Relay-Pin");
-  const signature = headers.get("X-Reign-Relay-Signature") || "";
-  if (
-    pin &&
-    externalRelays(env).some((node) => node.pin === pin) &&
-    /^[A-Za-z0-9_-]{86}$/.test(signature)
-  ) {
-    const key = await crypto.subtle.importKey(
-      "raw",
-      un64(pin),
-      "Ed25519",
-      false,
-      ["verify"],
-    );
-    if (
-      await crypto.subtle.verify(
-        "Ed25519",
-        key,
-        un64(signature),
-        new TextEncoder().encode("reign/native-relay/lease/v1\n" + raw),
-      )
-    )
-      return pin;
-  }
-  throw new APIError("RELAY_DENIED", "中继验证失败", 403);
+export async function relayWelcome(
+  node: ReturnType<typeof externalRelays>[number],
+  host: string,
+  generation: string,
+  peer: string,
+  role: string,
+  expires: number,
+) {
+  const until = Math.min(expires, Math.floor(Date.now() / 1000) + 60);
+  const payload = ["rh2", host, generation, peer, role, until].join(".");
+  const key = await crypto.subtle.importKey(
+    "raw",
+    un64(node.secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const mac = await crypto.subtle.sign(
+    "HMAC",
+    key,
+    new TextEncoder().encode(payload),
+  );
+  return {
+    ...node.endpoint,
+    ticket: payload + "." + bytes64(new Uint8Array(mac)),
+  };
 }

@@ -21,7 +21,7 @@ type Policy struct {
 }
 
 func DefaultPolicy() Policy {
-	return Policy{PublicSTUN: []string{"stun:stun.cloudflare.com:3478", "stun:stun.l.google.com:19302"}, SelfSTUN: []string{}}
+	return Policy{PublicSTUN: []string{"stun:stun.cloudflare.com:3478", "stun:stun.l.google.com:19302", "stun:stun.chat.bilibili.com:3478"}, SelfSTUN: []string{}}
 }
 
 func STUNOnly(servers []webrtc.ICEServer) []webrtc.ICEServer {

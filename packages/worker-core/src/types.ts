@@ -8,8 +8,9 @@ export interface CoreEnv {
   EXTERNAL_STUN?: string | string[];
   SELF_STUN?: string;
   TCP_STUN?: string;
+  STUN_SERVERS?: string | string[];
   PUBLIC_URL?: string;
-  EXTERNAL_RELAYS?: string | { addresses: string[]; pin: string }[];
+  EXTERNAL_RELAYS?: string | { addresses: string[]; credential: string }[];
 }
 export interface Policy {
   deployment: "self-hosted" | "saas";

@@ -12,7 +12,11 @@ Go and Worker must preserve the same client-visible public behavior. Internal ch
 | Signed grants            | `pkg/access`                                   | `worker-core/src/crypto.ts`                    | Ed25519 payloads, namespace, expiry, permissions             |
 | Web console              | `internal/webui`                               | `worker-core/src/console.ts`                   | The same NSGo assets, entry and cache semantics              |
 | Storage                  | SQLite/GORM                                    | D1/Drizzle                                     | Durable identity, isolation, idempotency; layouts may differ |
-| TCP/UDP probes           | Integrated or standalone                       | Advertised external endpoints                  | Discovered from the configured service origin                |
+| TCP/UDP probes           | Selectable in the Go server                    | Advertised external endpoints                  | Discovered from the configured service origin                |
+
+Both control services accept arrays of public address strings. A bare `host:port` serves both transports. The prefixes `udp:` and `tcp:` restrict an address to one transport. Go’s `services.control.stunServers` and Worker’s `EXTERNAL_STUN` each take one array for all discovery providers. Both services always advertise the built-in Cloudflare, Google and Bilibili (`stun.chat.bilibili.com:3478`) UDP nodes. An omitted or empty array adds no endpoints. Duplicate UDP entries are advertised once. Go also advertises its enabled local STUN listeners. Each external relay contains an `addresses` array and its private registration `credential`. Discovery translates STUN addresses to the existing client fields.
+
+Both signal welcomes can advertise a static, pinned external Go relay. Go can also advertise its local listener. Both controls sign short-lived tickets for authorized native sockets. External nodes verify and renew each leg locally. Clients authenticate the node against the public pin sent by control. See the [wire contract](../platform/protocol.md). Both forward encrypted native direct negotiation and support the same WebSocket compatibility path.
 
 Public TS types live in [protocol](../../packages/protocol/src/index.ts); Go counterparts live in `internal/device`, `internal/connectivity`, `internal/relay` and `pkg/access`. They are not generated from each other. Review them manually and verify interoperability.
 

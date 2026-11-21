@@ -22,6 +22,7 @@ type nativeState struct {
 	direct, relay   atomic.Pointer[nativepath.Link]
 	welcome         *relay.NativeWelcome
 	hostID          string
+	latestTicket    atomic.Pointer[string]
 	negotiated      atomic.Bool
 	quicEnabled     atomic.Bool
 	relayNegotiated atomic.Bool
@@ -171,6 +172,11 @@ func (w *wire) runQUIC(a *ice.Agent, credentials <-chan quicSignal) {
 	w.useNative(l, &w.native.direct, "P2P · QUIC")
 }
 
+func (w *wire) refreshNativeTicket(info *relay.NativeWelcome) {
+	if info != nil && w.native.welcome != nil && info.Endpoint == w.native.welcome.Endpoint && relay.IsExternalTicket(info.Ticket) {
+		w.native.latestTicket.Store(&info.Ticket)
+	}
+}
 func (w *wire) runNativeRelay() {
 	info := w.native.welcome
 	if info == nil {
@@ -180,7 +186,7 @@ func (w *wire) runNativeRelay() {
 	if w.host {
 		role = "host"
 	}
-	join, _ := json.Marshal(relay.NativeJoin{Host: w.native.hostID, Role: role, Peer: w.peer, Ticket: info.Ticket})
+	join := relay.NativeJoin{Host: w.native.hostID, Role: role, Peer: w.peer, Ticket: info.Ticket}
 	for w.ctx.Err() == nil && !w.signalLost.Load() {
 		for _, network := range []string{"QUIC", "TCP"} {
 			if info.AddressFor(network) == "" || network == "QUIC" && w.opts.DisableQUIC {
@@ -204,7 +210,7 @@ func (w *wire) hasNativeRelay() bool {
 	return e != nil && (e.AddressFor("TCP") != "" || !w.opts.DisableQUIC && e.AddressFor("QUIC") != "")
 }
 
-func (w *wire) connectNativeRelay(endpoint nativepath.Endpoint, network string, join []byte) {
+func (w *wire) connectNativeRelay(endpoint nativepath.Endpoint, network string, join relay.NativeJoin) {
 	dial, stop := context.WithTimeout(w.ctx, 3*time.Second)
 	l, err := nativepath.Dial(dial, endpoint, network)
 	stop()
@@ -215,7 +221,11 @@ func (w *wire) connectNativeRelay(endpoint nativepath.Endpoint, network string, 
 	stopClose := context.AfterFunc(w.ctx, l.Close)
 	defer stopClose()
 	setup, cancel := context.WithTimeout(w.ctx, 12*time.Second)
-	err = l.Send(setup, 0, join)
+	if ticket := w.native.latestTicket.Load(); ticket != nil {
+		join.Ticket = *ticket
+	}
+	raw, _ := json.Marshal(join)
+	err = l.Send(setup, 0, raw)
 	if err == nil {
 		var ack []byte
 		ack, err = l.Setup(setup)
@@ -225,6 +235,28 @@ func (w *wire) connectNativeRelay(endpoint nativepath.Endpoint, network string, 
 	}
 	cancel()
 	if err == nil {
+		if relay.IsExternalTicket(join.Ticket) {
+			life, end := context.WithCancel(w.ctx)
+			defer end()
+			go func(last string) {
+				tick := time.NewTicker(3 * time.Second)
+				defer tick.Stop()
+				for {
+					select {
+					case <-life.Done():
+						return
+					case <-tick.C:
+						if next := w.native.latestTicket.Load(); next != nil && *next != last {
+							if l.Send(life, nativepath.LeaseLane, []byte(*next)) != nil {
+								l.Close()
+								return
+							}
+							last = *next
+						}
+					}
+				}
+			}(join.Ticket)
+		}
 		w.useNative(l, &w.native.relay, "Relay · "+network)
 	}
 }

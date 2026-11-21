@@ -30,7 +30,7 @@ PR 和 main 构建的产物在对应 Actions run 的 Artifacts 中，保留 14 �
 
 Go server job 复用已通过检查的 Worker 归档内 Web 资产，交叉编译六个平台，生成真实 URL/校验和的 Homebrew/Scoop 定义，并通过随机端口验证打包二进制的 Web 分片、SQLite、TCP/UDP，以及 TypeScript 控制端到隔离 Go Agent 的加密中继互通。另构建并启动非 root、根文件系统只读的 Docker 服务，验证同样的加密客户端互通。构建不会自动发布 Homebrew tap、Scoop bucket 或容器镜像。
 
-Web job 只构建 NSGo Web 和独立开源 Worker，并使用迁移后的本地 D1 验证原生客户端互通、根路径跳转、分片资源与官网路径 404。官网由独立的 `site.yml` 工作流使用 `pnpm build:site` 构建、验证；仅官方仓库开启 `REIGNHUB_DEPLOY_OFFICIAL_SITE=true` 并配置 Cloudflare secrets 后发布，不进入开源归档。同一个 Linux amd64 服务程序读取 `"http": false` 的 JSON 配置并 在随机本地端口启动，验证 TCP/UDP 探测，不承载 Web 或账号服务。
+Web job 只构建 NSGo Web 和独立开源 Worker，并使用迁移后的本地 D1 验证原生客户端互通、根路径跳转、分片资源与官网路径 404。官网由独立的 `site.yml` 工作流使用 `pnpm build:site` 构建、验证；仅官方仓库开启 `REIGNHUB_DEPLOY_OFFICIAL_SITE=true` 并配置 Cloudflare secrets 后发布，不进入开源归档。同一个 Linux amd64 服务程序读取 `{"services":{"stun":{}}}` 的 JSON 配置并在随机本地端口启动，验证 TCP/UDP 探测，不承载 Web 或账号服务。
 
 ## 配置（均可选）
 
