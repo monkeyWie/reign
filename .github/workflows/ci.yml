@@ -479,6 +479,7 @@ jobs:
           cat > build-notes.md <<'NOTES'
           One workspace for your agents. Bring Codex, Claude Code and Pi sessions together by project on desktop, mobile and Web. Agents and their working files stay on your computer.
 
+          - Upgrading from 0.x: the 1.0 clients start with fresh local storage. Save any unsent drafts and keep your current desktop data directory before upgrading. Plan to pair devices again.
           - Conversation history loads in pages as you scroll. Native and browser clients persist individual messages and keep a bounded window in memory.
           - Desktop sessions include terminal tabs. Hosts manage paired devices’ terminal access in Connection settings.
           - Native peers can negotiate QUIC or TCP paths. The open-source Go server and Cloudflare Worker can advertise your own STUN and pinned relay nodes.

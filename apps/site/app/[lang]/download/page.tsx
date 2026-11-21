@@ -30,7 +30,7 @@ export default async function DownloadPage({
           }
         >
           {t(
-            "桌面端负责本机 Agent，也能连接其他电脑。手机和浏览器用于控制，设备之间保留统一的会话体验。",
+            "在桌面上聚合本地和已配对电脑的 Agent 会话，用手机或浏览器继续同一个项目。",
           )}
         </PageIntro>
         <section className="site-width download-web">
@@ -61,7 +61,7 @@ export default async function DownloadPage({
             <ArrowUpRight size={15} />
           </Link>
           <p className="measurement-note">
-            {t("轻巧原生：macOS 压缩包 8.9 MB，演示场景内存 39–48 MiB。查看")}{" "}
+            {t("安装包大小见上方各平台链接。macOS 预览构建的内存测量见")}{" "}
             <Link href="/docs/architecture/performance">{t("性能说明")}</Link>。
           </p>
         </section>

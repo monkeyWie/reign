@@ -13,7 +13,7 @@ android:
   permissions: [android.permission.INTERNET, android.permission.CAMERA, android.permission.POST_NOTIFICATIONS]
 linux:
   maintainer: "liwei <liwei2633@gmail.com>"
-  summary: Remote access to your AI agents
+  summary: One workspace for your AI agents
   license: MIT
 apple:
   info:
