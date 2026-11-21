@@ -1,21 +1,22 @@
 ---
-title: Deploy an optional probe
-description: One Go binary for TCP and UDP discovery on the same port.
+title: Add a STUN and native relay node
+description: Offer discovery and optional QUIC and TCP relay on a public IP.
 ---
 
 ## When you need it
 
-Workers cannot listen on raw UDP/TCP probe sockets. Public UDP STUN works by default. To add your own mapping discovery or cover unreachable public probes, run `reignhub-probe` on a public server.
+Workers cannot listen on raw UDP/TCP probe sockets. Public UDP STUN works by default. To add your own mapping discovery or cover unreachable public probes, set `"http": false` in the public server’s `config.json`.
 
 The probe returns address mappings only. It does not store a device directory, run agents, serve Web pages or relay application traffic. You can deploy the Worker without it.
 
 ## Build and run
 
-Use the Go version in `go.mod`, or Linux amd64/arm64 probe artifacts when available:
+Use the Go version in `go.mod`, or the server archive for your platform:
 
 ```sh
-go build -o reignhub-probe ./cmd/reignhub-probe
-./reignhub-probe --listen :26331
+go build -o reignhub-server ./cmd/reignhub-server
+# Set config.json to {"http":false} before starting.
+./reignhub-server
 ```
 
 Allow both in the server firewall and cloud security group:
@@ -32,13 +33,37 @@ An ordinary Nginx HTTP proxy cannot forward these protocols. Use **DNS only** fo
 Set Worker variables and redeploy:
 
 ```text
-SELF_STUN=stun:probe.example.com:26331
-TCP_STUN=probe.example.com:26331
+EXTERNAL_STUN=["probe.example.com:26331"]
 ```
 
 Clients still configure only the Worker HTTPS URL. `/p2p/config` publishes these endpoints.
 
 Public and self-hosted STUN run in parallel to find a direct path. Browsers have no raw TCP API; TCP probing is primarily for native clients.
+
+## Add native relay on the same machine
+
+Set the HTTPS origin of your Go or Worker control service in the node’s `config.json`. In another shell, print the pin from the same state file.
+
+```json
+{
+  "http": false,
+  "relayControl": "https://control.example",
+  "state": "data/relay.db"
+}
+```
+
+```sh
+./reignhub-server
+./reignhub-server --print-relay-pin
+```
+
+Allow inbound UDP and TCP on port 26332 for relay traffic. Preserve the database when upgrading. Set the Worker variable `EXTERNAL_RELAYS` or the Go JSON field `externalRelays` to this array and replace both example values.
+
+```json
+[{ "addresses": ["203.0.113.10:26332"], "pin": "REPLACE_WITH_PRINTED_PIN" }]
+```
+
+For multiple nodes, add one entry per relay. A shared address advertises both protocols. Use `["udp:probe.example.com:3478","tcp:probe.example.com:3479"]` for separate endpoints. This syntax applies to both STUN and each relay’s `addresses` array on Go and Worker. Redeploy the Worker or restart the Go control after editing its configuration.
 
 ## Limits
 

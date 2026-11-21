@@ -3,6 +3,18 @@ title: Deploy to Cloudflare
 description: Deploy the open-source Worker, initialize D1 and connect your devices.
 ---
 
+## Deploy the release bundle
+
+Choose **Cloudflare Worker** under [server downloads](/download#server), verify the checksum and extract the archive. With Node.js 24 installed, run these commands in the directory containing `wrangler.json`.
+
+```sh
+npx wrangler@4 login
+npx wrangler@4 deploy
+npx wrangler@4 d1 migrations apply DB --remote
+```
+
+Keep the Worker's HTTPS origin and D1 binding. A Worker on its own provides public UDP STUN discovery and an authorized WebSocket relay. To offer your own STUN or native QUIC/TCP relay, [add a node](/docs/self-hosting/probe).
+
 ## Deployment button
 
 Open [Deploy to Cloudflare](https://deploy.workers.cloudflare.com/?url=https://github.com/monkeyWie/reignhub), authorize your Cloudflare account and follow the setup flow.

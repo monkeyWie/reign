@@ -23,7 +23,11 @@ const publicDir = join(
 );
 if (selfHosted) rmSync(publicDir, { recursive: true, force: true });
 const assets = join(publicDir, "assets/chat");
-const version = process.env.VERSION || "0.1.0";
+const version =
+  process.env.VERSION ||
+  readFileSync(join(root, "clients/nsgo/nsgo.yaml"), "utf8").match(
+    /^version:\s*([0-9.]+)\s*$/m,
+  )[1];
 mkdirSync(output, { recursive: true });
 const result = spawnSync(
   "sh",

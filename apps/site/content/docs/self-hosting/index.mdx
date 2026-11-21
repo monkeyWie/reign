@@ -1,37 +1,20 @@
 ---
-title: Self-hosting overview
-description: Choose a standalone Go server or a Cloudflare Worker.
+title: Open-source self-hosting
+description: Choose where devices pair and how encrypted connections reach them.
 ---
 
-## What you deploy
+Your agents and projects run on your computer. The connection service pairs your devices, helps them find a direct path and can relay encrypted traffic. Every client uses the same service URL. Open its `/chat/` page to use a browser.
 
-Choose a standalone Go server with local SQLite and integrated TCP/UDP discovery, or Cloudflare Worker with D1 and Durable Objects. Both provide the same pairing and encrypted transport APIs. Both include only the Web console; the root URL redirects to `/chat/`. The official website/docs are built and published separately.
+| Where you want to run it                           | What to install                                                                       | What to expose                                                             |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| On your own machine or VM                          | [Go server](/docs/self-hosting/go) with its built-in Web console and SQLite           | HTTPS for the console and signaling, TCP and UDP for STUN and native relay |
+| In your Cloudflare account                         | [Worker deployment bundle](/docs/self-hosting/cloudflare) with D1 and Durable Objects | One HTTPS origin, including the encrypted WebSocket relay                  |
+| With a separate public IP for STUN or native relay | [Additional Go node](/docs/self-hosting/probe) alongside either control service       | Only the TCP and UDP ports you advertise                                   |
 
-The Cloudflare deployment includes only the `/chat` Web controller, `/p2p/*` connection protocol, D1 and a device-room Durable Object. It requires no accounts, OAuth or payment configuration and applies no official commercial quotas.
+### Connect your devices
 
-For the Worker you need a Cloudflare account. The default workers.dev address includes HTTPS, so neither a paid domain nor a public VM is mandatory.
+1. Open the service URL and confirm the Web console loads.
+2. Enter that same root URL in the desktop app on the computer running your agents.
+3. Pair your phone or browser using the desktop's device code. Approve the request on the computer, then open a project and read a session.
 
-<Cards>
-  <Card title="Deploy the Go server" href="/docs/self-hosting/go">
-    One binary or Docker Compose, local SQLite, all features enabled.
-  </Card>
-  <Card title="Deploy to Cloudflare" href="/docs/self-hosting/cloudflare">
-    Start from the deployment button or CLI.
-  </Card>
-  <Card title="Optional TCP/UDP probe" href="/docs/self-hosting/probe">
-    Add your own candidate discovery while retaining one service URL.
-  </Card>
-  <Card title="Operations and backups" href="/docs/self-hosting/operations">
-    Preserve bindings, back up metadata and check deployments.
-  </Card>
-</Cards>
-
-## License and resources
-
-The MIT-licensed software has no subscription fee. Workers, D1, DO and probe servers remain subject to your own cloud quotas and billing; check resource usage and budgets in your Cloudflare dashboard.
-
-Your self-hosted service runs independently, without official accounts, payment configuration or a commercial subscription.
-
-## Client configuration
-
-Use the same Go server or Worker root URL in every client, such as `https://reignhub.example.workers.dev`. The Web client is at `/chat`. The service publishes probe addresses, so clients need no second address field.
+The open-source service works without a ReignHub account. Hosting costs follow your infrastructure provider's rates. See [backups and upgrades](/docs/self-hosting/operations).

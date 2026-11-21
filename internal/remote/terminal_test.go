@@ -61,7 +61,7 @@ func (e *wireTerminal) ExitCode() int         { return 0 }
 func (e *wireTerminal) Close() error          { e.once.Do(func() { close(e.done) }); return nil }
 
 func TestTerminalRemoteRecoveryAndRevocation(t *testing.T) {
-	for _, opts := range []Options{{RelayOnly: true}, {DisableWebRTC: true}} {
+	for _, opts := range []Options{{RelayOnly: true}, {DisableWebRTC: true, DisableQUIC: true}} {
 		name := "relay"
 		if !opts.RelayOnly {
 			name = "tcp"

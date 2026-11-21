@@ -1,21 +1,22 @@
 ---
-title: 部署可选探测器
-description: 一个 Go 二进制，在同一个端口提供 TCP 和 UDP 探测。
+title: 添加 STUN 与原生中继节点
+description: 在一个公网 IP 上提供 TCP、UDP 探测和可选的 QUIC、TCP 中继。
 ---
 
 ## 什么时候需要
 
-Worker 不能直接监听原始 UDP／TCP 探测 Socket。默认可以使用公共 UDP STUN；如果希望补充自己的候选地址发现、提高公共探测服务不可达时的覆盖，可在有公网地址的服务器运行 `reignhub-probe`。
+Worker 不能直接监听原始 UDP／TCP 探测 Socket。默认可以使用公共 UDP STUN；如果希望补充自己的候选地址发现、提高公共探测服务不可达时的覆盖，可在有公网地址的服务器将 `config.json` 中的 `http` 设为 `false` 并启动服务。
 
 探测器只返回地址映射，不保存设备目录、不运行 Agent、不托管网页，也不是业务中继。没有它也可以部署 Worker。
 
 ## 构建并运行
 
-Go 版本以仓库 `go.mod` 为准，也可以使用发布产物中的 Linux amd64／arm64 探测器。
+Go 版本以仓库 `go.mod` 为准，也可以使用对应平台的 Go 服务发布包。
 
 ```sh
-go build -o reignhub-probe ./cmd/reignhub-probe
-./reignhub-probe --listen :26331
+go build -o reignhub-server ./cmd/reignhub-server
+# 将 config.json 设为 {"http":false} 后启动。
+./reignhub-server
 ```
 
 服务器与云安全组同时放行：
@@ -32,13 +33,37 @@ go build -o reignhub-probe ./cmd/reignhub-probe
 在 Worker 变量中配置并重新部署：
 
 ```text
-SELF_STUN=stun:probe.example.com:26331
-TCP_STUN=probe.example.com:26331
+EXTERNAL_STUN=["probe.example.com:26331"]
 ```
 
 客户端仍然只填 Worker 的 HTTPS 地址。服务会通过 `/p2p/config` 下发这些入口。
 
 公共与自建 STUN 并行尝试，优先得到可用的直连路径；浏览器没有原始 TCP 能力，TCP 探测主要用于原生端。
+
+## 在同一台机器上提供原生中继
+
+在节点的 `config.json` 中填写 Go 或 Worker 中控的 HTTPS 地址。启动后在另一个终端读取 PIN。
+
+```json
+{
+  "http": false,
+  "relayControl": "https://control.example",
+  "state": "data/relay.db"
+}
+```
+
+```sh
+./reignhub-server
+./reignhub-server --print-relay-pin
+```
+
+中继另需放行 26332 的 UDP 和 TCP。升级时保留数据库，节点 PIN 就能保持稳定。在 Worker 的 `EXTERNAL_RELAYS` 或 Go 中控 JSON 的 `externalRelays` 里填下面的数组，将示例地址和 PIN 换成自己的。
+
+```json
+[{ "addresses": ["203.0.113.10:26332"], "pin": "替换成命令输出的PIN" }]
+```
+
+多台中继各加一项。共用地址写一次即可。分端口时填 `["udp:probe.example.com:3478","tcp:probe.example.com:3479"]`。Go 与 Worker 都对 STUN 和每个中继的 `addresses` 数组使用这套规则，同一中继只需一个 PIN。配置修改后重新部署 Worker 或重启 Go 中控。
 
 ## 运行边界
 

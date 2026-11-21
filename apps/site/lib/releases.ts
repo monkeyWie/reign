@@ -10,12 +10,18 @@ export interface ReleaseAsset {
   architecture: string;
   format: "dmg" | "exe" | "deb" | "arch" | "appimage" | "apk" | "ipa";
 }
+export interface HostingAsset {
+  name: string;
+  url: string;
+  label: string;
+}
 export interface ReleaseVersion {
   version: string;
   url: string;
   publishedAt: string;
   prerelease: boolean;
   assets: ReleaseAsset[];
+  hostingAssets: HostingAsset[];
   checksumsURL: string | null;
 }
 export interface ReleaseCatalog {
@@ -83,6 +89,7 @@ export function parseReleases(value: unknown): ReleaseVersion | null {
     const tag = release.tag_name as string;
     const version = tag.slice(1);
     const assets: ReleaseAsset[] = [];
+    const hostingAssets: HostingAsset[] = [];
     let checksumsURL: string | null = null;
     for (const item of release.assets as unknown[]) {
       const a = record(item);
@@ -91,6 +98,38 @@ export function parseReleases(value: unknown): ReleaseVersion | null {
       if (!url) continue;
       if (a.name === "SHA256SUMS") {
         checksumsURL = url;
+        continue;
+      }
+      if (typeof a.size !== "number" || a.size <= 0) continue;
+      const serverPrefix = `reignhub-server-${version}-`;
+      if (a.name.startsWith(serverPrefix)) {
+        const server =
+          /^(linux|darwin|windows)-(amd64|arm64)(\.tar\.gz|\.zip)$/.exec(
+            a.name.slice(serverPrefix.length),
+          );
+        if (server && (server[1] === "windows") === (server[3] === ".zip")) {
+          const os = { darwin: "macOS", linux: "Linux", windows: "Windows" }[
+            server[1]
+          ];
+          hostingAssets.push({
+            name: a.name,
+            url,
+            label: `${os} · ${server[2]}`,
+          });
+        }
+        continue;
+      }
+      if (
+        a.name === `reignhub-web-worker-${version}.tar.gz` ||
+        a.name === `reignhub-server-packaging-${version}.tar.gz`
+      ) {
+        hostingAssets.push({
+          name: a.name,
+          url,
+          label: a.name.startsWith("reignhub-web")
+            ? "Cloudflare Worker"
+            : "Homebrew / Scoop",
+        });
         continue;
       }
       const prefix = `reignhub-${version}-`;
@@ -131,7 +170,6 @@ export function parseReleases(value: unknown): ReleaseVersion | null {
       } else {
         continue;
       }
-      if (typeof a.size !== "number" || a.size <= 0) continue;
       assets.push({
         name: a.name,
         url,
@@ -149,6 +187,7 @@ export function parseReleases(value: unknown): ReleaseVersion | null {
       publishedAt: release.published_at as string,
       prerelease: release.prerelease === true,
       assets,
+      hostingAssets,
       checksumsURL,
     };
   }

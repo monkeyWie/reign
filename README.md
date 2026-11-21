@@ -1,6 +1,6 @@
 # ReignHub
 
-Remote control for the AI Agents on your own computers. Desktop, mobile and browser controllers share one NSGo + Go UI. The website and documentation use Next.js and Fumadocs. The default service is `https://reignhub.app`.
+One workspace for your agents. Organize Codex, Claude Code and Pi sessions by project, open a terminal on your desktop and continue conversations from your phone or browser. Desktop, mobile and browser controllers share one NSGo + Go UI. The website and documentation use Next.js and Fumadocs. The default service is `https://reignhub.app`.
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/monkeyWie/reignhub)
 
@@ -12,7 +12,7 @@ The official site is [reignhub.app](https://reignhub.app), with [quick start](ht
 
 - **Two self-hosting options:** a standalone `reignhub-server` with SQLite and integrated TCP/UDP discovery, or a Cloudflare Worker with D1 and Durable Objects. Both use the same `/p2p/*` protocol.
 - **A lean Worker** hosts `/chat` and `/p2p/*`; `/` redirects to `/chat/`. D1 stores device identities and encrypted pairing envelopes. Hibernating Durable Objects route signaling and encrypted relay frames.
-- **Direct first:** native clients try WebRTC/UDP and native TCP in parallel. Browsers use WebRTC. Public and optional self-hosted discovery servers provide candidates concurrently. If direct connectivity fails, self-hosted clients use their own Go or Worker relay.
+- **Direct first:** native peers try QUIC/UDP and TCP in parallel. Browsers and older peers use WebRTC. Public and optional self-hosted discovery servers provide candidates concurrently. If direct connectivity fails, self-hosted clients use their own Go or Worker relay.
 - **One service address:** clients discover optional probe endpoints from `/p2p/config`. No second service address is required in the UI.
 - **End-to-end encryption:** pairing uses X25519/HKDF/AES-GCM; session traffic uses fresh directional AEAD keys and replay protection. Servers do not hold chat pairing keys or store chat plaintext.
 - **Providers:** Codex has one integration for App, CLI and VS Code sessions. Existing sessions follow their current local IPC owner; ReignHub-created sessions use a private app-server. Claude Code, Cursor, OpenCode, Grok Build, Antigravity, Kiro, Muse Code, fx, DeepSeek Harness and Gemini CLI use a common ACP adapter; Pi uses its native RPC. Custom ACP commands are configured on the host. Local Agent tasks continue independently of remote connection authorization.
@@ -61,16 +61,17 @@ docker compose -f deploy/service/compose.yaml up -d --build
 # Or extract a reignhub-server release archive and run ./reignhub-server
 ```
 
-Go uses local SQLite, embeds `/chat`, and listens on HTTP 26330 plus TCP/UDP discovery 26331. All addresses and features are configurable by JSON or CLI. It has no Cloudflare dependency. Both Go and Worker roots redirect to `/chat/`. Neither self-hosted package includes the marketing website or docs. See [Go configuration and package-manager installation](deploy/service/README.md).
+Go uses local SQLite, embeds `/chat`, and listens on HTTP 26330 plus TCP/UDP discovery 26331 and native QUIC/TLS relay 26332. All addresses and features are configured in `config.json`. It has no Cloudflare dependency. Both Go and Worker roots redirect to `/chat/`. Neither self-hosted package includes the marketing website or docs. See [Go configuration and package-manager installation](deploy/service/README.md).
 
 For a Worker deployment, the same server can run only TCP/UDP discovery (no HTTP or SQLite):
 
 ```sh
 go build -o reignhub-server ./cmd/reignhub-server
-./reignhub-server --http=false --stun-listen :26331 --tcp-stun-listen :26331
+# Set config.json to {"http":false} before starting.
+./reignhub-server
 ```
 
-Expose **26331/TCP and 26331/UDP** directly. The probe contains no website, device directory, account database, or relay. No TURN, DERP, cloudflared or Tailcat is required.
+Expose **26331/TCP and 26331/UDP** directly. Probe mode starts only the selected STUN listeners. No TURN, DERP, cloudflared or Tailcat is required.
 
 ## Source map
 
@@ -85,8 +86,7 @@ Expose **26331/TCP and 26331/UDP** directly. The probe contains no website, devi
 | `clients/nsgo`         | Shared desktop, Android, iOS and browser UI                     |
 | `internal`             | Native Go application, Providers, transport and SQLite          |
 | `cmd/reignhub-server`  | Standalone SQLite/Web/relay/discovery server                    |
-| `cmd/reignhub-probe`   | Optional TCP/UDP discovery binary                               |
 | `docs/engineering`     | Engineering standards, decisions and troubleshooting knowledge  |
-| `.github/workflows`    | Native, Web, Worker, Go server and probe checks/builds/releases |
+| `.github/workflows`    | Native, Web, Worker and Go server checks/builds/releases |
 
-Protocol compatibility with older prototypes is intentionally not provided. See [implementation scope](docs/platform/implementation.md) and [protocol](docs/platform/protocol.md). Current engineering references are indexed in [the knowledge base](docs/engineering/README.md); dated research records describe their own validation scope.
+Protocol compatibility with older prototypes is intentionally not provided. See [implementation scope](docs/platform/implementation.md) and [protocol](docs/platform/protocol.md). Current engineering references are indexed in [the knowledge base](docs/engineering/README.md).

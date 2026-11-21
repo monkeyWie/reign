@@ -108,7 +108,7 @@ export function ReleaseDownloads({
                     a.name.localeCompare(b.name),
                 ) || [];
             return (
-              <article key={id}>
+              <article key={id} id={id}>
                 <PlatformIcon platform={id} size={25} />
                 <h2>{title}</h2>
                 <p className="download-arch">{arch}</p>
@@ -174,6 +174,38 @@ export function ReleaseDownloads({
               <ArrowUpRight size={14} />
             </Link>
           </article>
+        </div>
+      </section>
+      <section
+        id="server"
+        className="site-section site-width hosting-downloads"
+      >
+        <h2>{t("服务端下载")}</h2>
+        <p>
+          {t(
+            "Go 服务按系统和 CPU 架构打包，内含程序和 config.json。Worker 提供独立部署包。",
+          )}
+        </p>
+        <div className="download-assets">
+          {release?.hostingAssets?.map((asset) => (
+            <a
+              className="button"
+              key={asset.name}
+              href={asset.url}
+              title={asset.name}
+            >
+              <Download size={14} />
+              {asset.label}
+            </a>
+          ))}
+        </div>
+        <div className="site-actions">
+          <Link className="site-text-link" href="/docs/self-hosting">
+            {t("安装与配置")} <ArrowUpRight size={14} />
+          </Link>
+          <a className="site-text-link" href={release?.url || releasesURL}>
+            {t("查看发布附件")} <ArrowUpRight size={14} />
+          </a>
         </div>
       </section>
     </>

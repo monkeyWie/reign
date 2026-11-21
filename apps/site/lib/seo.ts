@@ -59,12 +59,12 @@ export function pageMetadata(
 export const marketingMeta = {
   "/": {
     en: [
-      "ReignHub — Your agents. Anywhere.",
-      "Your agents, beyond your desk. ReignHub spans macOS, Windows, Linux, iOS, Android and Web. Native UI, an 8.9 MB macOS archive, low memory usage and end-to-end encryption.",
+      "ReignHub — One workspace for your agents",
+      "Organize Codex, Claude Code and Pi sessions by project. Work locally or remotely with native apps, a Web workspace, P2P connections, desktop terminals and open-source self-hosting.",
     ],
     "zh-CN": [
-      "ReignHub — 你的 Agent，随处掌控",
-      "掌控你的 Agent，不止于桌面。ReignHub 覆盖 macOS、Windows、Linux、iOS、Android 与 Web，原生轻量，macOS 包体积 8.9 MB、演示内存实测 39–48 MiB，端到端加密。",
+      "ReignHub — 你的 Agent 聚合工作台",
+      "按项目聚合 Codex、Claude Code、Pi 等 Agent 会话。原生客户端与 Web 跨平台访问，支持 P2P 直连、桌面远程终端和开源自托管。",
     ],
   },
   "/features": {

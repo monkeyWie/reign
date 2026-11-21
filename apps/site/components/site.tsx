@@ -31,12 +31,7 @@ export function SiteFooter() {
           <Link className="brand" href="/">
             ♜ ReignHub
           </Link>
-          <p>
-            {t("你的 Agent，你的电脑。")}
-            <br />
-            {t("从任何屏幕，继续你的工作。")}
-          </p>
-          <span className="footer-caption">Your agents. Anywhere.</span>
+          <p>{t("你的 Agent 聚合工作台。")}</p>
           <SupportContact className="footer-contact" />
         </div>
         {[

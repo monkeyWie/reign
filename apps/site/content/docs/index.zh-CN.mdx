@@ -1,9 +1,9 @@
 ---
 title: 欢迎使用 ReignHub
-description: 从你口袋里的屏幕，连接电脑上的 AI Agent。
+description: 在一个工作台里按项目管理多个 Agent 的会话。
 ---
 
-ReignHub 让你在手机、桌面或浏览器里，继续处理自己电脑上的 Agent 会话。代码、工作目录和 Agent 仍在原来的电脑上运行。
+ReignHub 是你的 Agent 聚合工作台。在同一个项目下找到 Codex、Claude Code、Pi 等 Agent 的会话，用手机、桌面或浏览器继续工作。代码、工作目录和 Agent 仍在原来的电脑上运行。
 
 ## 从这里开始
 
@@ -15,7 +15,7 @@ ReignHub 让你在手机、桌面或浏览器里，继续处理自己电脑上�
     连接桌面 App，跨设备继续同一个会话。
   </Card>
   <Card title="自建服务" href="/docs/self-hosting">
-    用自己的 Cloudflare 账号部署完整服务。
+    在自己的服务器上运行 Go 服务，或部署到 Cloudflare Worker。
   </Card>
   <Card title="参与贡献" href="/docs/contributing">
     搭建开发环境、接入新 Provider、提交文档或代码。
@@ -28,7 +28,7 @@ ReignHub 让你在手机、桌面或浏览器里，继续处理自己电脑上�
 | -------- | --------------------- | --------------------------------------- |
 | 被控端   | 安装 Agent 的桌面电脑 | 显示 Agent 接入状态，处理配对和远程指令 |
 | 控制端   | 桌面、手机、浏览器    | 连接多台电脑，管理会话、发送消息和附件  |
-| 连接服务 | Cloudflare Worker     | 设备发现、配对信令、可用时提供加密中继  |
+| 连接服务 | Go 服务或 Cloudflare Worker     | 设备发现、配对信令、可用时提供加密中继  |
 
 桌面应用同时承担控制端和被控端。浏览器和手机作为控制端，不会把你电脑上的 Agent 搬到云端运行。
 

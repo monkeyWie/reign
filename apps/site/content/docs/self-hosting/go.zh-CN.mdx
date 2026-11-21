@@ -3,52 +3,38 @@ title: 部署 Go 服务
 description: 一个独立二进制，内置 SQLite、Web、信令、中继和 TCP/UDP 探测。
 ---
 
-## Go 与 Cloudflare 两种部署
+## 下载和启动
 
-`reignhub-server` 独立运行，不依赖 Cloudflare。它与 Worker 使用相同的设备配对和加密连接协议，本地 SQLite 替代 D1，Go WebSocket 房间替代 Durable Objects。Agent 仍运行在被控电脑上，服务只转发加密数据。
+从[服务端下载](/zh-CN/download#server)选择与你的系统和 CPU 匹配的 `reignhub-server` 压缩包。对照同一版本的 `SHA256SUMS` 校验，解压后进入包含程序和 `config.json` 的目录。程序内置 Web 控制台。
 
-默认开启设备目录、配对、信令、加密中继、Web 控制台、UDP STUN 和 TCP STUN。Go 与 Worker 的根地址均跳转到 `/chat/`，自部署包不包含官网和文档。
+```sh
+./reignhub-server --version
+./reignhub-server
+```
 
-## 一条命令部署
+Windows PowerShell 下使用 `.\reignhub-server.exe`。在服务器上打开 `http://localhost:26330/chat/`。公网访问时，用 HTTPS 反向代理转发至 26330/TCP，或配置 `tlsCert` 和 `tlsKey`。默认探测端口为 26331/UDP 和 TCP，原生中继为 26332/UDP 和 TCP。若经 NAT 或反向代理，请将 `selfStun`、`tcpStunPublic`、`nativeRelayPublic` 设为客户端可达的地址。
 
-在源码仓库根目录运行：
+也可以从源码仓库启动 Docker Compose：
 
 ```sh
 docker compose -f deploy/service/compose.yaml up -d --build
 ```
 
-SQLite 保存在 Docker 数据卷中。放行 HTTP **26330/TCP** 和探测 **26331/TCP + UDP**。通过反向代理提供 HTTPS/WSS，或直接配置 `--tls-cert`、`--tls-key`。远程浏览器需要 HTTPS，本机浏览器开发可以使用 localhost。
-
-也可以下载 Linux、macOS 或 Windows 的 amd64/arm64 服务归档，核对 SHA-256 后解压运行 `reignhub-server`。正式构建的二进制内嵌优化后的 Web 控制台，不需要安装 Go 或 Node。
-
 ## 配置功能与端口
 
-配置优先级为默认值 → JSON 文件 → 显式命令行参数：
+服务从当前工作目录读取 `config.json`。解压包已附带模板。单独安装二进制时，在服务目录执行一次 `reignhub-server --init` 生成模板，编辑后运行 `reignhub-server`。已有配置会保留。也可以用 `--config PATH` 指定其他文件。数据库、Web 目录和 TLS 文件的相对路径以配置文件所在目录为准。
 
-```sh
-reignhub-server --config server.json --listen :8080 \
-  --stun-listen :3478 --tcp-stun-listen :3479 \
-  --state /var/lib/reignhub/reignhub.db
-```
+下面这份配置只开 TCP 和 UDP 探测，监听所有网卡的 3478 端口。
 
 ```json
 {
-  "http": true,
-  "signal": true,
-  "relay": true,
-  "webEnabled": true,
-  "stun": true,
-  "tcpStun": true,
-  "listen": ":26330",
-  "state": "data/reignhub.db",
-  "stunListen": ":26331",
-  "tcpStunListen": ":26331"
+  "http": false,
+  "stunListen": ":3478",
+  "tcpStunListen": ":3478"
 }
 ```
 
-通过 `--web-enabled=false`、`--relay=false`、`--stun=false`、`--tcp-stun=false` 单独关闭功能。关闭信令时也必须关闭中继。`--http=false` 只运行选定的探测服务，不开启 SQLite，可用于配合 Worker。
-
-探测 Socket 不经过 HTTP 代理或 CDN。如果存在端口映射或 HTTP 域名走代理，使用 `--self-stun stun:probe.example.com:3478 --tcp-stun-public probe.example.com:3479` 下发直接可达的地址；否则服务自动使用请求域名与实际监听端口。`--origins` 配置额外的精确浏览器来源，`--public-stun` 指定公共探测地址，`--web DIR` 指定外部构建的控制台目录。完整参数见 `--help`。
+修改后重启 Go 服务。中控可以用 `externalStun` 追加外部探测节点，用 `externalRelays` 登记外部中继的地址和 PIN。
 
 ## 安装与升级
 
@@ -56,4 +42,4 @@ reignhub-server --config server.json --listen :8080 \
 
 Linux 可使用归档中的 systemd 服务文件。升级时保留 SQLite；复制备份前先停止服务并一并保留 WAL/SHM，或使用 SQLite 备份功能。数据库包含固定的服务 ID、签名密钥、设备元数据、凭据哈希与配对权限，不保存聊天明文。重启后检查 `/healthz`、`/p2p/config` 和实际配对连接。
 
-仓库 `deploy/service/README.md` 提供 Docker、Nginx、systemd 和安装脚本详情。直接 `go install` 的源码构建没有自动内嵌 Web 资产，应使用发布二进制或通过 `--web` 提供。
+仓库 `deploy/service/README.md` 提供 Docker、Nginx、systemd 和安装脚本详情。直接 `go install` 的源码构建没有自动内嵌 Web 资产，应使用发布二进制或通过 `web` 提供。

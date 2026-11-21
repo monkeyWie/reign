@@ -3,52 +3,38 @@ title: Deploy the Go server
 description: A standalone binary with SQLite, Web, signaling, relay and TCP/UDP discovery.
 ---
 
-## Choose Go or Cloudflare
+## Download and start
 
-`reignhub-server` runs independently of Cloudflare. It provides the same device pairing and encrypted connection protocol as the Worker. SQLite replaces D1, and Go WebSocket rooms replace Durable Objects. Agents stay on controlled computers; the service forwards encrypted traffic.
+Choose the `reignhub-server` archive for your OS and CPU from [server downloads](/download#server). Verify it against the release’s `SHA256SUMS`, extract it and enter the directory containing the executable and `config.json`. The binary embeds the Web console.
 
-All features start by default: device directory, pairing, signaling, encrypted relay, Web console, UDP STUN and TCP STUN. Both Go and Worker roots redirect to `/chat/`; neither self-hosted package includes the marketing website or docs.
+```sh
+./reignhub-server --version
+./reignhub-server
+```
 
-## One-command deployment
+On Windows PowerShell, run `.\reignhub-server.exe`. Open `http://localhost:26330/chat/` on the server. For public browser access, proxy HTTPS to port 26330/TCP or configure `tlsCert` and `tlsKey`. Expose 26331/UDP and TCP for STUN and 26332/UDP and TCP for native relay. Behind NAT or a reverse proxy, set `selfStun`, `tcpStunPublic` and `nativeRelayPublic` to addresses reachable by clients.
 
-From the source repository root:
+To use Docker Compose, run this from the source repository:
 
 ```sh
 docker compose -f deploy/service/compose.yaml up -d --build
 ```
 
-SQLite persists in a Docker volume. Open HTTP **26330/TCP** and discovery **26331/TCP + UDP**. Provide HTTPS/WSS with a reverse proxy, or use `--tls-cert` and `--tls-key`. Remote browsers need HTTPS; localhost works for browser development.
-
-Alternatively, extract a standalone release archive for Linux, macOS or Windows (amd64/arm64), verify its SHA-256, and run `reignhub-server`. The release binary embeds the optimized Web client; no Go or Node runtime is needed.
-
 ## Configuration
 
-Defaults are overridden by a JSON file, then by explicit CLI flags:
+The server reads `config.json` in the working directory. Archives include the template. With a binary-only install, run `reignhub-server --init` once in your service directory, edit the file and run `reignhub-server`. Initialization preserves existing files. Use `--config PATH` to select a different file. Relative state, Web and TLS paths resolve from the config directory.
 
-```sh
-reignhub-server --config server.json --listen :8080 \
-  --stun-listen :3478 --tcp-stun-listen :3479 \
-  --state /var/lib/reignhub/reignhub.db
-```
+This configuration runs TCP and UDP discovery on port 3478 on all interfaces.
 
 ```json
 {
-  "http": true,
-  "signal": true,
-  "relay": true,
-  "webEnabled": true,
-  "stun": true,
-  "tcpStun": true,
-  "listen": ":26330",
-  "state": "data/reignhub.db",
-  "stunListen": ":26331",
-  "tcpStunListen": ":26331"
+  "http": false,
+  "stunListen": ":3478",
+  "tcpStunListen": ":3478"
 }
 ```
 
-Disable features with `--web-enabled=false`, `--relay=false`, `--stun=false` or `--tcp-stun=false`. Disabling signaling also requires disabling relay. `--http=false` runs only the selected probes and never opens SQLite, useful alongside a Worker.
-
-Probe sockets bypass HTTP proxies/CDNs. If ports are mapped or the HTTP hostname is proxied, advertise direct endpoints with `--self-stun stun:probe.example.com:3478 --tcp-stun-public probe.example.com:3479`. Otherwise they derive from the request hostname and bound listener ports. Configure exact additional browser origins using `--origins`, public discovery using `--public-stun`, and external console assets using `--web DIR`. Run `--help` for every flag.
+Restart the Go service after editing. A control service can use `externalStun` to append discovery nodes and `externalRelays` to register relay addresses and pins.
 
 ## Installation and upgrades
 
@@ -56,4 +42,4 @@ The release packaging archive contains Homebrew and Scoop definitions with verif
 
 For Linux, use the bundled systemd unit. Preserve the SQLite database when upgrading. Stop the service before copying the database and any WAL/SHM files, or use SQLite's backup API. The database contains the persistent service ID, signing key, device metadata, credential hashes and pairing permissions, but no chat plaintext. Check `/healthz`, `/p2p/config` and an actual paired connection after restarting.
 
-The repository's `deploy/service/README.md` contains Docker, Nginx, systemd and installer details. Building from source with `go install` only embeds Web when release assets have been staged; use a release binary or provide `--web`.
+The repository's `deploy/service/README.md` contains Docker, Nginx, systemd and installer details. Building from source with `go install` only embeds Web when release assets have been staged; use a release binary or set `web` in config.json.

@@ -6,7 +6,7 @@ import {
   type ReleaseVersion,
 } from "./releases";
 
-const key = "github-releases:" + releaseRepository;
+const key = "github-releases-with-hosting:" + releaseRepository;
 const refreshSeconds = 60 * 60;
 export interface ReleaseRow {
   body: string | null;

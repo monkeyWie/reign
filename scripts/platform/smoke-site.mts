@@ -71,7 +71,7 @@ export async function smokeSite(origin: string) {
       );
     }
     if (path === "/") {
-      assert.match(html, /Beyond your desk/);
+      assert.match(html, /One workspace/);
       assert.ok(
         !html.includes("Agent 在电脑上"),
         "English homepage must have translated content",
@@ -79,8 +79,10 @@ export async function smokeSite(origin: string) {
     }
     if (path === "/" || path === "/zh-CN") {
       for (const text of [
-        "8.9",
-        "39–48",
+        "/docs/self-hosting/go",
+        "/docs/self-hosting/cloudflare",
+        "Claude Code",
+        "/docs/guides/terminal",
         "macOS",
         "Windows",
         "Linux",

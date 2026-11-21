@@ -477,7 +477,7 @@ jobs:
       - name: Prepare release notes
         run: |
           cat > build-notes.md <<'NOTES'
-          Access your agents from anywhere. Open the same project on your desktop, phone or browser. Agents and their working files stay on your computer.
+          One workspace for your agents. Bring Codex, Claude Code and Pi sessions together by project on desktop, mobile and Web. Agents and their working files stay on your computer.
 
           - Conversation history loads in pages as you scroll. Native and browser clients persist individual messages and keep a bounded window in memory.
           - Desktop sessions include terminal tabs. Hosts manage paired devices’ terminal access in Connection settings.

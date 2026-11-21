@@ -24,6 +24,16 @@ const filenames = [
   "android-arm64.apk",
   "ios-unsigned.ipa",
 ].map((suffix) => `reignhub-1.2.3-${suffix}`);
+filenames.push(
+  ...["linux", "darwin", "windows"].flatMap((os) =>
+    ["amd64", "arm64"].map(
+      (arch) =>
+        `reignhub-server-1.2.3-${os}-${arch}.${os === "windows" ? "zip" : "tar.gz"}`,
+    ),
+  ),
+  "reignhub-web-worker-1.2.3.tar.gz",
+  "reignhub-server-packaging-1.2.3.tar.gz",
+);
 const catalog: ReleaseCatalog = {
   release: parseReleases([
     {

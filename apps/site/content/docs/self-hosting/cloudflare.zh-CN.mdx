@@ -3,6 +3,18 @@ title: 部署到 Cloudflare
 description: 部署开源 Worker，初始化 D1，连接自己的设备。
 ---
 
+## 用发布包部署
+
+在[服务端下载页](/zh-CN/download#server)选择 **Cloudflare Worker**，核对校验和后解压，进入包含 `wrangler.json` 的目录。准备好 Node.js 24，在这个目录运行：
+
+```sh
+npx wrangler@4 login
+npx wrangler@4 deploy
+npx wrangler@4 d1 migrations apply DB --remote
+```
+
+保存 Worker 的 HTTPS 地址和 D1 绑定。只部署 Worker 时，客户端可使用内置公共 UDP STUN 和授权的 WebSocket 中继。如果需要自己的 STUN 或 QUIC/TCP 中继，请按[添加节点](/zh-CN/docs/self-hosting/probe)配置。
+
 ## 一键部署
 
 打开仓库中的 [Deploy to Cloudflare](https://deploy.workers.cloudflare.com/?url=https://github.com/monkeyWie/reignhub) 入口，授权你自己的 Cloudflare 账号，按向导创建服务。

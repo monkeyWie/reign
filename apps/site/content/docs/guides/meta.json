@@ -1,4 +1,11 @@
 {
   "title": "Usage guides",
-  "pages": ["devices", "sessions", "files", "connections", "troubleshooting"]
+  "pages": [
+    "devices",
+    "sessions",
+    "terminal",
+    "files",
+    "connections",
+    "troubleshooting"
+  ]
 }

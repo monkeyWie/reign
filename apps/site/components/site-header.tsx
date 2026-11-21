@@ -12,7 +12,7 @@ export function SiteHeader() {
   const pathname = usePathname();
   const links = [
     ["/features", t("特性")],
-    ["/technology", t("技术栈")],
+    ["/docs/self-hosting", t("自建服务")],
     ["/docs", t("文档")],
     ["/pricing", t("价格")],
   ];

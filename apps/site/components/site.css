@@ -2063,3 +2063,20 @@
   color: var(--muted-foreground, #808080);
   font-size: 12px;
 }
+.hosting-downloads,
+.download-grid article[id] {
+  scroll-margin-top: 90px;
+}
+.hosting-downloads h2 {
+  font-size: clamp(28px, 4vw, 48px);
+  letter-spacing: -0.04em;
+  margin: 0;
+}
+.hosting-downloads > p {
+  color: var(--muted);
+}
+.hosting-downloads .download-assets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
