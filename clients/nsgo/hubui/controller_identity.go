@@ -30,14 +30,49 @@ func controllerIconKey(info Object) string {
 	if kind == "browser" || kind == "" && browser != "browser" {
 		return browser
 	}
-	switch strings.ToLower(str(info, "platform")) {
+	return platformIconKey(str(info, "platform"))
+}
+
+func platformIconKey(platform string) string {
+	switch strings.ToLower(platform) {
 	case "darwin", "macos", "ios":
 		return "apple"
 	case "windows", "android", "linux":
-		return strings.ToLower(str(info, "platform"))
+		return strings.ToLower(platform)
 	}
 	return "device"
 }
+
+// A saved host can be offline or running a version that predates platform
+// metadata. Old catalogues can still identify a Windows host by its native
+// executable path. Device names are user-editable.
+func (s *State) hostIcon(cx *core.Scope, target string) *core.SVG {
+	s.read()
+	platform := str(s.networkDevice(target), "platform")
+	if platform == "" && target == "local" {
+		platform = string(cx.Env().OS())
+	}
+	if platform == "" {
+		for _, provider := range s.workspaces[target].providers {
+			path := str(provider, "installPath")
+			if len(path) >= 3 && strings.ContainsAny(path[:1], "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz") && path[1:3] == `:\` {
+				platform = "windows"
+				break
+			}
+		}
+	}
+	if svg := brandLogos[platformIconKey(platform)]; svg != nil {
+		return svg
+	}
+	return lucide.Monitor()
+}
+
+func (s *State) hostGlyph(cx *core.Scope, target string, size core.Points) core.Icon {
+	return core.Icon{TestID: "host-platform-" + target, SVGFunc: func() *core.SVG { return s.hostIcon(cx, target) },
+		Style:     core.Style{Width: core.Pt(size), Height: core.Pt(size), FlexShrink: 0},
+		StyleFunc: func() core.Style { return core.Style{Color: palette(cx).foreground} }}
+}
+
 func identityGlyph(cx *core.Scope, info Object, size core.Points) core.Node {
 	key := controllerIconKey(info)
 	if svg := brandLogos[key]; svg != nil {

@@ -6,16 +6,18 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
 
-	"github.com/monkeyWie/reignhub/internal/assets"
 	"github.com/monkeyWie/reignhub/internal/provider"
+	"github.com/monkeyWie/reignhub/internal/terminal"
 	"github.com/monkeyWie/reignhub/internal/workspace"
 )
 
 type Request struct {
+	ReceiptOwner   string                 `json:"-"`
 	Cancel         string                 `json:"cancel,omitempty"`
 	Progress       bool                   `json:"progress,omitempty"`
 	Probe          bool                   `json:"probe,omitempty"`
@@ -32,6 +34,8 @@ type Request struct {
 	Text           string                 `json:"text,omitempty"`
 	Attachments    []string               `json:"attachments,omitempty"`
 	Model          string                 `json:"model,omitempty"`
+	HistoryItems   int                    `json:"historyItems,omitempty"`
+	RecentTurns    int                    `json:"recentTurns,omitempty"`
 	Turn           string                 `json:"turn,omitempty"`
 	Approval       string                 `json:"approval,omitempty"`
 	Options        provider.CreateOptions `json:"options,omitempty"`
@@ -42,6 +46,7 @@ type Request struct {
 
 type Response struct {
 	Code        string          `json:"code,omitempty"`
+	Sequence    uint32          `json:"sequence,omitempty"`
 	Partial     bool            `json:"partial,omitempty"`
 	ID          string          `json:"id"`
 	Result      json.RawMessage `json:"result,omitempty"`
@@ -65,13 +70,18 @@ type PeerStatus struct {
 	Path string `json:"path"`
 }
 type NetworkStatus struct {
-	State  string       `json:"state"`
-	Relay  string       `json:"relay,omitempty"`
-	Detail string       `json:"detail,omitempty"`
-	Peers  []PeerStatus `json:"peers"`
+	Platform string       `json:"platform,omitempty"`
+	State    string       `json:"state"`
+	Relay    string       `json:"relay,omitempty"`
+	Detail   string       `json:"detail,omitempty"`
+	Peers    []PeerStatus `json:"peers"`
 }
 type Dispatcher struct {
-	Assets          *assets.Store
+	Terminals             *terminal.Manager
+	RemoteTerminalAllowed func() bool
+	Assets                interface {
+		Handle(context.Context, string, string, provider.AttachmentParams) (any, error)
+	}
 	mutationMu      [64]sync.Mutex
 	Execute         func(Request, func() Response) Response
 	Providers       map[string]provider.Provider
@@ -83,6 +93,11 @@ type Dispatcher struct {
 
 func (d *Dispatcher) Handle(ctx context.Context, r Request) Response {
 	result, err := d.dispatch(ctx, r)
+	if err == nil && strings.HasPrefix(r.Method, "terminal.") {
+		if _, remote := ctx.Value(remoteIdentityKey{}).(string); remote && (d.RemoteTerminalAllowed == nil || !d.RemoteTerminalAllowed()) {
+			err = &ResponseError{Code: "TERMINAL_DENIED", Message: "请在被控设备的「设置 → 连接」中开启远程终端"}
+		}
+	}
 	out := Response{ID: r.ID}
 	if err != nil {
 		out.Error = err.Error()
@@ -104,6 +119,9 @@ func (d *Dispatcher) Handle(ctx context.Context, r Request) Response {
 	return out
 }
 func (d *Dispatcher) HandleRemote(ctx context.Context, r Request) Response {
+	if _, ok := ctx.Value(remoteIdentityKey{}).(string); !ok {
+		ctx = WithRemoteIdentity(ctx, "")
+	}
 	if strings.HasPrefix(r.Method, "host.") || strings.HasPrefix(r.Method, "client.") || r.Method == "connectDesktop" {
 		return Response{ID: r.ID, Error: "此操作仅允许在本机执行"}
 	}
@@ -113,7 +131,7 @@ func (d *Dispatcher) HandleRemote(ctx context.Context, r Request) Response {
 // HandleRequest applies the same command ordering and receipt semantics to
 // local and remote callers. Remote authorization is checked before this layer.
 func (d *Dispatcher) HandleRequest(ctx context.Context, r Request) Response {
-	if strings.HasPrefix(r.Method, "host.") || strings.HasPrefix(r.Method, "client.") {
+	if strings.HasPrefix(r.Method, "host.") || strings.HasPrefix(r.Method, "client.") || strings.HasPrefix(r.Method, "terminal.") {
 		return d.Handle(ctx, r)
 	}
 	if d.Execute != nil && !ReadOnly(r.Method) && r.Method != "watch" && r.Method != "network" && !strings.HasPrefix(r.Method, "attachment.") {
@@ -124,11 +142,48 @@ func (d *Dispatcher) HandleRequest(ctx context.Context, r Request) Response {
 		if err := ctx.Err(); err != nil {
 			return Response{ID: r.ID, Error: err.Error()}
 		}
+		r.ReceiptOwner = "local"
+		if peer, ok := ctx.Value(remoteIdentityKey{}).(string); ok {
+			r.ReceiptOwner = "remote:" + peer
+		}
 		return d.Execute(r, func() Response { return d.Handle(ctx, r) })
 	}
 	return d.Handle(ctx, r)
 }
+func watch(ctx context.Context, p provider.Provider, r Request) (provider.StreamBatch, error) {
+	stream, ok := p.(provider.StreamingProvider)
+	var read func(context.Context, string, string, int64) (provider.StreamBatch, error)
+	if ok {
+		read = stream.Watch
+	}
+	if probe, ok := p.(provider.StreamProber); r.Probe && ok {
+		read = probe.Probe
+	}
+	if read == nil {
+		return provider.StreamBatch{}, fmt.Errorf("此 Agent 暂不支持实时订阅")
+	}
+	if r.Turn != "" {
+		ctx = provider.WithWatchedTurn(ctx, r.Turn)
+	}
+	batch, err := read(ctx, r.Session, r.Epoch, r.After)
+	if err == nil && r.Turn != "" {
+		// Enforce the wire projection for external providers as well. Their
+		// watch implementation may deliver a broader set of events.
+		events := make([]provider.StreamEvent, 0)
+		for _, e := range batch.Events {
+			if e.Kind == "turn" && e.SessionID == r.Session && e.TurnID == r.Turn {
+				events = append(events, provider.StreamEvent{ID: e.ID, SessionID: r.Session, Kind: "turn", TurnID: r.Turn, Status: e.Status})
+			}
+		}
+		batch.Events = events
+	}
+	return batch, err
+}
+
 func (d *Dispatcher) dispatch(ctx context.Context, r Request) (any, error) {
+	if strings.HasPrefix(r.Method, "terminal.") {
+		return d.terminal(ctx, r)
+	}
 	if strings.HasPrefix(r.Method, "host.") || strings.HasPrefix(r.Method, "client.") {
 		if d.Local == nil {
 			return nil, fmt.Errorf("本机接口不可用")
@@ -136,15 +191,19 @@ func (d *Dispatcher) dispatch(ctx context.Context, r Request) (any, error) {
 		return d.Local(ctx, r)
 	}
 	if r.Method == "network" {
+		status := NetworkStatus{State: "disabled", Peers: []PeerStatus{}}
 		if d.Network != nil {
-			return d.Network(), nil
+			status = d.Network()
 		}
-		return NetworkStatus{State: "disabled", Peers: []PeerStatus{}}, nil
+		status.Platform = runtime.GOOS
+		return status, nil
 	}
 	if r.Method == "providers" {
 		statuses := []provider.Status{}
 		for id, p := range d.Providers {
 			s := p.Status(ctx)
+			s.Capabilities.Terminal = d.Terminals != nil
+			s.Capabilities.TerminalProfiles = d.Terminals != nil && terminal.SupportsProfiles
 			s.Enabled = d.ProviderEnabled == nil || d.ProviderEnabled(id)
 			if !s.Enabled && s.State != "unsupported" {
 				s.State, s.Detail = "disabled", "已关闭"
@@ -163,15 +222,7 @@ func (d *Dispatcher) dispatch(ctx context.Context, r Request) (any, error) {
 		return nil, fmt.Errorf("此 Agent 已在本机关闭")
 	}
 	if r.Method == "watch" {
-		if r.Probe {
-			if stream, ok := p.(provider.StreamProber); ok {
-				return stream.Probe(ctx, r.Session, r.Epoch, r.After)
-			}
-		}
-		if stream, ok := p.(provider.StreamingProvider); ok {
-			return stream.Watch(ctx, r.Session, r.Epoch, r.After)
-		}
-		return nil, fmt.Errorf("此 Agent 暂不支持实时订阅")
+		return watch(ctx, p, r)
 	}
 	if strings.HasPrefix(r.Method, "attachment.") {
 		if d.Assets == nil {
@@ -180,11 +231,11 @@ func (d *Dispatcher) dispatch(ctx context.Context, r Request) (any, error) {
 		if _, ok := p.(provider.AttachmentSender); !ok {
 			return nil, fmt.Errorf("此 Agent 暂不支持附件")
 		}
-		var params assets.Params
+		var params provider.AttachmentParams
 		if err := json.Unmarshal(r.Params, &params); err != nil {
 			return nil, fmt.Errorf("无效附件参数")
 		}
-		return d.Assets.Handle(ctx, assets.Scope(r.Provider, r.Session), r.Method, params)
+		return d.Assets.Handle(ctx, r.Provider+"\x00"+r.Session, r.Method, params)
 	}
 	if r.Method != "connectDesktop" {
 		s := p.Status(ctx)
@@ -232,6 +283,18 @@ func (d *Dispatcher) dispatch(ctx context.Context, r Request) (any, error) {
 		// Never transfer history, tool output or attachments for task polling.
 		return provider.Turn{ID: r.Turn, Status: state.Status}, nil
 	case "transcript":
+		if r.HistoryItems != 0 {
+			if r.HistoryItems < 1 || r.HistoryItems > 100 {
+				return nil, fmt.Errorf("无效的消息分页大小")
+			}
+			ctx = provider.WithHistoryItems(ctx, r.HistoryItems)
+		}
+		if r.RecentTurns != 0 {
+			if r.Cursor != "" || r.RecentTurns < 1 || r.RecentTurns > 30 {
+				return nil, fmt.Errorf("无效的最近对话轮数")
+			}
+			ctx = provider.WithRecentTurns(ctx, r.RecentTurns)
+		}
 		if !r.Progress {
 			return p.Transcript(ctx, r.Session, r.Cursor)
 		}

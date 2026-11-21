@@ -7,7 +7,7 @@ import (
 )
 
 // Layout depends only on the available viewport, never the platform or OS.
-// Compact uses a page stack; larger viewports keep the unified directory
+// Compact uses an overlay drawer; larger viewports keep the unified directory
 // next to the conversation. The wide breakpoint only tunes content styling.
 const (
 	compactBreakpoint core.Points = 650

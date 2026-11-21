@@ -18,15 +18,23 @@ There is no `/v1` or `/v2` fallback. All connectivity endpoints share `/p2p/`.
 
 JSON HTTP endpoints use POST (config also accepts GET). Identity tokens are opaque random bearer credentials. Browser WebSocket authentication uses subprotocols `reign.p2p` and `auth.<base64url(token)>`. Tokens are never placed in query strings.
 
-The signal welcome assigns a peer, protocol `1`, `allowRelay` and a short signed grant. When permitted, a sender attaches a relay socket with that signal peer. Business frames arriving on relay are delivered to the recipient's signal socket, keeping a single read stream and peer namespace. The recipient does not need a second read loop for business traffic.
+The signal welcome assigns a peer, protocol `1`, `allowRelay` and a short signed grant. When permitted, a sender attaches a relay socket with that signal peer. WebSocket business frames arriving on that relay are delivered to the recipient's signal socket, keeping a single read stream and peer namespace. Native relay connections carry data in both directions.
 
 The room injects authenticated controller identity and signed grant into forwarded frames. Caller-supplied identity/grants are ignored. Signal sockets accept only hello, signal and renewal; business frames cannot be moved onto that free ingress. Signal size and rate are bounded. Idle heartbeat replies bypass Durable Object JavaScript; client-driven lease renewal wakes it only periodically.
+
+The encrypted `network` response includes the host's optional `platform`
+(Go OS name). Native and browser controllers retain it with the verified
+pairing for offline display. Older hosts may omit this field.
 
 Pairing uses X25519, HKDF-SHA256 salt `reign/pairing`, AES-256-GCM with per-message random nonce and domain-separated context. A PSK-authenticated hello exchanges fresh nonces; session keys bind PSK, peer and both nonces. Data has directional counter nonces, authenticated context, replay protection and bounded 4,096-byte chunk reassembly. Mutations are never transparently retried after uncertain delivery.
 
 Lease format is `base64url(JSON).base64url(Ed25519 signature)` signed over `reign/grant/v1/<payload>`. Grants bind service namespace, host, controller, role, expiry, product families and connect/relay scopes. Native controlled hosts obtain the verification key from their configured service and verify grants on RPC dispatch **and response**, including direct transports. Missing/expired grants deny remote operations without terminating local Agent work. Nil product list means unrestricted self-hosted use; an empty list means no Agent access.
 
-A paid entitlement enables fallback, rather than forcing relay use. Native clients continuously negotiate WebRTC/UDP and TCP; browsers negotiate WebRTC. Connection loss ends associated peer lifetimes and reconnect begins with fresh handshake randomness. Transcript watch cursors reset to a full snapshot on epoch/replay-window changes; ordinary updates are incremental.
+Both native peers advertise optional `native`, `quic` and `nativeRelay` flags in the encrypted hello. The host responds with their intersection. Native direct paths prefer QUIC over a UDP ICE candidate pair, then authenticated TCP. ICE credentials and candidates travel in encrypted signals. Direct QUIC uses mutually pinned TLS 1.3 identities derived from the fresh pairing session. Peers without native negotiation retain WebRTC and authorized WebSocket relay. A healthy direct session can survive signaling loss while its authorization remains valid.
+
+A Go or Worker signal welcome can include `nativeRelay: {address, pin, ticket}` for an authorized native socket. A shared address serves both transports. For split or single-transport endpoints the welcome supplies `udpAddress` for QUIC and/or `tcpAddress` for TLS/TCP in place of `address`. Both peers receive the same relay pin. Each leg tries only its available transports, in QUIC then TCP order, with ALPN `reign-native/1`. The pin is the base64url Ed25519 public key. Each leg verifies it before sending its generation-scoped ticket. The first control record identifies the host ID, controller peer, local role and ticket. The relay acknowledges both matched legs with `ready` after both roles are admitted. Local Go connections close with their signal sockets. Neither device supplies a destination IP to the relay. An external Go relay calls its configured control origin with `POST /p2p/native-relay/lease`. The JSON body contains `host`, controller `peer`, `hostTicket` and `clientTicket`. The node includes its registered `X-Reign-Relay-Pin` and a base64url Ed25519 `X-Reign-Relay-Signature` over the UTF-8 prefix `reign/native-relay/lease/v1\n` followed by the exact request body. A valid pair of current signal tickets assigned to that pin receives `{"validFor":60}` or a shorter remaining lease in seconds. The node renews once per active pair. Denial or a failed renewal closes the data path, bounding stale authorization to 60 seconds. The node uses HTTPS in production and disallows redirects. Browsers and WebSocket data sockets receive no native ticket.
+
+Each relay leg tries QUIC and can fall back to TLS/TCP independently. Existing WebSocket relay remains available when permitted. Native records contain a one-byte lane, a big-endian uint16 body length and at most 32 KiB of payload. QUIC opens two bidirectional streams in order, each prefixed by its one-byte lane index. Lane 0 carries control and ordinary messages, lane 1 carries bulk data. TLS/TCP multiplexes both record types on one stream. Application payloads retain their authenticated device-to-device chunk framing. Progressive transcript responses between negotiated native peers carry a per-request sequence starting at 1, including the final success. The receiving inbox withholds out-of-order fragments within its existing byte and count limits.
 
 ## Encrypted RPC version 3
 
@@ -68,10 +76,18 @@ boundary. Busy and unsupported sessions are rejected; an ambiguous completion
 returns `WRITE_OUTCOME_UNKNOWN`. Controllers reconcile the directory instead of
 replaying this write. These endpoint fields remain opaque to both service runtimes.
 
-Directory reconciliation transfers session metadata deltas. Opening a Codex
-conversation loads its latest 30 turns; steady state uses watch events. Plain
-user messages do not trigger a history snapshot. Android monitors only the state
-of known running tasks through `turn.status`, never their transcript contents.
+Directory reconciliation transfers session metadata deltas. For an opening
+`transcript` request, `recentTurns` is an optional hint from 1 to 30 for
+turn-paginated sources. The remote controller requests the latest four turns.
+Remote controllers additionally request `historyItems: 50` on open and continuation. Codex honors a limit of 1–100 records, counting empty turns as a record. A partial first turn is identified by `partialTurn`. An opaque continuation preserves the source, session, turn and last owed item, allowing older parts of the same turn to be fetched on scroll. The default without the hint remains turn-based. A cached remote page can be revalidated with its existing snapshot revision. Managed Providers use their row and byte budgets.
+
+A regular `watch` returns events for the selected session. The optional `turn`
+field requests only that turn's lifecycle events with ID, session ID, turn ID,
+kind and status. Both modes preserve epoch, cursor, resets and heartbeats.
+Built-in Providers hold the long poll through unrelated traffic. On Android a
+background task uses this scoped watch and reconciles on reset or heartbeat
+with `turn.status`. Codex requests turn headers for that read. Plain user
+messages do not trigger a history snapshot.
 History is reread for initial loading, replay-epoch gaps, explicit older pages,
 and attachment import events that require an authoritative snapshot.
 
@@ -120,6 +136,48 @@ metadata carries the queue once; subsequent text fragments may omit it.
 Assemblers preserve it, cache content with its watch cursor, and replay newer
 queue events over a delayed history snapshot. No new mutation or public service
 route is introduced. Go relay and Worker room continue forwarding opaque frames.
+
+## Desktop terminal endpoint operations
+
+`providers[].capabilities.terminal` advertises a desktop host engine. Terminal
+requests include the existing `provider` and `session` scope. Params contain a
+client-generated 64-hex-character `id`, optional `attachment` token, `after`
+output sequence, `inputSeq`, base64 `data` bytes, and `size` with integer `cols`,
+`rows`, `cellWidth`, `cellHeight` (pixel dimensions may be zero/unknown).
+
+- `terminal.open` resolves the cwd on the host, reserves the ID and starts the
+  user's shell, or attaches to an existing shell with that ID and owner.
+- Desktop hosts with shell discovery advertise `providers[].capabilities.terminalProfiles`.
+  `terminal.profiles` takes no params and returns an array of `{id, name}`
+  for the authorized host. This cancellable read bypasses caches.
+- `terminal.openProfile` takes the same params as open plus a required
+  `profile` ID. For a new process the host resolves that ID against its
+  current installations. An unknown or removed profile fails explicitly.
+  Controllers use `terminal.open` for the default shell.
+- `terminal.attach` creates a fresh attachment and returns a reset screen.
+- `terminal.read` acknowledges `after` and waits up to 15 seconds for a change.
+  It is cancellable, but not cacheable or conditionally hashed.
+- `terminal.input` accepts exactly the next input sequence; duplicates are
+  rejected. Controllers never automatically replay input.
+- `terminal.resize`, `terminal.detach` and `terminal.close` resize, detach the
+  reader, and explicitly terminate respectively. Detach does not stop a shell.
+
+Both open methods, attach and read return `{id, attachment, sequence, data?, size, exited, exitCode}`.
+`data` contains official NSGo Mirror VT bytes. Input, resize, detach and close return null.
+Exit code is meaningful only when exited. Sequence acknowledgement retains
+lost frames; an attachment change requires a reset, never a delta from an old
+receiver. `TERMINAL_UNSUPPORTED`, `TERMINAL_DENIED`, `TERMINAL_GONE` and
+`TERMINAL_DETACHED` distinguish unavailable capability, local host consent,
+missing process and a replaced attachment. Terminals are scoped by trusted
+transport identity, Provider and conversation. Existing grants apply on direct
+and relay paths; local-only `host.terminal.enabled` persists additional consent.
+
+Terminal reads have four independent slots per peer and terminal output uses
+bulk transport priority, leaving ordinary navigation and Agent operations free.
+Terminal payloads bypass durable mutation receipts. Both Go relay and Worker
+room already forward these endpoint operations opaquely; no public service
+route, grant schema, storage or RPC framing version changes are required.
+See [ownership, limits and recovery](../../internal/terminal/README.md).
 
 ## Session directory metadata
 

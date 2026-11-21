@@ -40,6 +40,78 @@ func TestMobileMultilineMessage320(t *testing.T) { testMobileMultilineMessage(t,
 func TestMobileMultilineMessage390(t *testing.T) { testMobileMultilineMessage(t, 390) }
 func TestMobileMultilineMessage720(t *testing.T) { testMobileMultilineMessage(t, 720) }
 
+func TestReadingPositionWhileReplyGrows(t *testing.T) {
+	f := &delayedSendAPI{demoAPI: newDemoAPI(), release: make(chan struct{})}
+	reply := strings.Repeat("A line of the reply.\n\n", 50)
+	transcript := func() Object {
+		return outgoingTranscript(Object{"id": "answer", "role": "assistant", "text": reply})
+	}
+	app, s := conversationFixture(t, f, 390, transcript(), true)
+	const list = "id:chat-message-list"
+	assertBottom := func() {
+		t.Helper()
+		app.WaitUntil(time.Second, func() bool {
+			v := app.Find(list)
+			return v.Content.Height > v.Frame.Size.Height && v.Content.Height-v.Frame.Size.Height-v.Offset.Y <= 1 && !app.Exists("id:jump-to-latest")
+		})
+	}
+	grow := func() {
+		t.Helper()
+		before := app.Find(list).Content.Height
+		app.Post(func() {
+			reply += strings.Repeat("More streamed text.\n\n", 4)
+			s.setTranscript(transcript())
+		})
+		app.WaitUntil(time.Second, func() bool { return app.Find(list).Content.Height > before })
+		app.Settle()
+	}
+	assertBottom()
+	app.Scroll(list, -12)
+	location := func() core.Points { return globalBounds(app.Find("id:message-turn|answer")).Origin.Y }
+	before := location()
+	grow()
+	if after := location(); after != before {
+		t.Fatalf("streaming moved the paragraph being read by %g points", after-before)
+	}
+	app.WaitFor("id:jump-to-latest", time.Second)
+
+	app.Post(func() {
+		page := transcript()
+		older := Object{"id": "older", "status": "completed", "items": []Object{
+			{"id": "user", "role": "user", "text": "Earlier instruction"},
+			{"id": "reply", "role": "assistant", "text": strings.Repeat("Earlier reply.\n\n", 30)},
+		}}
+		page["turns"] = append([]Object{older}, objects(page["turns"])...)
+		s.setTranscript(page)
+	})
+	app.Settle()
+	if after := location(); after != before {
+		t.Fatalf("loading earlier history moved the paragraph being read by %g points", after-before)
+	}
+	app.Find("id:jump-to-latest")
+
+	app.Scroll(list, app.Find(list).Content.Height)
+	// Native trackpad steps round to whole points. Finish the gesture if it
+	// stopped just short of the bottom.
+	if v := app.Find(list); v.Content.Height-v.Frame.Size.Height-v.Offset.Y > 1 {
+		app.Scroll(list, v.Content.Height)
+	}
+	assertBottom()
+	grow()
+	assertBottom()
+	app.Scroll(list, -80)
+	before = location()
+	app.Type("id:chat-input", "My follow-up")
+	if after := location(); after != before {
+		t.Fatalf("typing moved the reading position by %g points", after-before)
+	}
+	app.Press("id:send-message")
+	app.WaitFor("id:send-loading", time.Second)
+	assertBottom()
+	grow()
+	assertBottom()
+}
+
 func TestSendingLongMessageAndJumpToLatestReachTheBottom(t *testing.T) {
 	f := &delayedSendAPI{demoAPI: newDemoAPI(), release: make(chan struct{})}
 	app, s := conversationFixture(t, f, 390, Object{}, true)
@@ -60,7 +132,7 @@ func TestSendingLongMessageAndJumpToLatestReachTheBottom(t *testing.T) {
 	app.Post(func() { s.cx.Post(func() { s.draft.Set("下一条草稿\n第二行\n第三行") }) })
 	app.Settle()
 	app.WaitUntil(time.Second, func() bool { return !app.Exists("id:jump-to-latest") })
-	app.Post(func() { s.cx.Post(func() { s.timeline.ScrollTo(core.Point{}, false) }) })
+	app.Post(func() { s.cx.Post(func() { s.timeline.list.ScrollTo(core.Point{}, false) }) })
 	app.Settle()
 	app.WaitFor("id:jump-to-latest", time.Second)
 	jump := app.Find("id:jump-to-latest")
@@ -206,6 +278,9 @@ func TestSendFailureStopsLoadingAndKeepsMessage(t *testing.T) {
 		t.Fatal("submitted draft was not moved to the timeline")
 	}
 	app.Find("text:这条消息不能丢")
+	app.Find("id:error-banner")
+	app.Press("id:dismiss-error")
+	// Dismissing the operation error must retain the failed message status.
 	app.Find("text:发送失败")
 }
 

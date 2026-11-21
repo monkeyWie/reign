@@ -1,74 +1,96 @@
 package hubui
 
 import (
+	"strings"
+
+	"github.com/monkeyWie/reignhub/clients/nsgo/hubui/locales"
 	"github.com/nsgo-dev/nsgo/base"
 	"github.com/nsgo-dev/nsgo/core"
-	"strings"
+	"github.com/nsgo-dev/nsgo/icons/lucide"
 )
 
-// The compact workspace has one aggregate list and one conversation page.
-func (s *State) phonePages(cx *core.Scope) core.Node {
-	nav := base.NewNav(cx, "sessions")
-	s.phoneNav = nav
-	cx.Effect(func() {
-		routes := nav.Routes()
-		s.phoneRoute.Set(routes[len(routes)-1])
-		if nav.Depth() > 0 {
-			s.clearRootBack()
+// Compact screens keep one content pane. The directory is an overlay, so
+// opening navigation does not replace the editor, transcript or subscription.
+func (s *State) compactWorkspace(cx *core.Scope) core.Node {
+	selection := core.NewMemo(cx, func() string {
+		s.read()
+		if s.selected == nil {
+			return ""
 		}
+		return s.key()
 	})
-	cx.Cleanup(func() {
-		if s.phoneNav == nav {
-			s.phoneNav = nil
-			s.phoneRoute.Set("")
-		}
-	})
-	if s.narrowChat && s.selected != nil {
-		nav.Push("chat:" + s.key())
-	}
-	return nav.Stack(fill, func(cx *core.Scope, route string, _ func() int) base.NavPage {
-		page := base.NavPage{TestID: "page-" + strings.Split(route, ":")[0], HeaderHidden: true, Style: fill}
-		if route == "sessions" {
-			page.Children = []core.Node{s.directory(cx)}
-		} else {
-			page.Children = []core.Node{s.conversation(cx, true)}
-			page.OnDismiss = func() { s.rememberDraft(); s.narrowChat = false; s.changed() }
-		}
-		return page
-	})
+	cx.Cleanup(func() { s.mobileSidebarOpen.Set(false) })
+	return core.View{TestID: "compact-workspace", Style: fill, Children: []core.Node{
+		core.Dynamic(func(cx *core.Scope) core.Node {
+			selection.Get()
+			return core.Untracked(cx, func() core.Node {
+				if s.selected != nil {
+					return s.conversation(cx, true)
+				}
+				return core.View{Style: fill, Children: []core.Node{
+					core.View{TestID: "compact-home-header", Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 12, Padding: core.Symmetric(8, 12), FlexShrink: 0}, Children: []core.Node{s.mobileMenuButton(cx), s.brand(cx, 16, false)}},
+					s.home(cx),
+				}}
+			})
+		}),
+		base.Sheet{TestID: "mobile-sidebar", Label: locales.For(cx).ShowSidebar(), Side: core.PlaceLeft,
+			Open: s.mobileSidebarOpen.Get,
+			OnOpenChange: func(open bool, _ base.Reason) {
+				if !open {
+					s.closeMobileSidebar()
+				}
+			},
+			BackdropStyle:  core.Style{Background: core.RGB(0x000000).Faded(.35)},
+			PopupStyle:     core.Style{Width: core.Pt(320), MaxWidth: core.Pct(88), Height: core.Pct(100)},
+			PopupStyleFunc: func() core.Style { return core.Style{Background: palette(cx).sidebar} },
+			Children:       []core.Node{core.View{Style: fill.Merge(core.Style{PaddingEnv: core.EnvEdges{Top: core.EnvSafeArea, Bottom: core.EnvSafeArea, Left: core.EnvSafeArea}}), Children: []core.Node{s.directory(cx)}}},
+		},
+	}}
 }
-func (s *State) showPhoneSessions() {
-	s.narrowChat = false
-	if s.phoneNav != nil {
-		s.phoneNav.SetRoutesKeeping(func(a, b string) bool { return a == b }, "sessions")
+
+func (s *State) mobileMenuButton(cx *core.Scope) core.Node {
+	v := labelledIconButton(cx, "mobile-menu", locales.For(cx).ShowSidebar(), lucide.Menu, s.openMobileSidebar).(core.View)
+	v.Expanded = s.mobileSidebarOpen.Get
+	v.Style.Width, v.Style.Height, v.Style.MinHeight = core.Pt(44), core.Pt(44), core.Pt(44)
+	return v
+}
+
+func (s *State) openMobileSidebar() {
+	s.clearRootBack()
+	s.cx.DismissKeyboard()
+	s.mobileSidebarOpen.Set(true)
+}
+
+func (s *State) closeMobileSidebar() {
+	s.mobileSidebarOpen.Set(false)
+	s.clearRootBack()
+	if s.selected != nil {
+		s.markSessionRead(s.selected)
+		s.changed()
 	}
 }
-func (s *State) showPhoneChat() {
-	if s.phoneNav != nil {
-		s.phoneNav.SetRoutesKeeping(func(a, b string) bool { return a == b }, "sessions", "chat:"+s.key())
-	}
+
+func (s *State) conversationVisible() bool {
+	return s.selected != nil && (!s.narrowLayout() || !s.mobileSidebarOpen.Get())
 }
-func (s *State) backSessions() {
+
+func (s *State) showHome() {
+	s.cancelSessionEntry()
 	s.restoreSession = nil
 	s.persistDraft()
 	s.rememberDraft()
-	s.narrowChat = false
-	if s.phoneNav != nil {
-		s.phoneNav.PopToRoot()
-	} else {
-		s.rememberSession()
-		if s.watchCancel != nil {
-			s.watchCancel()
-		}
-		s.sessionGeneration++
-		s.selected, s.transcript = nil, nil
-		s.messageRows, s.approvals, s.uploads = nil, nil, nil
-		s.transcriptSyncing, s.transcriptLoading = false, false
-		s.draft.Set("")
+	s.rememberSession()
+	if s.watchCancel != nil {
+		s.watchCancel()
 	}
+	s.sessionGeneration++
+	s.selected, s.transcript = nil, nil
+	s.messageRows, s.approvals, s.uploads = nil, nil, nil
+	s.transcriptSyncing, s.transcriptLoading = false, false
+	s.draft.Set("")
+	s.closeMobileSidebar()
 	s.changed()
 }
-func (s *State) backDevices() { s.backSessions() }
 func deviceName(d Object) string {
 	if n := strings.TrimSpace(str(d, "name")); n != "" && n != "RAS" {
 		return n

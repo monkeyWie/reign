@@ -101,8 +101,7 @@ func TestWorkSummaryAfterTerminalEventAndLateFinalItem(t *testing.T) {
 	if len(rows) != 3 || rows[1].Role != "work" || rows[2].Text != "Complete final response" {
 		t.Fatalf("late authoritative answer lost: %+v", rows)
 	}
-	slices.Reverse(rows)
-	preview := navigationPreview(rows, messageNavigationTarget{"t|u", 2})
+	preview := navigationPreview(rows, messageNavigationTarget{id: "t|u", row: 0})
 	if preview.response != "Complete final response" {
 		t.Fatal("navigation preview used process commentary", preview)
 	}
@@ -229,4 +228,31 @@ func TestSteeringUsesOneWorkSummaryAndKeepsPendingOrder(t *testing.T) {
 	app.Press("id:work-toggle-t|work|t|progress")
 	app.Find("text:正在调整附件下载交互。")
 	app.Find("text:已收到补充，正在检查。")
+}
+
+func TestCompactionAppearsBetweenProcessGroups(t *testing.T) {
+	turn := Object{"id": "turn", "status": "inProgress", "items": []Object{
+		{"id": "cmd", "role": "tool", "type": "commandExecution"},
+		{"id": "compact", "role": "system", "type": "contextCompaction", "text": "PRIVATE_SUMMARY_SENTINEL"},
+		{"id": "cmd2", "role": "tool", "type": "commandExecution"},
+		{"id": "reply", "role": "assistant", "text": "继续处理下一条消息。"},
+	}}
+	transcript := Object{"turns": []Object{turn}}
+	app, s := conversationFixture(t, newDemoAPI(), 900, transcript, true)
+	app.Find("id:message-turn|compact")
+	app.Post(func() {
+		s.cx.Post(func() {
+			final := copyObject(turn)
+			final["status"] = "completed"
+			s.setTranscript(Object{"turns": []Object{final}})
+		})
+	})
+	app.WaitFor("id:work-toggle-turn|work|turn|tools|cmd2", time.Second)
+	before := globalBounds(app.Find("id:work-toggle-turn|work|turn|tools|cmd")).Origin.Y
+	marker := globalBounds(app.Find("id:message-turn|compact")).Origin.Y
+	after := globalBounds(app.Find("id:work-toggle-turn|work|turn|tools|cmd2")).Origin.Y
+	if !(before < marker && marker < after) || app.Exists("text:PRIVATE_SUMMARY_SENTINEL") {
+		t.Fatal("compaction moved into a disclosure or exposed its payload")
+	}
+	app.Screenshot("conversation-context-compaction")
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/monkeyWie/reignhub/pkg/appdb"
 	"log"
 	"path/filepath"
 	"sync"
@@ -20,6 +21,7 @@ import (
 	"github.com/monkeyWie/reignhub/internal/provider"
 	"github.com/monkeyWie/reignhub/internal/store"
 	"github.com/monkeyWie/reignhub/internal/syncstate"
+	"github.com/monkeyWie/reignhub/internal/terminal"
 )
 
 // Embedded runs the host in the caller's process. Calls go straight to the
@@ -37,12 +39,12 @@ type Embedded struct {
 	closeErr   error
 }
 
-func StartEmbedded(ctx context.Context, c config.Config) (*Embedded, error) {
+func StartEmbedded(ctx context.Context, c config.Config, factories ...terminal.Factory) (*Embedded, error) {
 	key, err := config.AccessKey(c.DataDir)
 	if err != nil {
 		return nil, err
 	}
-	attachments := assets.New(filepath.Join(c.DataDir, "attachments"))
+	attachments := assets.NewInDatabase(filepath.Join(c.DataDir, "attachments"), appdb.Path(c.DataDir))
 	backend := codex.New(c, key, events.New(), attachments)
 	providers := map[string]provider.Provider{"codex-app": backend}
 	closers := []func() error{backend.Close}
@@ -55,24 +57,31 @@ func StartEmbedded(ctx context.Context, c config.Config) (*Embedded, error) {
 		providers[id] = p
 		closers = append(closers, p.Close)
 	}
-	r, err := startEmbedded(ctx, c, providers, attachments)
+	var factory terminal.Factory
+	if len(factories) > 0 {
+		factory = factories[0]
+	}
+	r, err := startEmbeddedWithTerminals(ctx, c, providers, factory, attachments)
 	if err != nil {
 		for _, close := range closers {
 			_ = close()
 		}
 		return nil, err
 	}
-	r.closers = closers
+	r.closers = append(r.closers, closers...)
 	return r, nil
 }
 
 func startEmbedded(ctx context.Context, c config.Config, providers map[string]provider.Provider, stores ...*assets.Store) (*Embedded, error) {
-	db, err := store.Open(filepath.Join(c.DataDir, "host.db"))
+	return startEmbeddedWithTerminals(ctx, c, providers, nil, stores...)
+}
+func startEmbeddedWithTerminals(ctx context.Context, c config.Config, providers map[string]provider.Provider, factory terminal.Factory, stores ...*assets.Store) (*Embedded, error) {
+	db, err := store.Open(appdb.Path(c.DataDir))
 	if err != nil {
 		return nil, err
 	}
 	life, cancel := context.WithCancel(ctx)
-	attachments := assets.New(filepath.Join(c.DataDir, "attachments"))
+	attachments := assets.NewInDatabase(filepath.Join(c.DataDir, "attachments"), appdb.Path(c.DataDir))
 	if len(stores) > 0 {
 		attachments = stores[0]
 	}
@@ -85,6 +94,10 @@ func startEmbedded(ctx context.Context, c config.Config, providers map[string]pr
 	d.Local = manager.Local
 	d.Network = manager.Network
 	r := &Embedded{Dispatcher: d, ctx: life, cancel: cancel, done: make(chan struct{}), db: db}
+	if factory != nil {
+		d.Terminals = terminal.New(life, factory)
+		r.closers = append(r.closers, d.Terminals.Close)
+	}
 	go func() { defer close(r.done); manager.Run(life) }()
 	return r, nil
 }

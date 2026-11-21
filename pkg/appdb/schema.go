@@ -1,0 +1,50 @@
+package appdb
+
+const schema = `
+PRAGMA auto_vacuum=INCREMENTAL;
+PRAGMA journal_mode=WAL;
+BEGIN IMMEDIATE;
+CREATE TABLE IF NOT EXISTS settings (k TEXT PRIMARY KEY, v BLOB NOT NULL);
+CREATE TABLE IF NOT EXISTS host_sessions(scope TEXT NOT NULL,id TEXT NOT NULL,value BLOB NOT NULL,PRIMARY KEY(scope,id));
+CREATE TABLE IF NOT EXISTS directory_changes(seq INTEGER PRIMARY KEY AUTOINCREMENT,scope TEXT NOT NULL,id TEXT NOT NULL,value BLOB,deleted INTEGER NOT NULL DEFAULT 0);
+CREATE INDEX IF NOT EXISTS changes_by_provider ON directory_changes(scope,seq);
+CREATE TABLE IF NOT EXISTS command_receipts(owner TEXT,id TEXT,request BLOB NOT NULL,response BLOB,state TEXT NOT NULL,PRIMARY KEY(id)) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS history_heads(env TEXT,provider TEXT,session TEXT,revision TEXT NOT NULL,metadata BLOB NOT NULL,PRIMARY KEY(env,provider,session)) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS turns(env TEXT,provider TEXT,session TEXT,turn TEXT,position INTEGER NOT NULL,metadata BLOB NOT NULL,PRIMARY KEY(env,provider,session,turn),FOREIGN KEY(env,provider,session) REFERENCES history_heads(env,provider,session) ON DELETE CASCADE) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS messages(env TEXT,provider TEXT,session TEXT,turn TEXT,item TEXT,position INTEGER NOT NULL,value BLOB NOT NULL,PRIMARY KEY(env,provider,session,turn,item),FOREIGN KEY(env,provider,session,turn) REFERENCES turns(env,provider,session,turn) ON DELETE CASCADE) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS turn_order ON turns(env,provider,session,position);
+CREATE INDEX IF NOT EXISTS message_order ON messages(env,provider,session,turn,position);
+CREATE TABLE IF NOT EXISTS sessions(env TEXT,provider TEXT,id TEXT,value BLOB NOT NULL,PRIMARY KEY(env,provider,id)) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS directory_heads(env TEXT,provider TEXT,epoch TEXT NOT NULL,cursor INTEGER NOT NULL,PRIMARY KEY(env,provider)) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS removed_sessions(provider TEXT,session TEXT,PRIMARY KEY(provider,session)) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS drafts(env TEXT,provider TEXT,session TEXT,text TEXT,model TEXT,base TEXT,PRIMARY KEY(env,provider,session)) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS draft_blobs(env TEXT,provider TEXT,session TEXT,hash TEXT,content BLOB NOT NULL,PRIMARY KEY(env,provider,session,hash)) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS draft_files(env TEXT,provider TEXT,session TEXT,position INTEGER,name TEXT,mime TEXT,hash TEXT,size INTEGER,PRIMARY KEY(env,provider,session,position),FOREIGN KEY(env,provider,session,hash) REFERENCES draft_blobs(env,provider,session,hash)) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS identities(service TEXT,role TEXT,value BLOB NOT NULL,PRIMARY KEY(service,role)) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS host_grants(service TEXT,client TEXT,value BLOB NOT NULL,PRIMARY KEY(service,client)) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS environments(env TEXT PRIMARY KEY,value BLOB NOT NULL);
+CREATE TABLE IF NOT EXISTS environment_routes(peer TEXT PRIMARY KEY,env TEXT UNIQUE NOT NULL);
+CREATE TABLE IF NOT EXISTS forgotten(env TEXT PRIMARY KEY);
+CREATE TRIGGER IF NOT EXISTS guard_environments BEFORE INSERT ON environments WHEN EXISTS(SELECT 1 FROM forgotten WHERE env=NEW.env) BEGIN SELECT RAISE(ABORT,'environment forgotten'); END;
+CREATE TRIGGER IF NOT EXISTS guard_history_heads BEFORE INSERT ON history_heads WHEN EXISTS(SELECT 1 FROM forgotten WHERE env=NEW.env) BEGIN SELECT RAISE(ABORT,'environment forgotten'); END;
+CREATE TRIGGER IF NOT EXISTS guard_sessions BEFORE INSERT ON sessions WHEN EXISTS(SELECT 1 FROM forgotten WHERE env=NEW.env) BEGIN SELECT RAISE(ABORT,'environment forgotten'); END;
+CREATE TRIGGER IF NOT EXISTS guard_directory_heads BEFORE INSERT ON directory_heads WHEN EXISTS(SELECT 1 FROM forgotten WHERE env=NEW.env) BEGIN SELECT RAISE(ABORT,'environment forgotten'); END;
+CREATE TRIGGER IF NOT EXISTS guard_drafts BEFORE INSERT ON drafts WHEN EXISTS(SELECT 1 FROM forgotten WHERE env=NEW.env) BEGIN SELECT RAISE(ABORT,'environment forgotten'); END;
+CREATE TRIGGER IF NOT EXISTS guard_draft_files BEFORE INSERT ON draft_files WHEN EXISTS(SELECT 1 FROM forgotten WHERE env=NEW.env) BEGIN SELECT RAISE(ABORT,'environment forgotten'); END;
+CREATE TRIGGER IF NOT EXISTS guard_draft_blobs BEFORE INSERT ON draft_blobs WHEN EXISTS(SELECT 1 FROM forgotten WHERE env=NEW.env) BEGIN SELECT RAISE(ABORT,'environment forgotten'); END;
+CREATE TABLE IF NOT EXISTS read_state(env TEXT,provider TEXT,session TEXT,kind TEXT,PRIMARY KEY(env,provider,session,kind)) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS providers(env TEXT,provider TEXT,session TEXT,position INTEGER,value BLOB,PRIMARY KEY(env,provider,session,position)) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS models(env TEXT,provider TEXT,session TEXT,position INTEGER,value BLOB,PRIMARY KEY(env,provider,session,position)) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS approval_previews(env TEXT,provider TEXT,session TEXT,position INTEGER,value BLOB,PRIMARY KEY(env,provider,session,position)) WITHOUT ROWID;
+CREATE TRIGGER IF NOT EXISTS guard_read_state BEFORE INSERT ON read_state WHEN EXISTS(SELECT 1 FROM forgotten WHERE env=NEW.env) BEGIN SELECT RAISE(ABORT,'environment forgotten'); END;
+CREATE TABLE IF NOT EXISTS download_cache(env TEXT,key TEXT,file TEXT NOT NULL,size INTEGER NOT NULL,touched INTEGER NOT NULL,PRIMARY KEY(env,key)) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS download_lru ON download_cache(touched);
+CREATE TRIGGER IF NOT EXISTS guard_download BEFORE INSERT ON download_cache WHEN EXISTS(SELECT 1 FROM forgotten WHERE env=NEW.env) BEGIN SELECT RAISE(ABORT,'environment forgotten'); END;
+CREATE TABLE IF NOT EXISTS host_assets(id TEXT PRIMARY KEY,scope TEXT NOT NULL,value BLOB NOT NULL);
+CREATE TABLE IF NOT EXISTS host_uploads(id TEXT PRIMARY KEY,scope TEXT NOT NULL,created INTEGER NOT NULL,value BLOB NOT NULL);
+CREATE TABLE IF NOT EXISTS outgoing_messages(env TEXT,provider TEXT,session TEXT,id TEXT,ref TEXT,position INTEGER,value BLOB,PRIMARY KEY(env,provider,session,id,ref)) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS outgoing_matches(env TEXT,provider TEXT,session TEXT,id TEXT,ref TEXT,position INTEGER,value BLOB,PRIMARY KEY(env,provider,session,id,ref)) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS queued_messages(env TEXT,provider TEXT,session TEXT,id TEXT,ref TEXT,position INTEGER,value BLOB,PRIMARY KEY(env,provider,session,id,ref)) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS message_anchors(env TEXT,provider TEXT,session TEXT,turn TEXT,item TEXT,row_id TEXT,preview TEXT,position INTEGER,PRIMARY KEY(env,provider,session,turn,item),FOREIGN KEY(env,provider,session,turn,item) REFERENCES messages(env,provider,session,turn,item) ON DELETE CASCADE) WITHOUT ROWID;
+PRAGMA user_version=1;
+COMMIT;`

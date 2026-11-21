@@ -10,7 +10,8 @@ import {
   type Decision,
 } from "@reignhub/protocol";
 import { devices, type DeviceRow } from "./schema";
-import { id, issueGrant } from "./crypto";
+import { externalRelays } from "./external-relay";
+import { id, issueGrant, random } from "./crypto";
 import { unrestricted, type CoreEnv, type Policy } from "./types";
 import { body, canAccess, fail, json } from "./index";
 interface SocketState {
@@ -24,6 +25,7 @@ interface SocketState {
   grant: string;
   expires: number;
   allowRelay: boolean;
+  nativeRelay?: Frame["nativeRelay"];
   window: number;
   count: number;
   bytes: number;
@@ -132,6 +134,39 @@ export class ReignHubRoom extends DurableObject<CoreEnv> {
       const url = new URL(request.url);
       if (url.hostname === "room.internal") {
         const input = await body(request);
+        if (url.pathname === "/native-lease") {
+          const hostSocket = this.host();
+          const host = hostSocket && this.state(hostSocket);
+          const client = this.sockets("client")
+            .map((ws) => this.state(ws))
+            .find((c) => c?.peer === input.peer);
+          const now = Math.floor(Date.now() / 1000);
+          if (
+            !host?.nativeRelay ||
+            !client?.nativeRelay ||
+            host.host !== input.host ||
+            host.generation !== client.generation ||
+            !host.allowRelay ||
+            !client.allowRelay ||
+            Math.min(host.expires, client.expires) <= now ||
+            host.nativeRelay.pin !== input.pin ||
+            client.nativeRelay.pin !== input.pin ||
+            host.nativeRelay.ticket !== input.hostTicket ||
+            client.nativeRelay.ticket !== input.clientTicket
+          )
+            throw new APIError("RELAY_DENIED", "中继验证失败", 403);
+          if (this.policy !== unrestricted) {
+            const decisions = await Promise.all([
+              this.decision(host, "relay"),
+              this.decision(client, "relay"),
+            ]);
+            if (decisions.some((decision) => !decision.limits.allowRelay))
+              throw new APIError("RELAY_DENIED", "中继验证失败", 403);
+          }
+          return json({
+            validFor: Math.min(60, host.expires - now, client.expires - now),
+          });
+        }
         if (url.pathname === "/online") return json({ online: !!this.host() });
         if (url.pathname === "/revoke") {
           for (const ws of this.sockets("client"))
@@ -171,7 +206,11 @@ export class ReignHubRoom extends DurableObject<CoreEnv> {
         });
         if (!signal)
           throw new APIError("SIGNAL_REQUIRED", "请先建立信令连接", 409);
-        state = { ...this.state(signal)!, route: "relay" };
+        state = {
+          ...this.state(signal)!,
+          nativeRelay: undefined,
+          route: "relay",
+        };
         const decision = await this.decision(state, "relay");
         if (!decision.limits.allowRelay)
           throw new APIError(
@@ -183,7 +222,11 @@ export class ReignHubRoom extends DurableObject<CoreEnv> {
           if (this.state(old)?.peer === state.peer)
             this.disconnect(old, 1000, "replaced");
       } else {
-        if (role === "host" && currentHost && this.state(currentHost)?.device !== deviceID)
+        if (
+          role === "host" &&
+          currentHost &&
+          this.state(currentHost)?.device !== deviceID
+        )
           throw new APIError("HOST_ALREADY_CONNECTED", "设备已连接", 409);
         if (role === "client" && !currentHost)
           throw new APIError("HOST_OFFLINE", "被控设备离线", 503);
@@ -201,6 +244,23 @@ export class ReignHubRoom extends DurableObject<CoreEnv> {
           role,
           decision,
         );
+        let nativeRelay: Frame["nativeRelay"];
+        if (
+          decision.limits.allowRelay &&
+          request.headers.has("x-reignhub-native")
+        ) {
+          const nodes = externalRelays(this.env);
+          const selected =
+            role === "host"
+              ? nodes.length
+                ? nodes[parseInt(hostID.slice(0, 8), 16) % nodes.length]
+                : undefined
+              : nodes.find(
+                  (n) => n.pin === this.state(currentHost!)?.nativeRelay?.pin,
+                );
+          if (selected)
+            nativeRelay = { ...selected, ticket: "ext1." + random() };
+        }
         // Only a fully authenticated and admitted owner may replace its own
         // lingering host socket. A lost close frame must not block restarts.
         if (role === "host" && currentHost)
@@ -214,6 +274,7 @@ export class ReignHubRoom extends DurableObject<CoreEnv> {
           generation:
             role === "host" ? peer : this.state(currentHost!)!.generation,
           closed: false,
+          nativeRelay,
           grant: grant.ticket,
           expires: grant.expires,
           allowRelay: decision.limits.allowRelay,
@@ -233,6 +294,7 @@ export class ReignHubRoom extends DurableObject<CoreEnv> {
         kind: "welcome",
         peer: state.peer,
         protocol: PROTOCOL,
+        nativeRelay: state.route === "signal" ? state.nativeRelay : undefined,
         allowRelay: state.allowRelay,
         grant: state.grant,
       });

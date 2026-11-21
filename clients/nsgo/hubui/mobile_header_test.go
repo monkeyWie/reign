@@ -34,7 +34,7 @@ func testMobileHeader(t *testing.T, dark bool) {
 	if timeline.Origin.Y != conversation.Origin.Y || header.Origin.Y != timeline.Origin.Y {
 		t.Fatalf("header displaced the list: conversation=%v timeline=%v header=%v", conversation, timeline, header)
 	}
-	for _, id := range []string{"back-sessions", "conversation-title-pill", "connection-status-demo-device", "attachment-cache"} {
+	for _, id := range []string{"mobile-menu", "conversation-title-pill", "connection-status-demo-device", "attachment-cache"} {
 		b := globalBounds(app.Find("id:" + id))
 		if b.Origin.X < conversation.Origin.X || b.Origin.X+b.Size.Width > conversation.Origin.X+conversation.Size.Width+.5 {
 			t.Fatalf("%s exceeds phone width: %v", id, b)

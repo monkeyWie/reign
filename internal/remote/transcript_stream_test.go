@@ -2,6 +2,7 @@ package remote
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"net/http/httptest"
 	"strings"
@@ -148,4 +149,45 @@ func TestSlowHistoryConsumerCannotBlockOtherRelayResponses(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("history did not finish")
 	}
+}
+
+func TestBackgroundTaskReceivesOnlyCompletionOverRelay(t *testing.T) {
+	token := strings.Repeat("r", 32)
+	server := httptest.NewServer(relay.New(token))
+	defer server.Close()
+	pair := Pairing{Relay: "ws" + strings.TrimPrefix(server.URL, "http"), Host: relay.ID(), Key: strings.Repeat("ab", 32), RelayToken: token}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	p := &testProvider{log: provider.NewEventLog()}
+	opts := Options{RelayOnly: true}
+	status := NewHostStatus(pair.Relay)
+	go RunHostObserved(ctx, pair, opts, &control.Dispatcher{Providers: map[string]provider.Provider{"test": p}}, status)
+	waitFor(t, func() bool { return status.Snapshot().State == "connected" })
+	client, err := Connect(ctx, pair, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	epoch, after := p.log.Position()
+	for i := range 500 {
+		p.log.Publish(provider.StreamEvent{SessionID: "s", TurnID: "t", ItemID: "reply", Kind: "text", Delta: fmt.Sprintf("synthetic output %x", sha256.Sum256([]byte(fmt.Sprint(i))))})
+	}
+	p.log.Publish(provider.StreamEvent{SessionID: "s", TurnID: "t", Kind: "turn", Status: "completed"})
+	request := control.Request{Provider: "test", Session: "s", Method: "watch", Epoch: epoch, After: after}
+	read := func(want int) (int64, provider.StreamBatch) {
+		var batch provider.StreamBatch
+		bytes := func() int64 { return client.wire.meter.Snapshot()["receivedBytes"].(int64) }
+		start := bytes()
+		if err := client.Call(ctx, request, &batch); err != nil || len(batch.Events) != want {
+			t.Fatalf("watch returned %d events: %v", len(batch.Events), err)
+		}
+		return bytes() - start, batch
+	}
+	full, all := read(501)
+	request.Turn = "t"
+	scoped, batch := read(1)
+	if batch.Cursor != all.Cursor || batch.Events[0].Kind != "turn" || batch.Events[0].Status != "completed" || scoped >= full/10 {
+		t.Fatalf("bad scoped response, sizes %d/%d", scoped, full)
+	}
+	t.Logf("received authenticated chunk bytes for 500 text events and completion: full=%d lifecycle=%d", full, scoped)
 }

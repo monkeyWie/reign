@@ -5,32 +5,36 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/monkeyWie/reignhub/pkg/persistence"
 	"strings"
 	"time"
 
 	"github.com/monkeyWie/reignhub/internal/control"
 	"github.com/monkeyWie/reignhub/internal/device"
-	"github.com/nsgo-dev/nsgo/base"
 	"github.com/nsgo-dev/nsgo/core"
 )
 
 type draftState struct {
-	Text, Model string
-	Uploads     []*Upload
+	Text, Model, ModelBase string
+	Uploads                []*Upload
 }
 
 type State struct {
-	draftWriter     *draftWriter
-	draftSaveFailed bool
-	draftLoads      map[string]string
-	restoreSession  Object
-	pinnedRefs      map[string]*core.Ref
-	pinDrag         *pinnedDrag
+	confirmedRowKeys map[string]string
+	cancelEntry      context.CancelFunc
+	cancelPageRead   context.CancelFunc
+	terminalPanels   map[string]*terminalPanel
+	composerRef      *core.Ref
+	draftWriter      *draftWriter
+	draftSaveFailed  bool
+	draftLoads       map[string]string
+	restoreSession   Object
+	pinnedRefs       map[string]*core.Ref
+	pinDrag          *pinnedDrag
 
 	submittedDraft, submittedDraftSession                   string
 	directoryGeneration                                     uint64
-	phoneNav                                                *base.Nav[string]
-	phoneRoute                                              *core.Signal[string]
+	mobileSidebarOpen                                       *core.Signal[bool]
 	clientName                                              string
 	drafts                                                  map[string]draftState
 	expanded                                                map[string]bool
@@ -49,13 +53,14 @@ type State struct {
 	accountStatusLoading                                    bool
 	accountDevices                                          []Object
 	target, error, notice, model                            string
+	modelBase                                               string
 	noticeGeneration                                        uint64
 	noticeTimer                                             func() bool
 	failure                                                 *sessionOperationError
 	copiedValue                                             string
 	copyVersion                                             uint64
 	copyTimer                                               func() bool
-	ready, polling, narrowChat, dark                        bool
+	ready, polling, dark                                    bool
 	manualRefresh                                           bool
 	actions                                                 map[string]bool
 	questionDrafts                                          map[string]map[string]questionDraft
@@ -71,6 +76,10 @@ type State struct {
 	downloadTask                                            *attachmentDownload
 	images                                                  map[string][]byte
 	loadingImages                                           map[string]bool
+	imageOrder                                              []string
+	imageBytes                                              int
+	imageContext                                            context.Context
+	imageCancel                                             context.CancelFunc
 	preview                                                 []Object
 	previewIndex                                            *core.Signal[int]
 	watchCancel                                             context.CancelFunc
@@ -85,10 +94,11 @@ type State struct {
 	directoryChecked                                        time.Time
 	directoryCancel                                         context.CancelFunc
 	timezone                                                *time.Location
-	timeline                                                *core.Ref
+	timeline                                                *messageScrollAnchor
 	loadingMotion                                           *loadingMotion
 	pendingSends                                            map[string]string
 	outgoing                                                map[string][]*outgoingMessage
+	outgoingRemoved                                         map[string]map[string]bool
 	streamKey, streamEpoch                                  string
 	streamCursor                                            int64
 	connectAttempt                                          *connectAttempt
@@ -105,6 +115,14 @@ type State struct {
 	deviceMenuTarget                                        string
 	sessionCache                                            map[string]Object
 	sessionCacheOrder                                       []string
+	livePage                                                Object
+	openingRow                                              historyRowID
+	historyPrefix                                           historyPrefix
+	reading, readingOverlap                                 Object
+	landmarks                                               []persistence.Landmark
+	landmarksKey                                            string
+	landmarksVersion                                        uint64
+	readingPages                                            []persistence.HistoryPage
 	cacheLoading, transcriptLoading, localPolling           bool
 	localProviderGeneration                                 uint64
 	catalogueVersion, sessionGeneration                     uint64
@@ -129,10 +147,10 @@ func newState(cx *core.Scope, api API) *State {
 	identified.setInfo(platformClientInfo())
 	api = identified
 	ctx, cancel := context.WithCancel(context.Background())
-	s := &State{clientName: platformDeviceName(), drafts: map[string]draftState{}, expanded: map[string]bool{}, cx: cx, api: api, ctx: ctx, cancel: cancel, revision: core.NewSignal(cx, 0), width: core.NewSignal(cx, core.Points(1320)), dialog: core.NewSignal(cx, ""), draft: core.NewSignal(cx, ""), sessionWidth: core.NewSignal(cx, core.Points(300)), collapsed: map[string]bool{}, images: map[string][]byte{}, loadingImages: map[string]bool{}, previewIndex: core.NewSignal(cx, 0), prompted: map[string]bool{}, retrying: map[string]time.Time{}, timeline: &core.Ref{}}
-	s.snapshots = newSnapshotWriter(ctx, api)
+	s := &State{clientName: platformDeviceName(), drafts: map[string]draftState{}, expanded: map[string]bool{}, cx: cx, api: api, ctx: ctx, cancel: cancel, revision: core.NewSignal(cx, 0), width: core.NewSignal(cx, core.Points(1320)), dialog: core.NewSignal(cx, ""), draft: core.NewSignal(cx, ""), sessionWidth: core.NewSignal(cx, core.Points(300)), collapsed: map[string]bool{}, images: map[string][]byte{}, loadingImages: map[string]bool{}, previewIndex: core.NewSignal(cx, 0), prompted: map[string]bool{}, retrying: map[string]time.Time{}}
+	s.snapshots = newSnapshotWriter(ctx, identified.API, s.historySaved)
 	s.loadingMotion = newLoadingMotion(cx)
-	s.phoneRoute = core.NewSignal(cx, "")
+	s.mobileSidebarOpen = core.NewSignal(cx, false)
 	s.sidebarHidden = core.NewSignal(cx, false)
 	s.loadSidebarPreferences()
 	s.loadLastSession()
@@ -373,12 +391,12 @@ func (s *State) key() string {
 }
 func (s *State) rememberDraft() {
 	if s.selected != nil && s.draftReady() {
-		s.drafts[s.key()] = draftState{s.draft.GetUntracked(), s.model, s.uploads}
+		s.drafts[s.key()] = draftState{Text: s.draft.GetUntracked(), Model: s.model, ModelBase: s.modelBase, Uploads: s.uploads}
 	}
 }
 func (s *State) selectDevice(id string) {
+	s.cancelSessionEntry()
 	if s.target == id {
-		s.showPhoneSessions()
 		return
 	}
 	s.persistDraft()
@@ -394,30 +412,37 @@ func (s *State) selectDevice(id string) {
 	s.messageRows = nil
 	s.approvals = nil
 	s.providers = s.workspaces[id].providers
-	s.narrowChat = false
 	s.draft.Set("")
 	s.uploads = nil
-	s.showPhoneSessions()
 	s.changed()
 	s.loadCachedWorkspace(id)
 	s.poll()
 }
 func (s *State) selectSession(session Object) {
+	s.cancelSessionEntry()
 	s.restoreSession = nil
-	s.markSessionRead(session)
 	target := str(session, "deviceId")
 	if target == "" {
 		target = s.target
 	}
-	if target != s.target {
-		s.selectDevice(target)
-	}
-	if s.key() == s.target+"|"+str(session, "providerId")+"|"+str(session, "id") {
-		s.narrowChat = true
-		s.showPhoneChat()
+	if s.key() == target+"|"+str(session, "providerId")+"|"+str(session, "id") {
+		s.markSessionRead(session)
+		s.closeMobileSidebar()
 		s.changed()
 		return
 	}
+	if s.selected != nil && s.snapshots != nil && s.snapshots.storage != nil {
+		s.prepareSession(session, target)
+		return
+	}
+	s.openSession(session, target, nil, false)
+}
+
+func (s *State) openSession(session Object, target string, page Object, pageRead bool) {
+	if target != s.target {
+		s.selectDevice(target)
+	}
+	s.markSessionRead(session)
 	s.persistDraft()
 	s.rememberDraft()
 	s.rememberSession()
@@ -428,24 +453,27 @@ func (s *State) selectSession(session Object) {
 	s.selected = session
 	s.saveLastSession()
 	s.transcriptSyncing = false
-	s.transcript = s.sessionCache[s.key()]
+	s.transcript = page
+	s.openingRow = firstHistoryRow(page)
+	if !pageRead {
+		s.transcript = s.sessionCache[s.key()]
+	}
 	s.restoreOutgoing(s.transcript)
+	s.reconcileOutgoing(time.Time{})
 	s.rebuildMessages()
 	s.approvals = nil
 	s.models = nil
 	s.model = str(session, "model")
-	s.narrowChat = true
+	s.modelBase = s.model
 	d := s.drafts[s.key()]
 	s.draft.Set(d.Text)
 	s.uploads = d.Uploads
-	if d.Model != "" {
-		s.model = d.Model
-	}
+	s.restoreDraftModel(d)
 	s.loadDraft()
-	s.timeline = &core.Ref{}
-	s.showPhoneChat()
+	s.timeline = nil
+	s.closeMobileSidebar()
 	s.changed()
-	s.loadCachedSession()
+	s.loadCachedSession(pageRead)
 	s.startSessionWatch()
 }
 func (s *State) startSessionWatch() {
@@ -499,27 +527,30 @@ func (s *State) startSessionWatch() {
 func (s *State) setTranscript(t Object) {
 	s.transcriptLoading = false
 	s.restoreOutgoing(t)
-	s.transcript = mergeLatest(s.transcript, t)
+	s.transcript = persistence.Align(s.transcript, mergeLatest(s.transcript, t))
 	summary := copyObject(object(s.transcript["session"]))
 	summary["recencyAt"] = transcriptRecency(s.transcript)
 	s.transcript["session"] = summary
 	s.updateSelectedSummary()
 	s.reconcileOutgoing(time.Time{})
 	s.rebuildMessages()
-	if s.model == "" {
-		s.model = str(object(t["session"]), "model")
-	}
+	s.syncModel(str(object(t["session"]), "model"))
 	s.scheduleSnapshot()
 	s.changed()
 }
-func (s *State) older() {
+func (s *State) older() { s.loadOlder(s.ctx, false, func() bool { return true }) }
+
+func (s *State) loadOlder(owner context.Context, fill bool, current func() bool) {
+	if s.olderPage(owner, fill, current) {
+		return
+	}
 	cursor := str(s.transcript, "nextCursor")
 	if cursor == "" {
 		return
 	}
 	key, target, p, id := s.key(), s.target, str(s.selected, "providerId"), str(s.selected, "id")
 	connected := s.connected()
-	s.runAction("history:"+key, func(ctx context.Context) (any, error) {
+	s.runScopedAction(owner, "history:"+key, false, func(ctx context.Context) (any, error) {
 		v, err := s.api.Call(ctx, "client.cached", nil, target, Object{"method": "transcript", "provider": p, "session": id, "cursor": cursor})
 		if err == nil && v != nil {
 			return v, nil
@@ -527,7 +558,11 @@ func (s *State) older() {
 		if !connected {
 			return nil, fmt.Errorf("更早的消息尚未缓存，请连接设备后加载")
 		}
-		return rpc(ctx, s.api, target, p, id, "transcript", Object{"cursor": cursor})
+		options := Object{"cursor": cursor}
+		if target != control.LocalTarget {
+			options["historyItems"] = persistence.PageSize
+		}
+		return rpc(ctx, s.api, target, p, id, "transcript", options)
 	}, func(v any) {
 		if key != s.key() || str(s.transcript, "nextCursor") != cursor {
 			return
@@ -540,7 +575,26 @@ func (s *State) older() {
 		}
 		older := []Object{}
 		for _, t := range objects(page["turns"]) {
+			if len(current) > 0 && str(t, "id") == str(current[0], "id") {
+				// The older page can end in the same turn as the mounted page.
+				// Keep the current version of overlapping records.
+				items := objects(current[0]["items"])
+				existing := map[string]bool{}
+				for _, v := range items {
+					existing[str(v, "id")] = true
+				}
+				var prefix []Object
+				for _, v := range objects(t["items"]) {
+					if !existing[str(v, "id")] {
+						prefix = append(prefix, v)
+					}
+				}
+				current = append([]Object{}, current...)
+				current[0] = copyObject(current[0])
+				current[0]["items"] = append(prefix, items...)
+			}
 			if !seen[str(t, "id")] {
+				seen[str(t, "id")] = true
 				older = append(older, t)
 			}
 		}
@@ -549,7 +603,7 @@ func (s *State) older() {
 		s.transcript["nextCursor"] = page["nextCursor"]
 		s.rebuildMessages()
 		s.scheduleSnapshot()
-	}, func() bool { return key == s.key() })
+	}, func() bool { return key == s.key() && current() })
 }
 func (s *State) pendingSend() string {
 	s.read()
@@ -646,7 +700,13 @@ func (s *State) submitMessage(method string, extra Object, outgoing *outgoingMes
 				}
 				if s.key() == key {
 					s.rebuildMessages()
-					s.persistSnapshot()
+					if s.transcript == nil {
+						s.persistSending()
+					} else {
+						s.persistSnapshot()
+					}
+				} else if s.snapshots != nil && s.snapshots.storage != nil {
+					s.writeSnapshot(target, p, id, Object{"_deliveryOnly": true, "localMessages": s.outgoing[key]})
 				} else if cached := s.sessionCache[key]; cached != nil {
 					cached["localMessages"] = s.outgoing[key]
 					s.writeSnapshot(target, p, id, cached)

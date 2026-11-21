@@ -240,7 +240,10 @@ func TestLocalControllerUsesSharedBusinessAndCacheWithoutService(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Both entry paths consult the same durable execution receipt.
-	repeated := runtime.Dispatcher.HandleRemote(ctx, request)
+	if r := runtime.Dispatcher.HandleRemote(control.WithRemoteIdentity(ctx, "other-controller"), request); r.Error == "" {
+		t.Fatal("another controller received the local command receipt")
+	}
+	repeated := runtime.Dispatcher.HandleRequest(ctx, request)
 	if repeated.Error != "" {
 		t.Fatal(repeated.Error)
 	}
@@ -256,7 +259,7 @@ func TestLocalControllerUsesSharedBusinessAndCacheWithoutService(t *testing.T) {
 	if _, err := hub.Call(ctx, control.LocalTarget, send); err != nil {
 		t.Fatal(err)
 	}
-	if response := runtime.Dispatcher.HandleRemote(ctx, send); response.Error != "" {
+	if response := runtime.Dispatcher.HandleRequest(ctx, send); response.Error != "" {
 		t.Fatal(response.Error)
 	}
 	if agent.Sends != 1 {

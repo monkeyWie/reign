@@ -184,7 +184,9 @@ func TestTreeExpansionAndCompactSidebar(t *testing.T) {
 	app.WaitFor(sessionSelector("local", "codex-app", "build"), time.Second)
 	for _, width := range []core.Points{320, 390} {
 		app.Resize(width, 1000)
-		for _, id := range []string{"session-sidebar", "session-filters", "connect-device", "sidebar-menu"} {
+		// Add-device can live in the workspace title bar outside this standalone
+		// directory fixture; window/mobile sidebar tests cover that entry.
+		for _, id := range []string{"session-sidebar", "session-filters", "sidebar-menu"} {
 			bounds := globalBounds(app.Find("id:" + id))
 			if bounds.Origin.X < 0 || bounds.Origin.X+bounds.Size.Width > width+.5 {
 				t.Fatal("sidebar overflows", id, width, bounds)

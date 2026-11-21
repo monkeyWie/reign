@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -126,5 +127,61 @@ func TestQueuedWriteHonorsCancellation(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("canceled request waited behind another write")
+	}
+}
+
+type stalledBroadcast struct {
+	Handler
+	started, release chan struct{}
+}
+
+func (h stalledBroadcast) Broadcast(Message) {
+	close(h.started)
+	<-h.release
+}
+
+// Use a small byte budget with the real framing, reader and event worker so
+// the test can distinguish a busy handler from a frame still in the queue.
+func TestBroadcastBytesBoundInFlightAndPreserveResponses(t *testing.T) {
+	client, router := net.Pipe()
+	defer router.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	h := stalledBroadcast{started: make(chan struct{}), release: make(chan struct{})}
+	defer close(h.release)
+	life, stop := context.WithCancel(context.Background())
+	defer stop()
+	c := &Client{life: life, conn: client, handler: h, pending: map[string]chan Message{}, writes: make(chan struct{}, 1), events: make(chan broadcastFrame, 64), done: make(chan struct{}), cancel: stop}
+	defer c.Close()
+	m := Message{Type: "broadcast", Params: mustJSON(strings.Repeat("x", 1024))}
+	go c.readLoop(int64(2 * len(mustJSON(m))))
+	go c.eventLoop()
+	if err := sendFixture(router, m); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-h.started:
+	case <-ctx.Done():
+		t.Fatal("handler did not start")
+	}
+	if err := sendFixture(router, m); err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		req, err := ReadFrame(router)
+		if err == nil {
+			_ = sendFixture(router, Message{Type: "response", RequestID: req.RequestID, ResultType: "success"})
+		}
+	}()
+	if _, err := c.Request(ctx, "probe", 1, nil, ""); err != nil {
+		t.Fatal("busy broadcast blocked response", err)
+	}
+	if err := sendFixture(router, m); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-c.Done():
+	case <-ctx.Done():
+		t.Fatal("byte overflow did not disconnect")
 	}
 }

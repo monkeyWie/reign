@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"maps"
 	"reflect"
 	"strconv"
 	"strings"
@@ -78,7 +79,10 @@ func stateTurns(state map[string]any) ([]map[string]any, bool, error) {
 		if id == "" {
 			return nil, false, errors.New("未知 IPC turn 结构")
 		}
-		copy := decodeObject(rawJSON(t))
+		// Only projection fields are changed. Items are read-only and the merge
+		// helpers allocate their own slices; copying every message through JSON
+		// here repeats the full history several times for each live patch.
+		copy := maps.Clone(t)
 		copy["id"] = id
 		if ms, ok := ipcTimestamp(t["turnStartedAtMs"]); ok {
 			copy["startedAt"] = ms / 1000
@@ -137,34 +141,29 @@ func ipcTimestamp(value any) (int64, bool) {
 	}
 	return 0, false
 }
-func (p *Provider) observeIPCState(id, owner string, oldRaw, newRaw json.RawMessage) {
-	next := decodeObject(newRaw)
-	turns, _, err := stateTurns(next)
-	if err != nil {
-		b := p.appBridge()
-		if b != nil {
-			b.mu.Lock()
-			if f := b.followed[id]; f != nil {
-				f.err = err
-				b.signal(f)
-			}
-			b.mu.Unlock()
-		}
-		return
-	}
+func (p *Provider) observeIPCState(id, owner string, oldRaw json.RawMessage, next map[string]any, turns []map[string]any) {
 	log := p.stream().log
 	if len(oldRaw) == 0 {
 		log.Publish(provider.StreamEvent{Kind: "snapshot", SessionID: id})
 	} else {
-		previous, _, _ := stateTurns(decodeObject(oldRaw))
-		oldTurns := map[string]provider.Turn{}
+		priorState := decodeObject(oldRaw)
+		// Settings can change without a turn/item event. Wake the existing
+		// snapshot path so controllers receive the new session model as well.
+		if stringValue(priorState["latestModel"]) != stringValue(next["latestModel"]) {
+			log.Publish(provider.StreamEvent{Kind: "snapshot", SessionID: id})
+		}
+		previous, _, _ := stateTurns(priorState)
+		oldTurns := map[string]map[string]any{}
 		for _, v := range previous {
-			t := normalizeTurn(rawJSON(v))
-			oldTurns[t.ID] = t
+			oldTurns[stringValue(v["id"])] = v
 		}
 		for _, v := range turns {
+			prior, known := oldTurns[stringValue(v["id"])]
+			if known && reflect.DeepEqual(prior, v) {
+				continue // Unchanged history cannot produce a normalized event.
+			}
 			t := normalizeTurn(rawJSON(v))
-			old, known := oldTurns[t.ID]
+			old := normalizeTurn(rawJSON(prior))
 			turnChanged := !known || old.Status != t.Status || !reflect.DeepEqual(old.DurationMS, t.DurationMS) || old.RecencyAt != t.RecencyAt
 			if turnChanged && t.Status == "inProgress" {
 				log.Publish(provider.StreamEvent{Kind: "turn", SessionID: id, TurnID: t.ID, Status: t.Status, DurationMS: t.DurationMS, RecencyAt: t.RecencyAt})
@@ -202,7 +201,8 @@ func (p *Provider) observeIPCState(id, owner string, oldRaw, newRaw json.RawMess
 				if t.Status == "inProgress" && exists && i.Role == "assistant" && prev.Type == i.Type && prev.Phase == i.Phase && strings.HasPrefix(i.Text, prev.Text) && len(i.Text) > len(prev.Text) {
 					event.Kind = "text"
 					event.Item = nil
-					event.Delta = strings.TrimPrefix(i.Text, prev.Text)
+					// Replay retains only the suffix across successive revisions.
+					event.Delta = strings.Clone(strings.TrimPrefix(i.Text, prev.Text))
 					event.Offset = utf16Length(prev.Text)
 				}
 				log.Publish(event)
@@ -221,16 +221,16 @@ func (p *Provider) observeIPCState(id, owner string, oldRaw, newRaw json.RawMess
 			}
 		}
 	}
-	p.syncIPCApprovals(id, owner, next)
+	p.syncIPCApprovals(id, owner, next, turns)
 }
-func (p *Provider) syncIPCApprovals(id, owner string, state map[string]any) {
+func (p *Provider) syncIPCApprovals(id, owner string, state map[string]any, turns []map[string]any) {
 	route := "ipc:" + id + ":" + owner
 	methods := map[string]string{"item/commandExecution/requestApproval": "thread-follower-command-approval-decision", "item/fileChange/requestApproval": "thread-follower-file-approval-decision", "item/tool/requestUserInput": "thread-follower-submit-user-input", "item/permissions/requestApproval": "thread-follower-permissions-request-approval-response", "mcpServer/elicitation/request": "thread-follower-submit-mcp-server-elicitation-response"}
 	active := map[string]bool{}
 	requests := append([]any{}, array(state["requests"])...)
-	requests = append(requests, asyncQuestionRequests(state, p.dismissedQuestions(id, owner, ""))...)
+	requests = append(requests, asyncQuestionRequests(id, turns, p.dismissedQuestions(id, owner, ""))...)
 	latestTurn := ""
-	if turns, _, err := stateTurns(state); err == nil && len(turns) > 0 {
+	if len(turns) > 0 {
 		latestTurn = stringValue(turns[len(turns)-1]["id"])
 	}
 	for _, raw := range requests {
@@ -312,7 +312,7 @@ func (p *Provider) ipcTranscript(ctx context.Context, id, cursor string) (provid
 	var err error
 	var owner string
 	if f != nil {
-		raw = append(json.RawMessage(nil), f.state...)
+		raw = f.state
 		err = f.err
 		owner = f.owner
 	}
@@ -382,16 +382,26 @@ func (p *Provider) ipcTranscript(ctx context.Context, id, cursor string) (provid
 			}
 		}
 	}
-	start := max(0, end-30)
+	anchor := historyBoundary(ctx)
+	bounded, found, e := throughBoundary(turns[:end], anchor)
+	if e != nil || !found {
+		return provider.Transcript{}, true, errHistoryBoundary
+	}
+	end = len(bounded)
+	start := max(0, end-provider.RecentTurns(ctx))
 	out := provider.Transcript{Session: p.session(stateThread(state)), Turns: []provider.Turn{}, StreamEpoch: epoch, StreamCursor: boundary}
-	out.Queue = p.messageQueue(ctx, id, cursor, acceptedQueueMessages(turns))
+	if anchor == nil {
+		out.Queue = p.messageQueue(ctx, id, cursor, acceptedQueueMessages(turns))
+	}
 	if (start > 0 || !complete) && end > 0 {
 		out.NextCursor = "ipc:" + base64.RawURLEncoding.EncodeToString([]byte(stringValue(turns[start]["id"])))
 	}
+	visible, next, partial := itemWindow(bounded[start:end], provider.HistoryItems(ctx), id, cursor, out.NextCursor, true)
+	out.NextCursor, out.PartialTurn = next, partial
 	if err = provider.ObserveTranscript(ctx, out); err != nil {
 		return out, true, err
 	}
-	for _, t := range turns[start:end] {
+	for _, t := range visible {
 		raw := rawJSON(t)
 		normalized := normalizeTurn(raw)
 		p.attachments(ctx, id, out.Session.CWD, &normalized, raw)
@@ -403,7 +413,7 @@ func (p *Provider) ipcTranscript(ctx context.Context, id, cursor string) (provid
 			return out, true, err
 		}
 	}
-	if end == len(turns) && len(out.Turns) > 0 && out.Turns[len(out.Turns)-1].Status == "inProgress" {
+	if anchor == nil && end == len(turns) && len(out.Turns) > 0 && out.Turns[len(out.Turns)-1].Status == "inProgress" {
 		out.Session.ActiveTurnID = out.Turns[len(out.Turns)-1].ID
 	}
 	return out, true, nil

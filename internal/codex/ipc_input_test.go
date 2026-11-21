@@ -143,7 +143,7 @@ func TestInstalledAppTextInputContract(t *testing.T) {
 	}
 	input := ipcInput([]any{map[string]string{"type": "text", "text": "isolated fixture"}, map[string]string{"type": "localImage", "path": "/fixture/image.png"}})
 	var result json.RawMessage
-	cmd := exec.Command("node", "../../docs/research/verification/codex-input-2026-11-18/validate.cjs", asar, string(rawJSON(input)))
+	cmd := exec.Command("node", "testdata/installed-app/input.cjs", asar, string(rawJSON(input)))
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("installed renderer contract: %v: %s", err, out)

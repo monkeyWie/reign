@@ -34,7 +34,6 @@ func workspaceLayoutFixture(cx *core.Scope) *State {
 		w.sessions = append(w.sessions, ss)
 		s.workspaces[id] = w
 	}
-	s.narrowChat = true
 	s.transcript = Object{"turns": []Object{{"id": "fixture", "status": "completed", "items": []Object{{"id": "answer", "role": "assistant", "text": "侧边栏收起后，当前会话保持不变。"}}}}}
 	s.rebuildMessages()
 	s.host = Object{"name": "Studio MacBook Pro", "connectionId": "123456", "status": "在线 · 可连接", "grants": []Object{
@@ -68,9 +67,18 @@ func TestSidebarTogglePreservesWorkspace(t *testing.T) {
 		t.Fatal("conversation has an extra rounded frame beside the flat sidebar")
 	}
 	add := globalBounds(app.Find("id:connect-device"))
-	if math.Abs(float64(toggle.Origin.X+toggle.Size.Width/2-add.Origin.X-add.Size.Width/2)) > 1 {
-		t.Fatal("title-bar and sidebar trailing actions do not share an alignment axis", toggle, add)
+	checkHeading := func(toggle, add core.Bounds) {
+		t.Helper()
+		if isWeb() {
+			brand := globalBounds(app.Find("id:brand-home"))
+			if math.Abs(float64(toggle.Origin.Y+toggle.Size.Height/2-add.Origin.Y-add.Size.Height/2)) > 1 || math.Abs(float64(toggle.Origin.Y+toggle.Size.Height/2-brand.Origin.Y-brand.Size.Height/2)) > 1 || add.Origin.X+add.Size.Width > toggle.Origin.X {
+				t.Fatal("Web sidebar heading must share one row without overlapping actions", brand, add, toggle)
+			}
+		} else if math.Abs(float64(toggle.Origin.X+toggle.Size.Width/2-add.Origin.X-add.Size.Width/2)) > 1 {
+			t.Fatal("native macOS title-bar and sidebar actions do not share an alignment axis", toggle, add)
+		}
 	}
+	checkHeading(toggle, add)
 	if app.Exists("id:window-toolbar") {
 		bar := globalBounds(app.Find("id:window-toolbar"))
 		if math.Abs(float64(toggle.Origin.Y+toggle.Size.Height/2-bar.Origin.Y-bar.Size.Height/2)) > 1 || app.Find("id:toggle-sidebar").Props.WindowDrag != core.WindowDragOff {
@@ -86,9 +94,7 @@ func TestSidebarTogglePreservesWorkspace(t *testing.T) {
 	app.Settle()
 	resizedToggle := globalBounds(app.Find("id:toggle-sidebar"))
 	resizedAdd := globalBounds(app.Find("id:connect-device"))
-	if math.Abs(float64(resizedToggle.Origin.X+resizedToggle.Size.Width/2-resizedAdd.Origin.X-resizedAdd.Size.Width/2)) > 1 {
-		t.Fatal("resizing the sidebar detached its toolbar alignment")
-	}
+	checkHeading(resizedToggle, resizedAdd)
 	app.Post(func() { s.cx.Post(func() { s.sessionWidth.Set(300) }) })
 	app.Settle()
 	app.Screenshot("sidebar-toggle-expanded-light")
@@ -110,8 +116,8 @@ func TestSidebarTogglePreservesWorkspace(t *testing.T) {
 	app.Screenshot("sidebar-toggle-expanded-dark")
 	app.Press("id:toggle-sidebar")
 	app.Resize(649, 820)
-	app.WaitFor("id:back-sessions", time.Second)
-	app.Press("id:back-sessions")
+	app.WaitFor("id:mobile-menu", time.Second)
+	app.Press("id:mobile-menu")
 	app.WaitFor("id:session-sidebar", time.Second)
 	if app.Exists("id:toggle-sidebar") {
 		t.Fatal("compact navigation inherited wide sidebar controls")

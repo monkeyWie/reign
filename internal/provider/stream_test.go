@@ -88,3 +88,21 @@ func TestBusySessionCannotEvictQuietSessionReplay(t *testing.T) {
 		t.Fatal("unbounded sessions", len(log.sessions), log.bytes)
 	}
 }
+
+func TestWatchWaitsForRequestedEvents(t *testing.T) {
+	log := NewEventLog()
+	epoch, after := log.Position()
+	log.Publish(StreamEvent{SessionID: "other", Kind: "text", Delta: "unrelated"})
+	ctx, cancel := context.WithTimeout(context.Background(), 80*time.Millisecond)
+	defer cancel()
+	if _, err := log.Watch(ctx, "s", epoch, after); err != context.DeadlineExceeded {
+		t.Fatal("unrelated session completed the long poll", err)
+	}
+	log.Publish(StreamEvent{SessionID: "s", TurnID: "selected", Kind: "text", Delta: "irrelevant to task monitoring"})
+	log.Publish(StreamEvent{SessionID: "s", TurnID: "other", Kind: "turn", Status: "completed"})
+	ctx, cancel = context.WithTimeout(WithWatchedTurn(context.Background(), "selected"), 80*time.Millisecond)
+	defer cancel()
+	if _, err := log.Watch(ctx, "s", epoch, after); err != context.DeadlineExceeded {
+		t.Fatal("unrequested task traffic completed the long poll", err)
+	}
+}

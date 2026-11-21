@@ -21,32 +21,79 @@ func (s *State) conversation(cx *core.Scope, narrow bool) core.Node {
 	}
 	children := []core.Node{}
 	floatingHeader := s.width.GetUntracked() < compactBreakpoint
-	listRef := s.timeline
-	atBottom := core.NewSignal(cx, true)
-	viewport := core.NewSignal(cx, core.Size{})
-	anchor := messageScrollAnchor{following: true}
-	keepLatest := func() { listRef.ScrollToIndexAt(0, 0, 0, false) }
-	updateScroll := func(e core.ScrollEvent) {
-		if anchor.scroll(e) {
-			keepLatest()
+	anchor := &messageScrollAnchor{following: true, atBottom: core.NewSignal(cx, true)}
+	s.timeline = anchor
+	cx.Cleanup(func() {
+		if s.timeline == anchor {
+			s.timeline = nil
 		}
-		atBottom.Set(anchor.following)
+	})
+	listRef := &anchor.list
+	historyHeader, historyFooter, checkHistory, scrollHistory := s.historyScroll(cx, anchor, choose(floatingHeader, core.Points(88), core.Points(0)))
+	viewport := core.NewSignal(cx, core.Size{})
+	// A native resize may finish with the last pre-resize offset. Wait for
+	// two quiet layout frames before one absolute alignment; never combine it
+	// with the List's relative correction in the same layout/scroll callback.
+	var cancelAlignment func()
+	settleResize := func() {
+		if cancelAlignment != nil {
+			cancelAlignment()
+			cancelAlignment = nil
+		}
+		if !anchor.following || !anchor.restoring || anchor.dragging {
+			return
+		}
+		cancelAlignment = cx.RequestAnimationFrame(func(time.Time) {
+			cancelAlignment = cx.RequestAnimationFrame(func(time.Time) {
+				cancelAlignment = nil
+				if anchor.following && anchor.restoring && !anchor.dragging {
+					anchor.list.ScrollToEnd(false)
+				}
+			})
+		})
+	}
+	var lastOffset core.Points
+	var cancelBoundsCheck func()
+	updateScroll := func(e core.ScrollEvent) {
+		size, content := anchor.size, anchor.content
+		anchor.scroll(e)
+		if cancelBoundsCheck != nil {
+			cancelBoundsCheck()
+			cancelBoundsCheck = nil
+		}
+		// A delayed page can shrink the list after the last gesture event.
+		// Let the platform apply its own correction before reconciling it.
+		if outsideScrollRange(e) && !anchor.dragging && !anchor.momentum {
+			cancelBoundsCheck = cx.RequestAnimationFrame(func(time.Time) {
+				cancelBoundsCheck = nil
+				anchor.settle(e)
+			})
+		}
+		if !e.Stale && e.Size.Height > 0 {
+			if s.reading != nil {
+				anchor.following, anchor.restoring = false, false
+			}
+			if anchor.pendingRow == nil && (anchor.dragging || content == e.ContentSize) && e.Offset.Y != lastOffset {
+				scrollHistory(choose(e.Offset.Y > lastOffset, 1, -1))
+			}
+			lastOffset = e.Offset.Y
+		}
+		if size != anchor.size {
+			settleResize()
+		}
+		anchor.atBottom.Set(anchor.following)
 	}
 	// Connection/approval polling must not rebuild the entire list's data and
 	// navigation index. Message projections are replaced, never edited in place.
-	source := core.NewMemoFunc(cx, func() []Message { s.read(); return s.messageRows }, func(a, b []Message) bool {
+	var previousRows []Message
+	rows := core.NewMemoFunc(cx, func() []Message {
+		s.read()
+		anchor.preserveReading(cx, previousRows, s)
+		previousRows = s.messageRows
+		return s.messageRows
+	}, func(a, b []Message) bool {
 		return len(a) == len(b) && (len(a) == 0 || &a[0] == &b[0])
 	})
-	rows := core.NewMemoFunc(cx, func() []Message {
-		messages := source.Get()
-		out := make([]Message, len(messages))
-		for i, m := range messages {
-			out[len(out)-1-i] = m
-		}
-		return out
-	}, nil)
-	// Row zero stays at the bottom. This is a native recycled list, not a
-	// scroll view with thousands of eagerly constructed Markdown documents.
 	tail := func() bool {
 		s.read()
 		active := activeTurn(s.transcript)
@@ -62,16 +109,32 @@ func (s *State) conversation(cx *core.Scope, narrow bool) core.Node {
 	}
 	tailCount := func() int {
 		s.read()
+		if s.reading != nil {
+			return 0
+		}
 		n := len(s.approvals)
 		if tail() {
 			n++
 		}
 		return n
 	}
-	tailKey := func(i int) string {
-		s.read()
-		if i < len(s.approvals) {
-			return "approval:" + str(s.approvals[i], "id")
+	// Pending approvals follow the transcript, with the first nearest the composer.
+	approvalIndex := func(i int) int { return len(rows.Get()) + tailCount() - 1 - i }
+	rowKey := func(i int) string {
+		messages := rows.Get()
+		if i < len(messages) {
+			id := messages[i].ID
+			if local := s.confirmedRowKeys[id]; local != "" {
+				return local
+			}
+			return id
+		}
+		a := approvalIndex(i)
+		if a < 0 {
+			return "" // Recycled cell from a longer list.
+		}
+		if a < len(s.approvals) {
+			return "approval:" + str(s.approvals[a], "id")
 		}
 		return "thinking"
 	}
@@ -79,53 +142,59 @@ func (s *State) conversation(cx *core.Scope, narrow bool) core.Node {
 		// Declare reading intent before a virtualized jump measures new rows.
 		// Those measurements must not restore the previous bottom anchor.
 		anchor.following, anchor.restoring = false, false
-		atBottom.Set(false)
-		listRef.ScrollToIndexAt(index+tailCount(), .5, 0, false)
+		anchor.pendingRow = nil
+		anchor.atBottom.Set(false)
+		listRef.ScrollToIndexAt(index, .5, 0, false)
 	}
-	list := core.List{TestID: "chat-message-list", Ref: listRef, Inverted: true, EstimatedSize: 120, Style: fill, Count: func() int { return len(rows.Get()) + tailCount() }, Key: func(i int) any {
-		offset := tailCount()
-		if i < offset {
-			return tailKey(i)
-		}
-		return rows.Get()[i-offset].ID
-	},
+	list := core.List{TestID: "chat-message-list", Ref: listRef, Alignment: core.ListAlignEnd, EstimatedSize: 120, Style: fill,
+		Count: func() int { return len(rows.Get()) + tailCount() }, Key: func(i int) any { return rowKey(i) },
 		OnLayout: func(b core.Bounds) {
 			viewport.Set(b.Size)
-			if anchor.layout(b.Size) {
-				keepLatest()
+			checkHistory()
+			previous := anchor.size
+			anchor.layout(b.Size)
+			if previous != anchor.size {
+				settleResize()
 			}
 		}, OnScroll: updateScroll,
+
+		OnViewableItemsChange: func(items core.ViewableItems) {
+			anchor.lastVisible = ""
+			if n := len(items.Viewable); n > 0 {
+				anchor.lastVisible, _ = items.Viewable[n-1].Key.(string)
+			}
+			checkHistory()
+		},
 		OnScrollDragStart: func(e core.ScrollEvent) {
+			anchor.pendingRow = nil
 			anchor.dragging, anchor.restoring = true, false
 			updateScroll(e)
 		}, OnScrollDragEnd: func(e core.ScrollEvent) {
 			updateScroll(e)
 			anchor.dragging = false
 		},
+		OnMomentumStart: func(core.ScrollEvent) { anchor.momentum = true },
+		OnMomentumEnd: func(e core.ScrollEvent) {
+			anchor.momentum = false
+			anchor.settle(e)
+		},
+		OnScrollEnd: func(e core.ScrollEvent) {
+			anchor.settle(e)
+			checkHistory()
+		},
 		Row: func(cx *core.Scope, r core.ListRow) core.Node {
-			key := core.NewMemo(cx, func() string {
-				i := r.Index()
-				offset := tailCount()
-				if i < offset {
-					return tailKey(i)
-				}
-				v := rows.Get()
-				if i-offset < len(v) {
-					return v[i-offset].ID
-				}
-				return ""
-			})
+			key := core.NewMemo(cx, func() string { return rowKey(r.Index()) })
 			return core.Dynamic(func(cx *core.Scope) core.Node {
 				id := key.Get()
 				if strings.HasPrefix(id, "approval:") || id == "thinking" {
-					i := core.Untracked(cx, r.Index)
-					if i < len(s.approvals) {
+					i := core.Untracked(cx, func() int { return approvalIndex(r.Index()) })
+					if i >= 0 && i < len(s.approvals) {
 						return s.approvalCard(cx, s.approvals[i])
 					}
 					return s.messageInset(cx, core.View{Style: core.Style{Padding: core.Edges{Top: 12, Bottom: 20}}, Children: []core.Node{chat.Shimmer{Text: func() string { return "Thinking…" }, Size: 13}}})
 				}
 				get := func() Message {
-					index := r.Index() - tailCount()
+					index := r.Index()
 					v := rows.Get()
 					if index < 0 || index >= len(v) {
 						return Message{}
@@ -134,16 +203,10 @@ func (s *State) conversation(cx *core.Scope, narrow bool) core.Node {
 				}
 				return s.messageInset(cx, s.message(cx, get))
 			})
-		}, Footer: core.View{TestID: "history-start-inset", Style: core.Style{Padding: core.Edges{Top: choose(floatingHeader, core.Points(88), core.Points(0))}}, Children: []core.Node{core.Show{When: func() bool { s.read(); return str(s.transcript, "nextCursor") != "" }, Then: func(cx *core.Scope) core.Node {
-			return busyButton(cx, "load-older", "加载更早消息", nil, "ghost", func() bool { return s.actionPending("history:" + s.key()) }, s.older)
-		}}}},
+		}, Footer: historyFooter, Header: historyHeader,
 	}
-	timelineChildren := []core.Node{list, s.emptyTranscript(cx), s.syncIndicator(cx), core.Show{When: func() bool { return !s.narrowLayout() }, Then: func(cx *core.Scope) core.Node { return s.messageNavigation(cx, rows, viewport, navigate) }}, core.Show{When: func() bool { return !atBottom.Get() }, Then: func(cx *core.Scope) core.Node {
-		v := button(cx, "jump-to-latest", "", lucide.ArrowDown, "outline", func() {
-			anchor.following, anchor.restoring = true, true
-			atBottom.Set(true)
-			keepLatest()
-		}).(core.View)
+	timelineChildren := []core.Node{list, s.emptyTranscript(cx), s.syncIndicator(cx), core.Show{When: func() bool { return !s.narrowLayout() }, Then: func(cx *core.Scope) core.Node { return s.messageNavigation(cx, rows, viewport, navigate) }}, core.Show{When: func() bool { s.read(); return s.reading != nil || !anchor.atBottom.Get() }, Then: func(cx *core.Scope) core.Node {
+		v := button(cx, "jump-to-latest", "", lucide.ArrowDown, "outline", func() { s.latestPage(); anchor.jumpToLatest() }).(core.View)
 		v.Label, v.Tooltip = locales.For(cx).JumpToLatest(), tooltipCard(cx, label(cx, locales.For(cx).JumpToLatest(), 12, false))
 		v.Style.Width, v.Style.Height, v.Style.MinHeight = core.Pt(36), core.Pt(36), core.Pt(36)
 		v.Style.Padding, v.Style.CornerRadius = core.All(8), 18
@@ -157,18 +220,18 @@ func (s *State) conversation(cx *core.Scope, narrow bool) core.Node {
 	}
 	children = append(children, core.View{TestID: "timeline", Style: fill, Children: timelineChildren})
 	children = append(children, s.composer(cx))
-	return core.View{TestID: "conversation", Style: fill, StyleFunc: func() core.Style { return s.workspaceSurface(cx) }, Children: children}
+	return core.View{TestID: "conversation", Style: fill, StyleFunc: func() core.Style { return s.workspaceSurface(cx) }, Children: []core.Node{s.withTerminal(cx, core.View{Style: fill, Children: children})}}
 }
 
 // The narrow-layout toolbar floats over the recycled list. Only the beginning of the
 // history has an inset, so scrolled messages pass beneath the fading backdrop.
-func (s *State) compactConversationHeader(cx *core.Scope, back bool) core.Node {
+func (s *State) compactConversationHeader(cx *core.Scope, menu bool) core.Node {
 	pill := func(children ...core.Node) core.Node {
 		return core.View{Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter, Height: core.Pt(52), CornerRadius: 26, FlexShrink: 0, Padding: core.Symmetric(0, 4)}, StyleFunc: func() core.Style { return core.Style{Background: palette(cx).background} }, Children: children}
 	}
 	buttons := []core.Node{}
-	if back {
-		buttons = append(buttons, pill(labelledIconButton(cx, "back-sessions", "返回会话列表", lucide.ArrowLeft, s.backSessions)))
+	if menu {
+		buttons = append(buttons, pill(s.mobileMenuButton(cx)))
 	}
 	buttons = append(buttons, core.View{TestID: "conversation-title-pill", Style: core.Style{FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0), Height: core.Pt(52), CornerRadius: 26, JustifyContent: core.JustifyCenter, Padding: core.Symmetric(6, 16), Gap: 2}, StyleFunc: func() core.Style { return core.Style{Background: palette(cx).background} }, Children: []core.Node{
 		singleLine(cx, func() string { s.read(); return str(s.selected, "title") }, 14, false),
@@ -180,7 +243,7 @@ func (s *State) compactConversationHeader(cx *core.Scope, back bool) core.Node {
 			}
 			return cwd
 		}, 11, true),
-	}}, pill(s.conversationConnectionIndicator(cx), labelledIconButton(cx, "attachment-cache", "管理附件缓存", lucide.HardDrive, func() { s.dialog.Set("clear-cache") })))
+	}}, pill(s.conversationConnectionIndicator(cx), s.terminalButton(cx), labelledIconButton(cx, "attachment-cache", "管理附件缓存", lucide.HardDrive, func() { s.dialog.Set("clear-cache") })))
 	return core.View{TestID: "conversation-header", PointerEvents: core.PointerEventsBoxNone, Style: core.Style{Position: core.Absolute, Top: core.Pt(0), Left: core.Pt(0), Right: core.Pt(0), Height: core.Pt(100), ZIndex: 5}, Children: []core.Node{
 		core.View{TestID: "conversation-header-fade", PointerEvents: core.PointerEventsNone, Style: core.Style{Position: core.Absolute, Top: core.Pt(0), Bottom: core.Pt(0), Left: core.Pt(0), Right: core.Pt(0)}, StyleFunc: func() core.Style {
 			bg := palette(cx).background
@@ -207,6 +270,10 @@ func (s *State) messageInset(cx *core.Scope, content core.Node) core.Node {
 }
 func (s *State) message(cx *core.Scope, get func() Message) core.Node {
 	m := core.Untracked(cx, get)
+	if m.Role == "compaction" {
+		icon := core.Icon{SVG: lucide.FoldVertical(), Style: core.Style{Width: core.Pt(15), Height: core.Pt(15), FlexShrink: 0}, StyleFunc: func() core.Style { return core.Style{Color: palette(cx).mutedText} }}
+		return core.View{TestID: "message-" + m.ID, Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 8, Padding: core.Symmetric(8, 0)}, Children: []core.Node{icon, label(cx, locales.For(cx).ContextCompacted(), 13, true)}}
+	}
 	if m.Role == "work" {
 		return s.workSummary(cx, get)
 	}
@@ -296,8 +363,8 @@ func (s *State) message(cx *core.Scope, get func() Message) core.Node {
 	}
 	content = append(content, core.Show{When: func() bool { return strings.TrimSpace(displayText(get())) != "" }, Then: func(*core.Scope) core.Node { return bubbleContent }})
 	content = append(content, s.attachmentGallery(cx, get))
-	content = append(content, core.Show{When: func() bool { return get().Delivery != "" }, Then: func(cx *core.Scope) core.Node {
-		return core.View{TestID: "delivery-" + m.ID, Tooltip: tooltipCard(cx, dynamicText(cx, func() string { return get().DeliveryError }, 12, false)), Style: core.Style{Padding: core.Edges{Top: 6}}, Children: []core.Node{core.Show{When: func() bool { return get().Delivery == "sending" }, Then: func(*core.Scope) core.Node {
+	delivery := core.Show{When: func() bool { return get().Delivery != "" }, Then: func(cx *core.Scope) core.Node {
+		return core.View{TestID: "delivery-" + m.ID, Tooltip: tooltipCard(cx, dynamicText(cx, func() string { return get().DeliveryError }, 12, false)), Style: core.Style{JustifyContent: core.JustifyCenter}, Children: []core.Node{core.Show{When: func() bool { return get().Delivery == "sending" }, Then: func(*core.Scope) core.Node {
 			return chat.Shimmer{Text: func() string { return "发送中…" }, Size: 11}
 		}, Else: func(cx *core.Scope) core.Node {
 			return dynamicText(cx, func() string {
@@ -311,8 +378,8 @@ func (s *State) message(cx *core.Scope, get func() Message) core.Node {
 				}
 			}, 11, true)
 		}}}}
-	}})
-	content = append(content, core.Show{When: func() bool { return !get().Live && get().Delivery != "sending" }, Then: func(cx *core.Scope) core.Node {
+	}}
+	actions := core.Show{When: func() bool { return !get().Live && get().Delivery != "sending" }, Then: func(cx *core.Scope) core.Node {
 		// Align the visible action icon with the article, while its full hit
 		// target extends into the existing message gutter.
 		inset := choose(user, core.Points(0), -buttonHorizontalPadding)
@@ -332,7 +399,12 @@ func (s *State) message(cx *core.Scope, get func() Message) core.Node {
 			}
 			return s.localTime(time.UnixMilli(ts)).Format("15:04")
 		}, 11, true)}}
-	}})
+	}}
+	if user {
+		content = append(content, core.View{Style: core.Style{Direction: core.Row, Height: core.Pt(32), AlignItems: core.AlignCenter, Gap: 8}, Children: []core.Node{delivery, actions}})
+	} else {
+		content = append(content, actions)
+	}
 	return core.View{TestID: "message-" + m.ID, OnMouseEnter: func(core.MouseEvent) { hover.Set(true) }, OnMouseLeave: func(core.MouseEvent) { hover.Set(false) }, Style: core.Style{AlignItems: choose(user, core.AlignEnd, core.AlignStretch), Padding: core.Edges{Top: 10, Bottom: 10}, Width: core.Pct(100), MinWidth: core.Pt(0)}, Children: content}
 }
 func (s *State) activity(cx *core.Scope, get func() Message) core.Node {
@@ -381,6 +453,12 @@ func (s *State) activity(cx *core.Scope, get func() Message) core.Node {
 }
 func (s *State) composer(cx *core.Scope) core.Node {
 	input := &core.Ref{}
+	s.composerRef = input
+	cx.Cleanup(func() {
+		if s.composerRef == input {
+			s.composerRef = nil
+		}
+	})
 	key, generation := s.key(), s.sessionGeneration
 	focusRequested := false
 	cx.Effect(func() {
@@ -392,7 +470,7 @@ func (s *State) composer(cx *core.Scope) core.Node {
 		// Focus after the restored draft and enabled editor reach the platform.
 		// This scope belongs to the entry, so navigation cancels a pending focus.
 		cx.Post(func() {
-			if s.key() == key && s.sessionGeneration == generation && s.draftReady() && s.dialog.GetUntracked() == "" {
+			if s.key() == key && s.sessionGeneration == generation && s.draftReady() && s.dialog.GetUntracked() == "" && !s.terminalVisible() {
 				input.Focus()
 			}
 		})

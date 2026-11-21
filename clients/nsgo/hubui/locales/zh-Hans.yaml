@@ -75,6 +75,7 @@ projects: "项目"
 activeSessionCount: "{count} 个活跃会话"
 moreProjectDetails: "还有 {count} 项 · 右键查看详情"
 detachedGitHead: "分离的 HEAD · {commit}"
+contextCompacted: "上下文已自动压缩"
 workDetails: "处理过程"
 workedFor: "已处理 {duration}"
 workedUnderSecond: "已处理不到 1 秒"
@@ -117,3 +118,30 @@ enableAgent: "启用"
 
 sessionInformation: "会话信息"
 workingDirectory: "工作目录"
+
+terminal: "终端"
+terminalTabs: "终端标签页"
+chooseTerminal: "选择终端类型"
+newTerminal: "新建终端"
+numberedTerminal:
+  message: "终端 {number, number, integer}"
+  placeholders:
+    number: { type: int }
+killTerminalTab:
+  message: "结束终端 {number, number, integer}"
+  placeholders:
+    number: { type: int }
+toggleTerminal: "展开或收起终端"
+hideTerminal: "收起终端"
+terminateTerminal: "结束终端"
+reconnectTerminal: "重新连接终端"
+reopenTerminal: "重新打开终端"
+resizeTerminal: "调整终端高度"
+terminalConnecting: "正在连接终端…"
+terminalExited: "已退出"
+terminalUnsupported: "此设备尚不支持终端，请更新其 ReignHub"
+terminalCopy: "复制"
+terminalPaste: "粘贴"
+terminalSelectAll: "全选"
+remoteTerminal: "允许远程终端"
+remoteTerminalHint: "允许已配对设备在这台电脑上运行命令。"

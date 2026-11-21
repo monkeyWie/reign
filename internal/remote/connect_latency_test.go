@@ -53,7 +53,7 @@ func TestDirectConnectDoesNotWaitForRelayOrAgentDiscovery(t *testing.T) {
 			defer cancel()
 			monitor := NewHostStatus(pair.Relay)
 			p := &blockedStatusProvider{testProvider: &testProvider{}}
-			opts := Options{DisableWebRTC: tcp, DisableTCP: !tcp}
+			opts := Options{DisableNative: true, DisableWebRTC: tcp, DisableTCP: !tcp}
 			go serveHostObserved(ctx, pair, opts, &control.Dispatcher{Providers: map[string]provider.Provider{"blocked": p}}, monitor)
 			waitFor(t, func() bool { return monitor.Snapshot().State == "connected" })
 			// Optional services remain blocked until after Connect returns.

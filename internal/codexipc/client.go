@@ -18,6 +18,14 @@ import (
 
 const MaxFrame = 32 << 20
 
+// Includes the broadcast currently being handled. One legal frame always fits.
+const broadcastBudget = 2 * MaxFrame
+
+type broadcastFrame struct {
+	message Message
+	bytes   int64
+}
+
 type Message struct {
 	Type       string          `json:"type"`
 	RequestID  string          `json:"requestId,omitempty"`
@@ -61,19 +69,20 @@ type Handler interface {
 }
 
 type Client struct {
-	conn      net.Conn
-	handler   Handler
-	mu        sync.Mutex
-	id        string
-	pending   map[string]chan Message
-	writes    chan struct{}
-	next      atomic.Uint64
-	done      chan struct{}
-	closeOnce sync.Once
-	events    chan Message
-	workers   chan struct{}
-	life      context.Context
-	cancel    context.CancelFunc
+	conn       net.Conn
+	handler    Handler
+	mu         sync.Mutex
+	id         string
+	pending    map[string]chan Message
+	writes     chan struct{}
+	next       atomic.Uint64
+	done       chan struct{}
+	closeOnce  sync.Once
+	events     chan broadcastFrame
+	eventBytes atomic.Int64
+	workers    chan struct{}
+	life       context.Context
+	cancel     context.CancelFunc
 }
 
 func Dial(ctx context.Context, endpoint string, handler Handler) (*Client, error) {
@@ -91,8 +100,8 @@ func Dial(ctx context.Context, endpoint string, handler Handler) (*Client, error
 // Connect also supports isolated in-memory protocol fixtures.
 func Connect(ctx context.Context, conn net.Conn, handler Handler) (*Client, error) {
 	life, cancel := context.WithCancel(context.Background())
-	c := &Client{writes: make(chan struct{}, 1), conn: conn, handler: handler, pending: map[string]chan Message{}, done: make(chan struct{}), events: make(chan Message, 64), workers: make(chan struct{}, 32), life: life, cancel: cancel}
-	go c.readLoop()
+	c := &Client{writes: make(chan struct{}, 1), conn: conn, handler: handler, pending: map[string]chan Message{}, done: make(chan struct{}), events: make(chan broadcastFrame, 64), workers: make(chan struct{}, 32), life: life, cancel: cancel}
+	go c.readLoop(broadcastBudget)
 	go c.eventLoop()
 	res, err := c.Request(ctx, "initialize", 0, map[string]string{"clientType": "reignhub"}, "")
 	if err == nil {
@@ -222,26 +231,31 @@ func (c *Client) write(ctx context.Context, m Message) error {
 	return nil
 }
 func ReadFrame(r io.Reader) (Message, error) {
+	m, _, err := readFrame(r)
+	return m, err
+}
+
+func readFrame(r io.Reader) (Message, int64, error) {
 	var header [4]byte
 	if _, err := io.ReadFull(r, header[:]); err != nil {
-		return Message{}, err
+		return Message{}, 0, err
 	}
 	n := binary.LittleEndian.Uint32(header[:])
 	if n == 0 || n > MaxFrame {
-		return Message{}, errors.New("invalid IPC frame size")
+		return Message{}, 0, errors.New("invalid IPC frame size")
 	}
 	data := make([]byte, n)
 	if _, err := io.ReadFull(r, data); err != nil {
-		return Message{}, err
+		return Message{}, 0, err
 	}
 	var m Message
 	err := json.Unmarshal(data, &m)
-	return m, err
+	return m, int64(n), err
 }
-func (c *Client) readLoop() {
+func (c *Client) readLoop(byteLimit int64) {
 	defer c.Close()
 	for {
-		m, err := ReadFrame(c.conn)
+		m, size, err := readFrame(c.conn)
 		if err != nil {
 			return
 		}
@@ -268,9 +282,14 @@ func (c *Client) readLoop() {
 			}
 			// Never block responses behind a large state stream. Overflow invalidates
 			// this connection; the bridge will refollow and obtain a fresh snapshot.
+			if c.eventBytes.Add(size) > byteLimit {
+				c.eventBytes.Add(-size)
+				return
+			}
 			select {
-			case c.events <- m:
+			case c.events <- broadcastFrame{m, size}:
 			default:
+				c.eventBytes.Add(-size)
 				return
 			}
 		case "client-discovery-request", "request":
@@ -288,10 +307,14 @@ func (c *Client) readLoop() {
 func (c *Client) eventLoop() {
 	for {
 		select {
-		case m := <-c.events:
-			if c.handler != nil {
-				c.handler.Broadcast(m)
+		case frame := <-c.events:
+			if !c.Alive() {
+				return
 			}
+			if c.handler != nil {
+				c.handler.Broadcast(frame.message)
+			}
+			c.eventBytes.Add(-frame.bytes)
 		case <-c.done:
 			return
 		}

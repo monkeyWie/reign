@@ -3,40 +3,12 @@
 package localstate
 
 import (
-	"database/sql"
 	"encoding/json"
-	_ "modernc.org/sqlite"
-	"os"
-	"path/filepath"
+	"github.com/monkeyWie/reignhub/pkg/appdb"
 )
 
-func Open(path string) (*sql.DB, error) {
-	if e := os.MkdirAll(filepath.Dir(path), 0700); e != nil {
-		return nil, e
-	}
-	f, e := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600)
-	if e != nil {
-		return nil, e
-	}
-	if e = f.Close(); e != nil {
-		return nil, e
-	}
-	if e = os.Chmod(path, 0600); e != nil {
-		return nil, e
-	}
-	db, e := sql.Open("sqlite", path)
-	if e != nil {
-		return nil, e
-	}
-	db.SetMaxOpenConns(1)
-	if _, e = db.Exec("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS settings (k TEXT PRIMARY KEY, v BLOB NOT NULL)"); e != nil {
-		db.Close()
-		return nil, e
-	}
-	return db, nil
-}
 func Get(path, key string, out any) error {
-	db, e := Open(path)
+	db, e := appdb.Open(path)
 	if e != nil {
 		return e
 	}
@@ -52,7 +24,7 @@ func Put(path, key string, v any) error {
 	if e != nil {
 		return e
 	}
-	db, e := Open(path)
+	db, e := appdb.Open(path)
 	if e != nil {
 		return e
 	}

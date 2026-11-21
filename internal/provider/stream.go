@@ -143,6 +143,13 @@ func (l *EventLog) Publish(event StreamEvent) {
 	l.changed = make(chan struct{})
 }
 
+type watchedTurnKey struct{}
+
+// WithWatchedTurn requests lifecycle metadata for one background task.
+func WithWatchedTurn(ctx context.Context, turn string) context.Context {
+	return context.WithValue(ctx, watchedTurnKey{}, turn)
+}
+
 func (l *EventLog) Watch(ctx context.Context, session, epoch string, after int64) (StreamBatch, error) {
 	return l.read(ctx, session, epoch, after, false)
 }
@@ -159,6 +166,7 @@ func (l *EventLog) Position() (string, int64) {
 }
 
 func (l *EventLog) read(ctx context.Context, session, epoch string, after int64, probe bool) (StreamBatch, error) {
+	turn, _ := ctx.Value(watchedTurnKey{}).(string)
 	timeout := time.NewTimer(15 * time.Second)
 	defer timeout.Stop()
 	for {
@@ -174,17 +182,24 @@ func (l *EventLog) read(ctx context.Context, session, epoch string, after int64,
 			l.mu.Unlock()
 			return batch, nil
 		}
-		if after < l.next || probe {
-			if replay != nil {
-				for _, event := range replay.history {
-					if event.ID > after {
-						batch.Events = append(batch.Events, event)
-					}
+		if replay != nil && replay.touched > after {
+			for _, event := range replay.history {
+				if event.ID <= after {
+					continue
 				}
+				if turn != "" && (event.Kind != "turn" || event.TurnID != turn) {
+					continue
+				}
+				batch.Events = append(batch.Events, event)
 			}
+		}
+		if probe || len(batch.Events) != 0 {
 			l.mu.Unlock()
 			return batch, nil
 		}
+		// Advance within this pending read. Unrelated or filtered events
+		// need no network response and must not restart its heartbeat.
+		after = l.next
 		changed := l.changed
 		l.mu.Unlock()
 		select {

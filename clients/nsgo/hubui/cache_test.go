@@ -82,6 +82,7 @@ func startCachedWorkspace(t *testing.T, connected bool, noCache ...bool) (*nsgot
 		f.noCache.Store(noCache[0])
 	}
 	app := nsgotest.Start(t, func(cx *core.Scope) core.Node { return RootWithAPI(cx, f, true) }, nsgotest.Size(390, 844))
+	showSessionDirectory(t, app)
 	app.WaitFor("id:device-demo-device", time.Second)
 	return app, f
 }
@@ -169,6 +170,7 @@ func TestLateDiskSnapshotCannotOverwriteNewerLiveMessages(t *testing.T) {
 	close(base.liveRelease)
 	f := &lateSnapshotAPI{cachedWorkspaceAPI: base, started: make(chan struct{}), release: make(chan struct{})}
 	app := nsgotest.Start(t, func(cx *core.Scope) core.Node { return RootWithAPI(cx, f, true) }, nsgotest.Size(390, 844))
+	showSessionDirectory(t, app)
 	app.WaitFor("id:device-demo-device", time.Second)
 	app.WaitFor(sessionSelector("demo-device", "codex-app", "demo-chat"), time.Second)
 	app.Press(sessionSelector("demo-device", "codex-app", "demo-chat"))

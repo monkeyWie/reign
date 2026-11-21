@@ -32,4 +32,4 @@ mkdir -p "$prefix"
 install -m 755 "$work/$name/reignhub-server" "$prefix/reignhub-server"
 "$prefix/reignhub-server" --version
 printf '\nInstalled to %s. Start with: %s/reignhub-server\n' "$prefix" "$prefix"
-printf 'HTTP :26330; discovery TCP/UDP :26331. Run --help for configuration.\n'
+printf 'In your service directory, run reignhub-server --init once to create config.json, edit it, then run reignhub-server.\n'

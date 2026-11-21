@@ -82,6 +82,7 @@ projects: "Projects"
 activeSessionCount: "{count} active"
 moreProjectDetails: "{count} more · Right-click for details"
 detachedGitHead: "Detached HEAD · {commit}"
+contextCompacted: "Context automatically compacted"
 workDetails: "Work details"
 workedFor: "Worked for {duration}"
 workedUnderSecond: "Worked for less than a second"
@@ -124,3 +125,30 @@ enableAgent: "Enable"
 
 sessionInformation: "Session information"
 workingDirectory: "Working directory"
+
+terminal: "Terminal"
+terminalTabs: "Terminal tabs"
+chooseTerminal: "New terminal with profile"
+newTerminal: "New terminal"
+numberedTerminal:
+  message: "Terminal {number, number, integer}"
+  placeholders:
+    number: { type: int }
+killTerminalTab:
+  message: "Kill terminal {number, number, integer}"
+  placeholders:
+    number: { type: int }
+toggleTerminal: "Toggle terminal"
+hideTerminal: "Hide terminal"
+terminateTerminal: "Kill terminal"
+reconnectTerminal: "Reconnect terminal"
+reopenTerminal: "Reopen terminal"
+resizeTerminal: "Resize terminal"
+terminalConnecting: "Connecting terminal…"
+terminalExited: "Exited"
+terminalUnsupported: "Update ReignHub on this device to use terminals"
+terminalCopy: "Copy"
+terminalPaste: "Paste"
+terminalSelectAll: "Select all"
+remoteTerminal: "Allow remote terminals"
+remoteTerminalHint: "Paired devices can run commands on this computer."

@@ -2,6 +2,8 @@ package store
 
 import (
 	"bytes"
+	"context"
+	"database/sql"
 	"encoding/json"
 )
 
@@ -30,7 +32,7 @@ func (d *DB) Replace(scope string, items map[string]json.RawMessage) error {
 	}
 	defer tx.Rollback()
 	old := map[string][]byte{}
-	rows, e := tx.Query("SELECT id,value FROM entities WHERE scope=?", scope)
+	rows, e := tx.Query("SELECT id,value FROM host_sessions WHERE scope=?", scope)
 	if e != nil {
 		return e
 	}
@@ -53,24 +55,24 @@ func (d *DB) Replace(scope string, items map[string]json.RawMessage) error {
 			delete(old, id)
 			continue
 		}
-		if _, e = tx.Exec("INSERT INTO entities VALUES(?,?,?) ON CONFLICT(scope,id) DO UPDATE SET value=excluded.value", scope, id, []byte(b)); e != nil {
+		if _, e = tx.Exec("INSERT INTO host_sessions VALUES(?,?,?) ON CONFLICT(scope,id) DO UPDATE SET value=excluded.value", scope, id, []byte(b)); e != nil {
 			return e
 		}
-		if _, e = tx.Exec("INSERT INTO changes(scope,id,value) VALUES(?,?,?)", scope, id, []byte(b)); e != nil {
+		if _, e = tx.Exec("INSERT INTO directory_changes(scope,id,value) VALUES(?,?,?)", scope, id, []byte(b)); e != nil {
 			return e
 		}
 		delete(old, id)
 	}
 	for id := range old {
-		if _, e = tx.Exec("DELETE FROM entities WHERE scope=? AND id=?", scope, id); e != nil {
+		if _, e = tx.Exec("DELETE FROM host_sessions WHERE scope=? AND id=?", scope, id); e != nil {
 			return e
 		}
-		if _, e = tx.Exec("INSERT INTO changes(scope,id,deleted) VALUES(?,?,1)", scope, id); e != nil {
+		if _, e = tx.Exec("INSERT INTO directory_changes(scope,id,deleted) VALUES(?,?,1)", scope, id); e != nil {
 			return e
 		}
 	}
 	// Bound the change log. Older client cursors receive a full reset.
-	if _, e = tx.Exec("DELETE FROM changes WHERE seq < (SELECT COALESCE(MAX(seq),0)-10000 FROM changes)"); e != nil {
+	if _, e = tx.Exec("DELETE FROM directory_changes WHERE seq < (SELECT COALESCE(MAX(seq),0)-10000 FROM directory_changes)"); e != nil {
 		return e
 	}
 	return tx.Commit()
@@ -79,16 +81,16 @@ func (d *DB) Delta(scope, epoch string, after int64) (Delta, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	out := Delta{Epoch: epoch, Changes: []Change{}}
-	tx, e := d.Begin()
+	tx, e := d.BeginTx(context.Background(), &sql.TxOptions{ReadOnly: true})
 	if e != nil {
 		return out, e
 	}
 	defer tx.Rollback()
-	if e = tx.QueryRow("SELECT COALESCE(MAX(seq),0) FROM changes").Scan(&out.Cursor); e != nil {
+	if e = tx.QueryRow("SELECT COALESCE(MAX(seq),0) FROM directory_changes").Scan(&out.Cursor); e != nil {
 		return out, e
 	}
 	var floor int64
-	if e = tx.QueryRow("SELECT COALESCE(MIN(seq),0) FROM changes").Scan(&floor); e != nil {
+	if e = tx.QueryRow("SELECT COALESCE(MIN(seq),0) FROM directory_changes").Scan(&floor); e != nil {
 		return out, e
 	}
 	if after > out.Cursor || (floor > 1 && after < floor) {
@@ -97,7 +99,7 @@ func (d *DB) Delta(scope, epoch string, after int64) (Delta, error) {
 	if after == 0 {
 		out.Reset = true
 		out.Items = []json.RawMessage{}
-		rows, e := tx.Query("SELECT value FROM entities WHERE scope=? ORDER BY id", scope)
+		rows, e := tx.Query("SELECT value FROM host_sessions WHERE scope=? ORDER BY id", scope)
 		if e != nil {
 			return out, e
 		}
@@ -113,7 +115,7 @@ func (d *DB) Delta(scope, epoch string, after int64) (Delta, error) {
 		rows.Close()
 		return out, e
 	}
-	rows, e := tx.Query("SELECT seq,id,value,deleted FROM changes WHERE scope=? AND seq>? ORDER BY seq LIMIT 1000", scope, after)
+	rows, e := tx.Query("SELECT seq,id,value,deleted FROM directory_changes WHERE scope=? AND seq>? ORDER BY seq LIMIT 1000", scope, after)
 	if e != nil {
 		return out, e
 	}

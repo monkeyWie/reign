@@ -18,7 +18,7 @@ type priorityKey struct{}
 func WithMethod(ctx context.Context, method string) context.Context {
 	p := Urgent
 	switch method {
-	case "transcript", "attachment.read", "attachment.write":
+	case "transcript", "attachment.read", "attachment.write", "terminal.read", "terminal.attach", "terminal.open", "terminal.openProfile":
 		p = Bulk
 	case "providers", "sessions", "sync", "models":
 		p = Normal

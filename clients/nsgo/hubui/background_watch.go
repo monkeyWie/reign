@@ -61,7 +61,7 @@ func (s *State) watchNativeTask(ctx context.Context, key string, task Object, mo
 	}
 	epoch, cursor := "", int64(0)
 	for ctx.Err() == nil {
-		value, err := rpc(ctx, s.api, target, provider, session, "watch", Object{"epoch": epoch, "after": cursor})
+		value, err := rpc(ctx, s.api, target, provider, session, "watch", Object{"epoch": epoch, "after": cursor, "turn": task["turnId"]})
 		if ctx.Err() != nil {
 			return
 		}

@@ -20,11 +20,11 @@ func questionState() map[string]any {
 	return decodeObject(json.RawMessage(`{"id":"session","cwd":"/fixture","turns":[{"id":"turn","status":"inProgress","items":[{"type":"agentMessage","id":"call","text":"","questions":[{"title":"Pick a scope","options":["Local","Remote"]},{"title":"Any constraints?"}]}]}]}`))
 }
 
-func setQuestionState(p *Provider, state map[string]any) {
+func setQuestionState(t *testing.T, p *Provider, state map[string]any) {
 	p.ipc.mu.Lock()
 	p.ipc.followed["session"] = &followedThread{owner: "app-owner", state: rawJSON(state), changed: make(chan struct{})}
 	p.ipc.mu.Unlock()
-	p.syncIPCApprovals("session", "app-owner", state)
+	p.syncIPCApprovals("session", "app-owner", state, fixtureStateTurns(t, state))
 }
 
 func questionAnswer(id, value string) provider.Decision {
@@ -35,7 +35,7 @@ func questionAnswer(id, value string) provider.Decision {
 
 func TestAsyncQuestionDiscoveryAndExpiry(t *testing.T) {
 	state := questionState()
-	requests := asyncQuestionRequests(state, nil)
+	requests := asyncQuestionRequests("session", fixtureStateTurns(t, state), nil)
 	if len(requests) != 1 {
 		t.Fatalf("textless question missing: %v", requests)
 	}
@@ -49,7 +49,7 @@ func TestAsyncQuestionDiscoveryAndExpiry(t *testing.T) {
 	answer := questionReplyOpen + "\n" + string(rawJSON([]asyncQuestionReply{{id, "Pick a scope", "Local"}})) + "\n" + questionReplyClose
 	steer := map[string]any{"id": "reply", "type": "steeringUserMessage", "status": "pending", "input": []any{map[string]any{"type": "text", "text": answer}}}
 	turn["items"] = append(array(turn["items"]), steer)
-	if len(array(object(object(asyncQuestionRequests(state, nil)[0])["params"])["questions"])) != 2 {
+	if len(array(object(object(asyncQuestionRequests("session", fixtureStateTurns(t, state), nil)[0])["params"])["questions"])) != 2 {
 		t.Fatal("unaccepted steer hid a question")
 	}
 	for _, acknowledged := range []string{"accepted", "acknowledged", "user"} {
@@ -58,18 +58,18 @@ func TestAsyncQuestionDiscoveryAndExpiry(t *testing.T) {
 		if acknowledged == "user" {
 			steer["type"], steer["content"] = "userMessage", steer["input"]
 		}
-		got := asyncQuestionRequests(state, nil)
+		got := asyncQuestionRequests("session", fixtureStateTurns(t, state), nil)
 		qs := array(object(object(got[0])["params"])["questions"])
 		if len(qs) != 1 || stringValue(object(qs[0])["id"]) == id {
 			t.Fatalf("%s did not resolve exact question: %v", acknowledged, qs)
 		}
 	}
 	turn["status"] = "completed"
-	if len(asyncQuestionRequests(state, nil)) != 1 {
+	if len(asyncQuestionRequests("session", fixtureStateTurns(t, state), nil)) != 1 {
 		t.Fatal("completion discarded latest unanswered question")
 	}
 	state["turns"] = append(array(state["turns"]), map[string]any{"id": "next", "status": "inProgress", "items": []any{}})
-	if len(asyncQuestionRequests(state, nil)) != 0 {
+	if len(asyncQuestionRequests("session", fixtureStateTurns(t, state), nil)) != 0 {
 		t.Fatal("historical question was revived")
 	}
 }
@@ -95,7 +95,7 @@ func TestAsyncQuestionRepliesUseOwnerAndClaimOnce(t *testing.T) {
 			}()
 			state := questionState()
 			object(array(state["turns"])[0])["status"] = status
-			setQuestionState(p, state)
+			setQuestionState(t, p, state)
 			a := p.Approvals()[0]
 			if !a.AllowSkip || len(a.Questions) != 2 || a.SessionID != "session" {
 				t.Fatalf("not normalized: %+v", a)
@@ -135,7 +135,7 @@ func TestAsyncQuestionRepliesUseOwnerAndClaimOnce(t *testing.T) {
 			if err := p.Decide(context.Background(), a.ID, d); err == nil {
 				t.Fatal("concurrent duplicate accepted")
 			}
-			p.syncIPCApprovals("session", "app-owner", state)
+			p.syncIPCApprovals("session", "app-owner", state, fixtureStateTurns(t, state))
 			if pending := p.Approvals(); len(pending) != 1 || pending[0].ID != a.ID {
 				t.Fatal("in-flight snapshot replaced the pending form and its draft")
 			}
@@ -147,7 +147,7 @@ func TestAsyncQuestionRepliesUseOwnerAndClaimOnce(t *testing.T) {
 			// The owner's echo resolves one answer. The skipped sibling stays hidden.
 			turn := object(array(state["turns"])[0])
 			turn["items"] = append(array(turn["items"]), map[string]any{"type": "userMessage", "id": "reply", "content": input})
-			setQuestionState(p, state)
+			setQuestionState(t, p, state)
 			if len(p.Approvals()) != 0 {
 				t.Fatal("skipped sibling reappeared after acknowledgement")
 			}
@@ -173,7 +173,7 @@ func TestAsyncQuestionFailureRecoveryAndSkip(t *testing.T) {
 				return codexipc.Message{}, false
 			})
 			state := questionState()
-			setQuestionState(p, state)
+			setQuestionState(t, p, state)
 			a := p.Approvals()[0]
 			d := questionAnswer(a.Questions[0].ID, "Local")
 			ctx, cancel := context.WithCancel(context.Background())
@@ -203,7 +203,7 @@ func TestAsyncQuestionFailureRecoveryAndSkip(t *testing.T) {
 					t.Fatalf("lost uncertain result: %v", err)
 				}
 			}
-			p.syncIPCApprovals("session", "app-owner", state)
+			p.syncIPCApprovals("session", "app-owner", state, fixtureStateTurns(t, state))
 			if outcome == "unknown" || outcome == "skip" {
 				if len(p.Approvals()) != 0 {
 					t.Fatal("claimed question reappeared")
@@ -235,7 +235,7 @@ func TestSynchronousQuestionExactAnswers(t *testing.T) {
 		return codexipc.Message{}, false
 	})
 	state := decodeObject(json.RawMessage(`{"id":"session","requests":[{"requestId":42,"method":"item/tool/requestUserInput","params":{"turnId":"turn","questions":[{"id":"scope","header":"Scope","question":"Which scope?","options":[{"label":"Local","description":"This device"}]},{"id":"notes","question":"Notes?","isSecret":true}]}}]}`))
-	setQuestionState(p, state)
+	setQuestionState(t, p, state)
 	a := p.Approvals()[0]
 	if a.AllowSkip || !a.Questions[1].IsSecret || a.Questions[0].Options[0].Description != "This device" {
 		t.Fatalf("question metadata lost: %+v", a)
@@ -257,7 +257,7 @@ func TestSynchronousQuestionExactAnswers(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("missing native user input response")
 	}
-	p.syncIPCApprovals("session", "app-owner", state)
+	p.syncIPCApprovals("session", "app-owner", state, fixtureStateTurns(t, state))
 	if len(p.Approvals()) != 0 {
 		t.Fatal("snapshot revived sync response")
 	}
@@ -271,4 +271,13 @@ func TestSynchronousQuestionExactAnswers(t *testing.T) {
 	if err := p.Decide(context.Background(), id, d); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func fixtureStateTurns(t testing.TB, state map[string]any) []map[string]any {
+	t.Helper()
+	turns, _, err := stateTurns(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return turns
 }

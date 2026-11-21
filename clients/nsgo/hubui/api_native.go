@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"github.com/monkeyWie/reignhub/internal/control"
 	"github.com/monkeyWie/reignhub/internal/device"
+	"github.com/monkeyWie/reignhub/pkg/appdb"
+	"github.com/monkeyWie/reignhub/pkg/persistence"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,6 +23,7 @@ import (
 type nativeAPI struct{ dir, uiPath string }
 
 func platformAPI(cx *core.Scope) API {
+	initializeTerminalHost()
 	dir := filepath.Join(cx.DataDir(), "agenthub")
 	if custom := os.Getenv("AGENTHUB_NSGO_DATA_DIR"); custom != "" {
 		dir = custom
@@ -107,4 +110,30 @@ func resolveClientInfo(cx *core.Scope, done func(device.ClientInfo)) {
 		}
 		done(info.Normalize())
 	})
+}
+
+func (n *nativeAPI) ApplyHistory(ctx context.Context, k persistence.Session, p persistence.HistoryPatch) error {
+	db, err := appdb.Open(appdb.Path(n.dir))
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	return db.ApplyHistory(ctx, k, p)
+}
+func (n *nativeAPI) ReadPage(ctx context.Context, k persistence.Session, q persistence.PageQuery) (persistence.HistoryPage, error) {
+	db, err := appdb.Open(appdb.Path(n.dir))
+	if err != nil {
+		return persistence.HistoryPage{}, err
+	}
+	defer db.Close()
+	return db.ReadPage(ctx, k, q)
+}
+
+func (n *nativeAPI) Navigation(ctx context.Context, k persistence.Session) ([]persistence.Landmark, error) {
+	db, err := appdb.Open(appdb.Path(n.dir))
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+	return db.Navigation(ctx, k)
 }

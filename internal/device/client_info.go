@@ -30,17 +30,21 @@ func (i ClientInfo) Normalize() ClientInfo {
 		return s
 	}
 	i.Name, i.Model = clean(i.Name), clean(i.Model)
-	switch i.Platform {
-	case "darwin", "windows", "linux", "android", "ios":
-	default:
-		i.Platform = ""
-	}
+	i.Platform = NormalizePlatform(i.Platform)
 	switch i.Kind {
 	case "native", "browser":
 	default:
 		i.Kind = ""
 	}
 	return i
+}
+
+func NormalizePlatform(platform string) string {
+	switch platform {
+	case "darwin", "windows", "linux", "android", "ios":
+		return platform
+	}
+	return ""
 }
 
 type clientInfoKey struct{}

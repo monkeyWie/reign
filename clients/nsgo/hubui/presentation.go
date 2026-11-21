@@ -72,6 +72,50 @@ func activityLabel(tools []Object) string {
 	return strings.Join(parts, " · ")
 }
 
+func messageHasContent(item Object) bool {
+	return strings.TrimSpace(str(item, "text")) != "" || len(objects(item["attachments"])) > 0
+}
+
+func terminalTurn(turn Object) bool {
+	switch str(turn, "status") {
+	case "completed", "failed", "interrupted":
+		return true
+	}
+	return false
+}
+
+func foldsWork(turn Object) bool {
+	if terminalTurn(turn) {
+		for _, item := range objects(turn["items"]) {
+			if str(item, "role") == "assistant" && str(item, "phase") != "commentary" && messageHasContent(item) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// Expand private in-memory process fragments in chronological order. Ordinary
+// live and provider rows use their original slice without allocating.
+func presentationItems(turn Object) []Object {
+	items := objects(turn["items"])
+	var expanded []Object
+	for i, item := range items {
+		if group, ok := item["_historyProcess"].([]Object); ok {
+			if expanded == nil {
+				expanded = append(make([]Object, 0, len(items)), items[:i]...)
+			}
+			expanded = append(expanded, group...)
+		} else if expanded != nil {
+			expanded = append(expanded, item)
+		}
+	}
+	if expanded != nil {
+		return expanded
+	}
+	return items
+}
+
 func messages(t Object) []Message {
 	out := []Message{}
 	active := str(activeTurn(t), "id")
@@ -80,22 +124,14 @@ func messages(t Object) []Message {
 		live := id != "" && id == active
 		// Only fold explicit process messages after a terminal turn has a
 		// visible answer. Unknown phases and incomplete history remain readable.
-		fold := false
-		switch str(turn, "status") {
-		case "completed", "failed", "interrupted":
-			for _, item := range objects(turn["items"]) {
-				if str(item, "role") == "assistant" && str(item, "phase") != "commentary" && (strings.TrimSpace(str(item, "text")) != "" || len(objects(item["attachments"])) > 0) {
-					fold = true
-					break
-				}
-			}
-		}
+		fold := foldsWork(turn)
 		var details []Message
-		workRow := -1
+		workRow, workGroups := -1, 0
 		flushDetails := func() {
 			if len(details) > 0 {
 				if workRow < 0 {
 					workRow = len(out)
+					workGroups++
 					out = append(out, Message{ID: id + "|work|" + details[0].ID, Role: "work", Turn: id})
 				}
 				out[workRow].Details = append(out[workRow].Details, details...)
@@ -114,8 +150,15 @@ func messages(t Object) []Message {
 				tools = nil
 			}
 		}
-		for _, item := range objects(turn["items"]) {
+		for _, item := range presentationItems(turn) {
 			role := str(item, "role")
+			if str(item, "type") == "contextCompaction" {
+				flush(false)
+				flushDetails()
+				workRow = -1
+				out = append(out, Message{ID: id + "|" + str(item, "id"), Role: "compaction", Turn: id})
+				continue
+			}
 			if visibleTool(item) && (live || fold) {
 				tools = append(tools, item)
 				continue
@@ -143,7 +186,7 @@ func messages(t Object) []Message {
 		// Earlier groups stop animating as soon as a later message arrives.
 		flush(live)
 		flushDetails()
-		if workRow >= 0 && turn["durationMs"] != nil && number(turn, "durationMs") >= 0 {
+		if workRow >= 0 && workGroups == 1 && turn["durationMs"] != nil && number(turn, "durationMs") >= 0 {
 			out[workRow].DurationMS = new(number(turn, "durationMs"))
 		}
 	}
@@ -220,12 +263,30 @@ func messagePreviewText(m Message) string {
 	return text
 }
 
+// Retain one position per turn, with the last received value winning. Besides
+// normal history reads, this repairs snapshots written with duplicated tails.
+// Always return a new slice: published history belongs to the cache writer too.
+func uniqueTurns(turns []Object) []Object {
+	out := make([]Object, 0, len(turns))
+	indices := make(map[string]int, len(turns))
+	for _, turn := range turns {
+		id := str(turn, "id")
+		if i, ok := indices[id]; id != "" && ok {
+			out[i] = turn
+			continue
+		}
+		indices[id] = len(out)
+		out = append(out, turn)
+	}
+	return out
+}
+
 func mergeLatest(old, latest Object) Object {
 	out := copyObject(latest)
 	if queue := object(latest["queue"]); queue != nil {
 		out["queue"] = mergeMessageQueue(object(old["queue"]), queue)
 	}
-	previous, next := objects(old["turns"]), append([]Object{}, objects(latest["turns"])...)
+	previous, next := uniqueTurns(objects(old["turns"])), uniqueTurns(objects(latest["turns"]))
 	// A recovered connection can first return its last persisted snapshot.
 	// Preserve the live tail until a newer/final snapshot actually supersedes it.
 	if activeTurn(old) != nil {
@@ -235,7 +296,18 @@ func mergeLatest(old, latest Object) Object {
 		}
 		for i, turn := range previous {
 			if str(turn, "id") == str(next[len(next)-1], "id") && i < len(previous)-1 {
-				next = append(append([]Object{}, next...), previous[i+1:]...)
+				// A refreshed prefix can reorder known turns. Appending the whole
+				// old suffix repeats those turns and can double it on each refresh.
+				seen := make(map[string]bool, len(next))
+				for _, turn := range next {
+					seen[str(turn, "id")] = true
+				}
+				for _, turn := range previous[i+1:] {
+					if id := str(turn, "id"); !seen[id] {
+						seen[id] = true
+						next = append(next, turn)
+					}
+				}
 				break
 			}
 		}
@@ -244,7 +316,31 @@ func mergeLatest(old, latest Object) Object {
 	for _, turn := range previous {
 		byID[str(turn, "id")] = turn
 	}
+	// Join a partial first turn only across a known item boundary in the
+	// same epoch. Otherwise the incoming cursor owns the gap.
+	partial := str(latest, "partialTurn")
+	sameEpoch := str(old, "streamEpoch") == str(latest, "streamEpoch")
+	joinedPartial := false
+	if partial != "" && len(next) > 0 && str(next[0], "id") == partial && sameEpoch {
+		prior := objects(byID[partial]["items"])
+		items := objects(next[0]["items"])
+		if len(items) > 0 {
+			for j, item := range prior {
+				if str(item, "id") != "" && str(item, "id") == str(items[0], "id") {
+					first := copyObject(next[0])
+					first["items"] = append(append([]Object{}, prior[:j]...), items...)
+					next[0] = first
+					out["nextCursor"] = old["nextCursor"]
+					joinedPartial = true
+					break
+				}
+			}
+		}
+	}
 	for i, turn := range next {
+		if str(turn, "id") == partial && !joinedPartial {
+			continue
+		}
 		prior := byID[str(turn, "id")]
 		if prior == nil || str(turn, "status") != "inProgress" {
 			continue // A final snapshot is authoritative, including corrected text.
@@ -257,6 +353,15 @@ func mergeLatest(old, latest Object) Object {
 		}
 		merged := copyObject(turn)
 		items := append([]Object{}, objects(prior["items"])...)
+		if flag(old, "_localOlder") && len(previous) > 0 && str(previous[0], "id") == str(turn, "id") && len(items) > 0 {
+			incoming := objects(turn["items"])
+			for j, item := range incoming {
+				if str(item, "id") == str(items[0], "id") {
+					items = append(append([]Object{}, incoming[:j]...), items...)
+					break
+				}
+			}
+		}
 		indices := map[string]int{}
 		for j, item := range items {
 			indices[str(item, "id")] = j
@@ -290,7 +395,10 @@ func mergeLatest(old, latest Object) Object {
 			}
 		}
 	}
-	if anchor > 0 {
+	// The retained prefix carries a source cursor. A fresh replay epoch
+	// can have a different owner or pagination base.
+	oldEpoch, newEpoch := str(old, "streamEpoch"), str(latest, "streamEpoch")
+	if anchor > 0 && (partial == "" || joinedPartial) && (oldEpoch == "" || newEpoch == "" || oldEpoch == newEpoch) {
 		seen := map[string]bool{}
 		for _, t := range next {
 			seen[str(t, "id")] = true

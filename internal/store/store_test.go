@@ -1,6 +1,7 @@
 package store
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"path/filepath"
 	"strings"
@@ -50,7 +51,8 @@ func TestDurableCommandDeduplication(t *testing.T) {
 	}
 	unknown := control.Request{ID: "crashed", Method: "send"}
 	b, _ := json.Marshal(unknown)
-	if _, e = db.Exec("INSERT INTO commands(id,request,state) VALUES(?,?,'pending')", unknown.ID, b); e != nil {
+	hash := sha256.Sum256(b)
+	if _, e = db.Exec("INSERT INTO command_receipts(owner,id,request,state) VALUES('local',?,?,'pending')", unknown.ID, hash[:]); e != nil {
 		t.Fatal(e)
 	}
 	out = db.Execute(unknown, func() control.Response { t.Error("crashed command replayed"); return control.Response{} })

@@ -399,7 +399,7 @@ func (s *State) dialogView(cx *core.Scope, kind string) core.Node {
 		footer = append(footer, busyButton(cx, "confirm-clear-cache", "清除缓存", nil, "primary", pending, func() {
 			s.runAction("confirm-clear-cache:"+dialogTarget, func(ctx context.Context) (any, error) {
 				return s.api.Call(ctx, "client.assetCache.clear", Object{}, target, nil)
-			}, func(any) { close(); s.images = map[string][]byte{}; s.showNotice("附件缓存已清除") })
+			}, func(any) { close(); s.resetImages(); s.showNotice("附件缓存已清除") })
 		}))
 	case kind == "forget":
 		title = "移除设备？"
@@ -481,7 +481,31 @@ func modalDialog(cx *core.Scope, d ui.Dialog, close func()) ui.Dialog {
 		children = append(children, label(cx, d.Description, 13, true))
 	}
 	d.Title, d.Description = "", ""
-	d.Children = append(children, d.Children...)
+	if ui.Touch(cx) {
+		// The sheet's max height alone clips a long form's footer. Let only
+		// its body shrink/scroll, keeping the close and decision actions visible.
+		d.Children = []core.Node{header, core.Scroll{TestID: d.TestID + "-body", Style: core.Style{FlexShrink: 1, MinHeight: core.Pt(0)}, Children: []core.Node{
+			core.View{Style: core.Style{Gap: 12}, Children: append(children[1:], d.Children...)},
+		}}}
+		for i, node := range d.Footer {
+			if action, ok := node.(core.View); ok {
+				action.Style.MinHeight = core.Pt(44)
+				d.Footer[i] = action
+			}
+		}
+		style := d.StyleFunc
+		d.StyleFunc = func() core.Style {
+			var st core.Style
+			if style != nil {
+				st = style()
+			}
+			keyboard := cx.Env().KeyboardHeight()
+			return st.Merge(core.Style{Width: core.Pct(100), MaxWidth: core.Pct(100), Bottom: core.Pt(keyboard),
+				MaxHeight: core.Pt(max(0, cx.Env().Window().Height-keyboard-max(16, cx.Env().SafeArea().Top)))})
+		}
+	} else {
+		d.Children = append(children, d.Children...)
+	}
 	return d
 }
 
@@ -489,6 +513,9 @@ func dialogHeader(cx *core.Scope, id, title string, close func()) core.Node {
 	x := labelledIconButton(cx, id, "关闭弹窗", lucide.X, close).(core.View)
 	x.Style.Width, x.Style.Height = core.Pt(36), core.Pt(36)
 	x.Style.Padding = core.All(8)
+	if ui.Touch(cx) {
+		x.Style.Width, x.Style.Height = core.Pt(44), core.Pt(44)
+	}
 	t := core.Text{Content: title, Role: core.RoleHeader, Style: ui.TypeTitle.Merge(core.Style{FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0)})}
 	return core.View{TestID: id + "-header", Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 12, Margin: core.Edges{Top: -8, Right: -8}}, Children: []core.Node{t, x}}
 }

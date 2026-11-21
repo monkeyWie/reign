@@ -35,9 +35,9 @@ func (s *State) conversationToolbar(cx *core.Scope) core.Node {
 	cache.Style.Width, cache.Style.Height, cache.Style.MinHeight, cache.Style.Padding = core.Pt(32), core.Pt(30), core.Pt(30), core.All(7)
 	return core.View{TestID: "conversation-header", Style: fill.Merge(core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 8, Height: core.Pct(100)}),
 		Children: []core.Node{
-			core.View{TestID: "conversation-title-control", Desktop: core.DesktopViewProps{WindowDrag: core.WindowDragOff}, Style: core.Style{MinWidth: core.Pt(0), FlexShrink: 1}, Children: []core.Node{s.conversationDetails(cx)}},
+			core.View{TestID: "conversation-title-control", Desktop: core.DesktopViewProps{WindowDrag: core.WindowDragOff}, Style: core.Style{MaxWidth: core.Pt(360), MinWidth: core.Pt(0), FlexShrink: 1}, Children: []core.Node{s.conversationDetails(cx)}},
 			spacer(),
-			core.View{TestID: "conversation-toolbar-actions", Desktop: core.DesktopViewProps{WindowDrag: core.WindowDragOff}, Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 4, FlexShrink: 0}, Children: []core.Node{s.conversationConnectionIndicator(cx), cache}},
+			core.View{TestID: "conversation-toolbar-actions", Desktop: core.DesktopViewProps{WindowDrag: core.WindowDragOff}, Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 4, FlexShrink: 0}, Children: []core.Node{s.conversationConnectionIndicator(cx), s.terminalButton(cx), cache}},
 		},
 	}
 }
@@ -77,7 +77,7 @@ func (s *State) conversationDetails(cx *core.Scope) core.Node {
 		},
 		Children: []core.Node{core.View{TestID: "conversation-info-panel", Style: core.Style{Gap: 14, MinWidth: core.Pt(0)}, Children: []core.Node{
 			heading,
-			row(glyph(cx, lucide.Monitor, 16), singleLine(cx, func() string { s.read(); return s.environmentName(s.target) }, 13, true)),
+			row(s.hostGlyph(cx, s.target, 16), singleLine(cx, func() string { s.read(); return s.environmentName(s.target) }, 13, true)),
 			row(agentGlyph(cx, str(s.selected, "providerId"), 16), singleLine(cx, func() string { s.read(); return s.providerName(s.target, str(s.selected, "providerId")) }, 13, true)),
 			core.Show{When: func() bool { s.read(); return projectDirectory(s.selected).Path != "" }, Then: func(cx *core.Scope) core.Node {
 				return core.View{Style: core.Style{Gap: 5}, Children: []core.Node{label(cx, locales.For(cx).Projects(), 11, true),

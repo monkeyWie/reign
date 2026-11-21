@@ -47,6 +47,7 @@ func startPairing(t *testing.T) (*nsgotest.App, *pairingFixture) {
 	t.Helper()
 	f := &pairingFixture{demoAPI: newDemoAPI(), steps: make(chan connectivity.Progress, 2), finish: make(chan error, 1)}
 	app := nsgotest.Start(t, func(cx *core.Scope) core.Node { return RootWithAPI(cx, f, true) }, nsgotest.Size(390, 844), nsgotest.Environment(core.Environment{OS: core.OSAndroid, Idiom: core.IdiomPhone}))
+	showSessionDirectory(t, app)
 	app.WaitFor("id:connect-device", time.Second)
 	app.Press("id:connect-device")
 	app.Type("id:connection-code", "123456")

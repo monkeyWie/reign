@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/monkeyWie/reignhub/pkg/appdb"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -48,7 +49,7 @@ type Provider struct {
 }
 
 func New(c config.Config, _ string, b *events.Broker, stores ...*assets.Store) *Provider {
-	store := assets.New(filepath.Join(c.DataDir, "attachments"))
+	store := assets.NewInDatabase(filepath.Join(c.DataDir, "attachments"), appdb.Path(c.DataDir))
 	if len(stores) > 0 {
 		store = stores[0]
 	}
@@ -179,15 +180,12 @@ type thread struct {
 }
 
 func (t thread) session() provider.Session {
-	title := t.Name
+	title := strings.TrimSpace(t.Name)
 	if title == "" {
-		title = strings.ReplaceAll(t.Preview, "\n", " ")
+		title = strings.TrimSpace(strings.ReplaceAll(t.Preview, "\n", " "))
 		if len([]rune(title)) > 70 {
 			title = string([]rune(title)[:70]) + "…"
 		}
-	}
-	if title == "" {
-		title = "未命名会话"
 	}
 	preview := []rune(t.Preview)
 	if len(preview) > 240 {
@@ -225,7 +223,7 @@ func (p *Provider) Sessions(ctx context.Context, cursor string) (provider.Sessio
 }
 func (p *Provider) TurnStatus(ctx context.Context, session, turn string) (provider.Turn, error) {
 	var out struct{ Data []struct{ ID, Status string } }
-	err := p.call(ctx, "thread/turns/list", map[string]any{"threadId": session, "limit": 30, "sortDirection": "desc", "itemsView": "full", "itemSnapshot": "latest"}, &out)
+	err := p.call(ctx, "thread/turns/list", map[string]any{"threadId": session, "limit": 30, "sortDirection": "desc", "itemsView": "notLoaded"}, &out)
 	if err != nil {
 		return provider.Turn{}, err
 	}
@@ -238,21 +236,29 @@ func (p *Provider) TurnStatus(ctx context.Context, session, turn string) (provid
 }
 
 func (p *Provider) Transcript(ctx context.Context, id, cursor string) (provider.Transcript, error) {
+	ctx, cursor, err := pageContext(ctx, id, cursor)
+	if err != nil {
+		return provider.Transcript{}, err
+	}
+	anchor := historyBoundary(ctx)
 	var refreshErr error
-	if b := p.appBridge(); b != nil && cursor == "" {
+	if b := p.appBridge(); b != nil && cursor == "" && anchor == nil {
 		refreshErr = b.refreshFollower(ctx, id)
 	}
 	if ctx.Err() != nil {
 		return provider.Transcript{}, ctx.Err()
 	}
-	if refreshErr == nil {
+	if refreshErr == nil && (anchor == nil || anchor.IPC) {
 		if out, ok, err := p.ipcTranscript(ctx, id, cursor); ok {
-			if err == nil || strings.HasPrefix(cursor, "ipc:") || ctx.Err() != nil {
+			if err == nil || anchor != nil || strings.HasPrefix(cursor, "ipc:") || ctx.Err() != nil {
 				return out, err
 			}
 			// A broken follower must not hide persisted history. These app-server
 			// APIs only read; they neither resume the thread nor acquire its writer.
 		}
+	}
+	if anchor != nil && anchor.IPC {
+		return provider.Transcript{}, errHistoryBoundary
 	}
 	// Capture before reading: later events can safely replay over this snapshot.
 	epoch, boundary := p.stream().log.Position()
@@ -260,7 +266,11 @@ func (p *Provider) Transcript(ctx context.Context, id, cursor string) (provider.
 	if err := p.call(ctx, "thread/read", map[string]any{"threadId": id}, &metadata); err != nil {
 		return provider.Transcript{}, err
 	}
-	params := map[string]any{"threadId": id, "limit": 30, "sortDirection": "desc", "itemsView": "full", "itemSnapshot": "latest"}
+	pageSize := provider.RecentTurns(ctx)
+	if provider.HistoryItems(ctx) > 0 {
+		pageSize = min(4, pageSize)
+	}
+	params := map[string]any{"threadId": id, "limit": pageSize, "sortDirection": "desc", "itemsView": "full", "itemSnapshot": "latest"}
 	if cursor != "" {
 		params["cursor"] = cursor
 	}
@@ -281,7 +291,59 @@ func (p *Provider) Transcript(ctx context.Context, id, cursor string) (provider.
 	for i := len(turns.Data) - 1; i >= 0; i-- {
 		queueTurns = append(queueTurns, decodeObject(turns.Data[i]))
 	}
-	out.Queue = p.messageQueue(ctx, id, cursor, acceptedQueueMessages(queueTurns))
+	for attempts := 0; anchor != nil; attempts++ {
+		bounded, found, err := throughBoundary(queueTurns, anchor)
+		if err != nil {
+			return provider.Transcript{}, err
+		}
+		if found {
+			queueTurns = bounded
+			break
+		}
+		if turns.NextCursor == "" || cursor == turns.NextCursor || attempts >= 31 {
+			return provider.Transcript{}, errHistoryBoundary
+		}
+		cursor = turns.NextCursor
+		params["cursor"] = cursor
+		turns.Data, turns.NextCursor = nil, ""
+		if err = p.call(ctx, "thread/turns/list", params, &turns); err != nil {
+			return provider.Transcript{}, err
+		}
+		out.NextCursor = turns.NextCursor
+		queueTurns = nil
+		for i := len(turns.Data) - 1; i >= 0; i-- {
+			queueTurns = append(queueTurns, decodeObject(turns.Data[i]))
+		}
+	}
+	accepted := acceptedQueueMessages(queueTurns)
+	if anchor == nil {
+		out.Queue = p.messageQueue(ctx, id, cursor, accepted)
+	}
+	// A staged message can already have a receipt in the original 30-turn
+	// reconciliation horizon. Only fetch those older items when an apparently
+	// pending queue needs verification. They stay on the host.
+	if cursor == "" && pageSize < 30 && turns.NextCursor != "" && out.Queue != nil && len(out.Queue.Messages) != 0 {
+		params["cursor"], params["limit"] = turns.NextCursor, 30-pageSize
+		var older struct{ Data []json.RawMessage }
+		if err := p.call(ctx, "thread/turns/list", params, &older); err != nil {
+			out.Queue = &provider.MessageQueue{State: "unknown"}
+		} else {
+			for _, raw := range older.Data {
+				for receipt := range acceptedQueueMessages([]map[string]any{decodeObject(raw)}) {
+					accepted[receipt] = true
+				}
+			}
+			out.Queue = p.messageQueue(ctx, id, cursor, accepted)
+		}
+	}
+	if n := provider.HistoryItems(ctx); n > 0 {
+		var visible []map[string]any
+		visible, out.NextCursor, out.PartialTurn = itemWindow(queueTurns, n, id, cursor, out.NextCursor, false)
+		turns.Data = make([]json.RawMessage, len(visible))
+		for i, t := range visible {
+			turns.Data[len(visible)-1-i] = rawJSON(t)
+		}
+	}
 	if err := provider.ObserveTranscript(ctx, out); err != nil {
 		return provider.Transcript{}, err
 	}
@@ -298,7 +360,7 @@ func (p *Provider) Transcript(ctx context.Context, id, cursor string) (provider.
 	}
 	// Historical turns may retain inProgress after a client restart or a
 	// superseding turn. Only the newest turn on the latest page is actionable.
-	if cursor == "" && len(out.Turns) > 0 {
+	if cursor == "" && anchor == nil && len(out.Turns) > 0 {
 		latest := out.Turns[len(out.Turns)-1]
 		if latest.Status == "inProgress" {
 			out.Session.ActiveTurnID = latest.ID
@@ -367,7 +429,9 @@ func normalizeTurn(raw json.RawMessage) provider.Turn {
 					item.ReasoningSummary = summary
 				}
 			}
-		case "functionCallOutput", "hookPrompt", "contextCompaction", "enteredReviewMode", "exitedReviewMode", "steered":
+		case "contextCompaction":
+			item.Role, item.Text = "system", ""
+		case "functionCallOutput", "hookPrompt", "enteredReviewMode", "exitedReviewMode", "steered":
 			item.Role = "internal"
 			item.Text = ""
 		default:
@@ -399,7 +463,7 @@ func normalizeTurn(raw json.RawMessage) provider.Turn {
 			ms := *t.StartedAt * 1000
 			item.TimestampMS, item.TimestampSource = &ms, "turnStarted"
 		}
-		if strings.TrimSpace(item.Text) != "" || len(item.Activities) > 0 || item.Role == "tool" || item.Role == "reasoning" || item.Role == "assistant" || (item.Role == "user" && len(i.Content) > 0) {
+		if strings.TrimSpace(item.Text) != "" || len(item.Activities) > 0 || item.Role == "tool" || item.Type == "contextCompaction" || item.Role == "reasoning" || item.Role == "assistant" || (item.Role == "user" && len(i.Content) > 0) {
 			out.Items = append(out.Items, item)
 		}
 	}

@@ -16,6 +16,7 @@ import (
 	"github.com/monkeyWie/reignhub/internal/clienthub"
 	"github.com/monkeyWie/reignhub/internal/config"
 	"github.com/monkeyWie/reignhub/internal/control"
+	"github.com/monkeyWie/reignhub/internal/terminal"
 )
 
 var mu sync.Mutex
@@ -25,6 +26,14 @@ var bridgeContext, cancelBridge = context.WithCancel(context.Background())
 var hubs = map[string]*clienthub.Hub{}
 var hosts = map[string]*app.Embedded{}
 var shuttingDown bool
+var terminalFactory terminal.Factory
+
+// SetTerminalFactory supplies the desktop engine before the first host starts.
+func SetTerminalFactory(factory terminal.Factory) {
+	hostMu.Lock()
+	defer hostMu.Unlock()
+	terminalFactory = factory
+}
 
 func embeddedHost(dir, uiPath string) (*app.Embedded, error) {
 	hostMu.Lock()
@@ -46,7 +55,7 @@ func embeddedHost(dir, uiPath string) (*app.Embedded, error) {
 		}
 	}
 	// The lifetime belongs to the application, never to a short-lived UI call.
-	h, err := app.StartEmbedded(context.Background(), c)
+	h, err := app.StartEmbedded(context.Background(), c, terminalFactory)
 	if err != nil {
 		return nil, err
 	}

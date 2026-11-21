@@ -53,6 +53,8 @@ var Parameters = map[string][]string{
 	"WorkSeconds":             {"seconds"},
 	"WorkMinutesSeconds":      {"minutes", "seconds"},
 	"WorkHoursMinutesSeconds": {"hours", "minutes", "seconds"},
+	"NumberedTerminal":        {"number"},
+	"KillTerminalTab":         {"number"},
 }
 
 // Translation is a language's messages another package supplies:
@@ -71,6 +73,8 @@ type Translation struct {
 	WorkSeconds             func(seconds int) string
 	WorkMinutesSeconds      func(minutes int, seconds int) string
 	WorkHoursMinutesSeconds func(hours int, minutes int, seconds int) string
+	NumberedTerminal        func(number int) string
+	KillTerminalTab         func(number int) string
 }
 
 var supplied = map[string]Translation{}
@@ -142,6 +146,7 @@ const (
 	textClearFilters
 	textNoFilterMatches
 	textProjects
+	textContextCompacted
 	textWorkDetails
 	textWorkedUnderSecond
 	textRemoveSession
@@ -176,6 +181,24 @@ const (
 	textEnableAgent
 	textSessionInformation
 	textWorkingDirectory
+	textTerminal
+	textTerminalTabs
+	textChooseTerminal
+	textNewTerminal
+	textToggleTerminal
+	textHideTerminal
+	textTerminateTerminal
+	textReconnectTerminal
+	textReopenTerminal
+	textResizeTerminal
+	textTerminalConnecting
+	textTerminalExited
+	textTerminalUnsupported
+	textTerminalCopy
+	textTerminalPaste
+	textTerminalSelectAll
+	textRemoteTerminal
+	textRemoteTerminalHint
 	numTexts
 )
 
@@ -247,6 +270,7 @@ var keyOfText = [numTexts]string{
 	"clearFilters",
 	"noFilterMatches",
 	"projects",
+	"contextCompacted",
 	"workDetails",
 	"workedUnderSecond",
 	"removeSession",
@@ -281,6 +305,24 @@ var keyOfText = [numTexts]string{
 	"enableAgent",
 	"sessionInformation",
 	"workingDirectory",
+	"terminal",
+	"terminalTabs",
+	"chooseTerminal",
+	"newTerminal",
+	"toggleTerminal",
+	"hideTerminal",
+	"terminateTerminal",
+	"reconnectTerminal",
+	"reopenTerminal",
+	"resizeTerminal",
+	"terminalConnecting",
+	"terminalExited",
+	"terminalUnsupported",
+	"terminalCopy",
+	"terminalPaste",
+	"terminalSelectAll",
+	"remoteTerminal",
+	"remoteTerminalHint",
 }
 
 // textsEn are the messages without arguments in en.
@@ -350,6 +392,7 @@ var textsEn = i18n.NewTexts(""+
 	"Clear filters"+
 	"No matching sessions. Try clearing the filters."+
 	"Projects"+
+	"Context automatically compacted"+
 	"Work details"+
 	"Worked for less than a second"+
 	"Remove session"+
@@ -383,7 +426,25 @@ var textsEn = i18n.NewTexts(""+
 	"Configure service"+
 	"Enable"+
 	"Session information"+
-	"Working directory",
+	"Working directory"+
+	"Terminal"+
+	"Terminal tabs"+
+	"New terminal with profile"+
+	"New terminal"+
+	"Toggle terminal"+
+	"Hide terminal"+
+	"Kill terminal"+
+	"Reconnect terminal"+
+	"Reopen terminal"+
+	"Resize terminal"+
+	"Connecting terminal…"+
+	"Exited"+
+	"Update ReignHub on this device to use terminals"+
+	"Copy"+
+	"Paste"+
+	"Select all"+
+	"Allow remote terminals"+
+	"Paired devices can run commands on this computer.",
 	[]uint16{
 		6,
 		17,
@@ -450,6 +511,7 @@ var textsEn = i18n.NewTexts(""+
 		13,
 		47,
 		8,
+		31,
 		12,
 		29,
 		14,
@@ -484,6 +546,24 @@ var textsEn = i18n.NewTexts(""+
 		6,
 		19,
 		17,
+		8,
+		13,
+		25,
+		12,
+		15,
+		13,
+		13,
+		18,
+		15,
+		15,
+		22,
+		6,
+		47,
+		4,
+		5,
+		10,
+		22,
+		49,
 	})
 
 // textsZhHans are the messages without arguments in zh-Hans.
@@ -553,6 +633,7 @@ var textsZhHans = i18n.NewTexts(""+
 	"清除筛选"+
 	"没有匹配的会话，可以清除筛选后重试。"+
 	"项目"+
+	"上下文已自动压缩"+
 	"处理过程"+
 	"已处理不到 1 秒"+
 	"移除会话"+
@@ -586,7 +667,25 @@ var textsZhHans = i18n.NewTexts(""+
 	"配置服务"+
 	"启用"+
 	"会话信息"+
-	"工作目录",
+	"工作目录"+
+	"终端"+
+	"终端标签页"+
+	"选择终端类型"+
+	"新建终端"+
+	"展开或收起终端"+
+	"收起终端"+
+	"结束终端"+
+	"重新连接终端"+
+	"重新打开终端"+
+	"调整终端高度"+
+	"正在连接终端…"+
+	"已退出"+
+	"此设备尚不支持终端，请更新其 ReignHub"+
+	"复制"+
+	"粘贴"+
+	"全选"+
+	"允许远程终端"+
+	"允许已配对设备在这台电脑上运行命令。",
 	[]uint16{
 		6,
 		12,
@@ -653,6 +752,7 @@ var textsZhHans = i18n.NewTexts(""+
 		12,
 		54,
 		6,
+		24,
 		12,
 		21,
 		12,
@@ -687,6 +787,24 @@ var textsZhHans = i18n.NewTexts(""+
 		6,
 		12,
 		12,
+		6,
+		15,
+		18,
+		12,
+		21,
+		12,
+		12,
+		18,
+		18,
+		18,
+		21,
+		9,
+		51,
+		6,
+		6,
+		6,
+		18,
+		54,
 	})
 
 // texts returns the messages without arguments in lang, nil for a
@@ -772,6 +890,12 @@ func Supply(lang string, t Translation) {
 	}
 	if t.WorkHoursMinutesSeconds != nil {
 		s.WorkHoursMinutesSeconds = t.WorkHoursMinutesSeconds
+	}
+	if t.NumberedTerminal != nil {
+		s.NumberedTerminal = t.NumberedTerminal
+	}
+	if t.KillTerminalTab != nil {
+		s.KillTerminalTab = t.KillTerminalTab
 	}
 	supplied[lang] = s
 	Catalog.Add(lang)
@@ -1379,6 +1503,13 @@ func (msgs Messages) DetachedGitHead(commit string) string {
 	}
 }
 
+// ContextCompacted says "Context automatically compacted"
+// in the language the app shows under cx.
+func ContextCompacted(cx *core.Scope) string { return For(cx).ContextCompacted() }
+
+// ContextCompacted is the package's ContextCompacted in the language of msgs.
+func (msgs Messages) ContextCompacted() string { return msgs.text(textContextCompacted) }
+
 // WorkDetails says "Work details"
 // in the language the app shows under cx.
 func WorkDetails(cx *core.Scope) string { return For(cx).WorkDetails() }
@@ -1708,3 +1839,173 @@ func WorkingDirectory(cx *core.Scope) string { return For(cx).WorkingDirectory()
 
 // WorkingDirectory is the package's WorkingDirectory in the language of msgs.
 func (msgs Messages) WorkingDirectory() string { return msgs.text(textWorkingDirectory) }
+
+// Terminal says "Terminal"
+// in the language the app shows under cx.
+func Terminal(cx *core.Scope) string { return For(cx).Terminal() }
+
+// Terminal is the package's Terminal in the language of msgs.
+func (msgs Messages) Terminal() string { return msgs.text(textTerminal) }
+
+// TerminalTabs says "Terminal tabs"
+// in the language the app shows under cx.
+func TerminalTabs(cx *core.Scope) string { return For(cx).TerminalTabs() }
+
+// TerminalTabs is the package's TerminalTabs in the language of msgs.
+func (msgs Messages) TerminalTabs() string { return msgs.text(textTerminalTabs) }
+
+// ChooseTerminal says "New terminal with profile"
+// in the language the app shows under cx.
+func ChooseTerminal(cx *core.Scope) string { return For(cx).ChooseTerminal() }
+
+// ChooseTerminal is the package's ChooseTerminal in the language of msgs.
+func (msgs Messages) ChooseTerminal() string { return msgs.text(textChooseTerminal) }
+
+// NewTerminal says "New terminal"
+// in the language the app shows under cx.
+func NewTerminal(cx *core.Scope) string { return For(cx).NewTerminal() }
+
+// NewTerminal is the package's NewTerminal in the language of msgs.
+func (msgs Messages) NewTerminal() string { return msgs.text(textNewTerminal) }
+
+// NumberedTerminal says "Terminal {number, number, integer}"
+// in the language the app shows under cx.
+func NumberedTerminal(cx *core.Scope, number int) string { return For(cx).NumberedTerminal(number) }
+
+// NumberedTerminal is the package's NumberedTerminal in the language of msgs.
+func (msgs Messages) NumberedTerminal(number int) string {
+	if i18n.IsPseudo(msgs.lang) {
+		return i18n.Pseudo(msgs.lang, Messages{lang: Source, mark: true}.NumberedTerminal(number))
+	}
+	for lang := msgs.lang; ; lang = i18n.Parent(lang) {
+		if f := supplied[lang].NumberedTerminal; f != nil {
+			return f(number)
+		}
+		switch lang {
+		case "", "en":
+			return "Terminal " + msgs.arg(i18n.FormatInteger("en", float64(number)))
+		case "zh-Hans":
+			return "终端 " + i18n.FormatInteger("zh-Hans", float64(number))
+		}
+	}
+}
+
+// KillTerminalTab says "Kill terminal {number, number, integer}"
+// in the language the app shows under cx.
+func KillTerminalTab(cx *core.Scope, number int) string { return For(cx).KillTerminalTab(number) }
+
+// KillTerminalTab is the package's KillTerminalTab in the language of msgs.
+func (msgs Messages) KillTerminalTab(number int) string {
+	if i18n.IsPseudo(msgs.lang) {
+		return i18n.Pseudo(msgs.lang, Messages{lang: Source, mark: true}.KillTerminalTab(number))
+	}
+	for lang := msgs.lang; ; lang = i18n.Parent(lang) {
+		if f := supplied[lang].KillTerminalTab; f != nil {
+			return f(number)
+		}
+		switch lang {
+		case "", "en":
+			return "Kill terminal " + msgs.arg(i18n.FormatInteger("en", float64(number)))
+		case "zh-Hans":
+			return "结束终端 " + i18n.FormatInteger("zh-Hans", float64(number))
+		}
+	}
+}
+
+// ToggleTerminal says "Toggle terminal"
+// in the language the app shows under cx.
+func ToggleTerminal(cx *core.Scope) string { return For(cx).ToggleTerminal() }
+
+// ToggleTerminal is the package's ToggleTerminal in the language of msgs.
+func (msgs Messages) ToggleTerminal() string { return msgs.text(textToggleTerminal) }
+
+// HideTerminal says "Hide terminal"
+// in the language the app shows under cx.
+func HideTerminal(cx *core.Scope) string { return For(cx).HideTerminal() }
+
+// HideTerminal is the package's HideTerminal in the language of msgs.
+func (msgs Messages) HideTerminal() string { return msgs.text(textHideTerminal) }
+
+// TerminateTerminal says "Kill terminal"
+// in the language the app shows under cx.
+func TerminateTerminal(cx *core.Scope) string { return For(cx).TerminateTerminal() }
+
+// TerminateTerminal is the package's TerminateTerminal in the language of msgs.
+func (msgs Messages) TerminateTerminal() string { return msgs.text(textTerminateTerminal) }
+
+// ReconnectTerminal says "Reconnect terminal"
+// in the language the app shows under cx.
+func ReconnectTerminal(cx *core.Scope) string { return For(cx).ReconnectTerminal() }
+
+// ReconnectTerminal is the package's ReconnectTerminal in the language of msgs.
+func (msgs Messages) ReconnectTerminal() string { return msgs.text(textReconnectTerminal) }
+
+// ReopenTerminal says "Reopen terminal"
+// in the language the app shows under cx.
+func ReopenTerminal(cx *core.Scope) string { return For(cx).ReopenTerminal() }
+
+// ReopenTerminal is the package's ReopenTerminal in the language of msgs.
+func (msgs Messages) ReopenTerminal() string { return msgs.text(textReopenTerminal) }
+
+// ResizeTerminal says "Resize terminal"
+// in the language the app shows under cx.
+func ResizeTerminal(cx *core.Scope) string { return For(cx).ResizeTerminal() }
+
+// ResizeTerminal is the package's ResizeTerminal in the language of msgs.
+func (msgs Messages) ResizeTerminal() string { return msgs.text(textResizeTerminal) }
+
+// TerminalConnecting says "Connecting terminal…"
+// in the language the app shows under cx.
+func TerminalConnecting(cx *core.Scope) string { return For(cx).TerminalConnecting() }
+
+// TerminalConnecting is the package's TerminalConnecting in the language of msgs.
+func (msgs Messages) TerminalConnecting() string { return msgs.text(textTerminalConnecting) }
+
+// TerminalExited says "Exited"
+// in the language the app shows under cx.
+func TerminalExited(cx *core.Scope) string { return For(cx).TerminalExited() }
+
+// TerminalExited is the package's TerminalExited in the language of msgs.
+func (msgs Messages) TerminalExited() string { return msgs.text(textTerminalExited) }
+
+// TerminalUnsupported says "Update ReignHub on this device to use terminals"
+// in the language the app shows under cx.
+func TerminalUnsupported(cx *core.Scope) string { return For(cx).TerminalUnsupported() }
+
+// TerminalUnsupported is the package's TerminalUnsupported in the language of msgs.
+func (msgs Messages) TerminalUnsupported() string { return msgs.text(textTerminalUnsupported) }
+
+// TerminalCopy says "Copy"
+// in the language the app shows under cx.
+func TerminalCopy(cx *core.Scope) string { return For(cx).TerminalCopy() }
+
+// TerminalCopy is the package's TerminalCopy in the language of msgs.
+func (msgs Messages) TerminalCopy() string { return msgs.text(textTerminalCopy) }
+
+// TerminalPaste says "Paste"
+// in the language the app shows under cx.
+func TerminalPaste(cx *core.Scope) string { return For(cx).TerminalPaste() }
+
+// TerminalPaste is the package's TerminalPaste in the language of msgs.
+func (msgs Messages) TerminalPaste() string { return msgs.text(textTerminalPaste) }
+
+// TerminalSelectAll says "Select all"
+// in the language the app shows under cx.
+func TerminalSelectAll(cx *core.Scope) string { return For(cx).TerminalSelectAll() }
+
+// TerminalSelectAll is the package's TerminalSelectAll in the language of msgs.
+func (msgs Messages) TerminalSelectAll() string { return msgs.text(textTerminalSelectAll) }
+
+// RemoteTerminal says "Allow remote terminals"
+// in the language the app shows under cx.
+func RemoteTerminal(cx *core.Scope) string { return For(cx).RemoteTerminal() }
+
+// RemoteTerminal is the package's RemoteTerminal in the language of msgs.
+func (msgs Messages) RemoteTerminal() string { return msgs.text(textRemoteTerminal) }
+
+// RemoteTerminalHint says "Paired devices can run commands on this computer."
+// in the language the app shows under cx.
+func RemoteTerminalHint(cx *core.Scope) string { return For(cx).RemoteTerminalHint() }
+
+// RemoteTerminalHint is the package's RemoteTerminalHint in the language of msgs.
+func (msgs Messages) RemoteTerminalHint() string { return msgs.text(textRemoteTerminalHint) }

@@ -40,6 +40,7 @@ func checkUnsupportedApp(t *testing.T, width, height core.Points, name string) {
 		s.initialize()
 		return s.workspaceView(cx)
 	}, nsgotest.Size(width, height), nsgotest.Environment(core.Environment{OS: core.OSMacOS, Idiom: core.IdiomDesktop, Locale: "en"}))
+	showSessionDirectory(t, app)
 	app.WaitFor("id:sidebar-menu", 3*time.Second)
 	sidebarMenuAction(app, "server-settings")
 	app.WaitFor("id:settings-nav-agents", 3*time.Second)

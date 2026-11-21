@@ -9,9 +9,11 @@ require (
 	github.com/egoist/mygo v0.8.3
 	github.com/evanphx/json-patch/v5 v5.9.0
 	github.com/google/uuid v1.6.0
+	github.com/pion/ice/v4 v4.0.13
 	github.com/pion/stun/v3 v3.0.2
 	github.com/pion/transport/v3 v3.1.1
 	github.com/pion/webrtc/v4 v4.1.8
+	github.com/quic-go/quic-go v0.64.1
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	github.com/wlynxg/anet v0.0.5
 	github.com/yuin/goldmark v1.7.13
@@ -34,7 +36,6 @@ require (
 	github.com/ncruces/go-strftime v0.1.9 // indirect
 	github.com/pion/datachannel v1.5.10 // indirect
 	github.com/pion/dtls/v3 v3.0.8 // indirect
-	github.com/pion/ice/v4 v4.0.13 // indirect
 	github.com/pion/interceptor v0.1.42 // indirect
 	github.com/pion/logging v0.2.4 // indirect
 	github.com/pion/mdns/v2 v2.1.0 // indirect

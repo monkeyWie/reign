@@ -592,7 +592,7 @@ func TestInstalledAppSteerContract(t *testing.T) {
 	}
 	input := []any{map[string]string{"type": "text", "text": "isolated fixture"}}
 	params := map[string]any{"conversationId": "fixture", "clientUserMessageId": "fixture-message", "input": input, "restoreMessage": ipcRestoreMessage(map[string]any{"cwd": "/project"}, input, "fixture-message"), "attachments": []any{}}
-	cmd := exec.Command("node", "../../docs/research/verification/codex-steer-2026-11-18/validate.cjs", asar, string(rawJSON(params)))
+	cmd := exec.Command("node", "testdata/installed-app/steer.cjs", asar, string(rawJSON(params)))
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("offline App entry check: %v: %s", err, out)

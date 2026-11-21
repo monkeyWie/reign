@@ -9,7 +9,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/coder/websocket"
 	"github.com/monkeyWie/reignhub/internal/connectivity"
 	"github.com/monkeyWie/reignhub/internal/control"
 	"github.com/monkeyWie/reignhub/internal/provider"
@@ -19,12 +18,13 @@ import (
 )
 
 type Client struct {
-	wire       *wire
-	mu         sync.Mutex
-	pending    map[string]*pendingCall
-	done       chan struct{}
-	cache      map[string]snapshot
-	cacheBytes int
+	hostPlatform string
+	wire         *wire
+	mu           sync.Mutex
+	pending      map[string]*pendingCall
+	done         chan struct{}
+	cache        map[string]snapshot
+	cacheBytes   int
 }
 
 type pendingCall struct {
@@ -49,16 +49,8 @@ func connectOnce(ctx context.Context, p Pairing, opts Options) (*Client, error) 
 	} else {
 		ctx = connectivity.WithProgress(ctx, opts.Progress)
 	}
-	var ws, dataWS *websocket.Conn
-	var peer string
-	var allowRelay bool
-	var err error
-	if opts.RelayOnly {
-		ws, dataWS, peer, err = dialWithRelayPolicy(ctx, p, "client", connectivity.StageTimeout, true)
-		allowRelay = dataWS != nil
-	} else {
-		ws, peer, allowRelay, err = dialSignal(ctx, p, "client", connectivity.StageTimeout)
-	}
+	ws, dataWS, welcome, err := dialService(ctx, p, "client", connectivity.StageTimeout, opts)
+	peer, allowRelay := welcome.Peer, welcome.AllowRelay
 	if err != nil {
 		return nil, err
 	}
@@ -72,7 +64,7 @@ func connectOnce(ctx context.Context, p Pairing, opts Options) (*Client, error) 
 		ch := c.pending[r.ID]
 		c.mu.Unlock()
 		if ch != nil && ch.ctx.Err() == nil {
-			ch.responses.Push(r, len(data))
+			ch.responses.PushSequence(r, len(data), r.Sequence)
 		}
 
 	})
@@ -80,6 +72,7 @@ func connectOnce(ctx context.Context, p Pairing, opts Options) (*Client, error) 
 		ws.CloseNow()
 		return nil, err
 	}
+	w.native.welcome, w.native.hostID = welcome.Native, p.Host
 	c.wire = w
 	w.wantsResponse = func(id string) bool {
 		c.mu.Lock()
@@ -142,7 +135,7 @@ func connectOnce(ctx context.Context, p Pairing, opts Options) (*Client, error) 
 		message = "优先尝试 P2P 直连，必要时自动使用中继"
 	}
 	if opts.RelayOnly {
-		if dataWS == nil {
+		if !allowRelay {
 			c.Close()
 			return nil, errors.New("当前服务未提供中继权限，请关闭“仅用中继”后尝试直连，或使用支持中继的服务")
 		}
@@ -164,18 +157,25 @@ func connectOnce(ctx context.Context, p Pairing, opts Options) (*Client, error) 
 	verifyCtx, stopVerify := context.WithTimeout(ctx, connectivity.StageTimeout)
 	defer stopVerify()
 	// Prove possession of the pairing key before presenting a connected UI.
-	var statuses json.RawMessage
+	var statuses control.NetworkStatus
 	if err = c.Call(verifyCtx, control.Request{Method: "network"}, &statuses); err != nil {
 		c.Close()
 		return nil, fmt.Errorf("配对验证失败: %w", err)
 	}
+	c.hostPlatform = statuses.Platform
 	w.meter.Connected()
 	return c, nil
 }
 
+// HostPlatform is the OS reported during encrypted connection verification.
+func (c *Client) HostPlatform() string { return c.hostPlatform }
+
 // Business RPCs have no total deadline. End their wait when every usable data
 // path has actually gone away, even if the signaling socket remains open.
-func (c *Client) recoveringICE() bool {
+func (c *Client) recoveringPath() bool {
+	if c.wire.native.relayNegotiated.Load() && !c.wire.signalLost.Load() {
+		return true
+	}
 	c.wire.mu.Lock()
 	pc, dc := c.wire.pc, c.wire.dc
 	c.wire.mu.Unlock()
@@ -188,7 +188,7 @@ func (c *Client) Resume(ctx context.Context) error {
 	tick := time.NewTicker(100 * time.Millisecond)
 	defer tick.Stop()
 	for c.Path() == "Disconnected" {
-		if !c.recoveringICE() {
+		if !c.recoveringPath() {
 			return errors.New("连接已断开")
 		}
 		select {
@@ -222,8 +222,8 @@ func (c *Client) watchPaths() {
 			}
 			// ICE disconnected is transient: allow the existing DTLS/SCTP
 			// channel to recover before destroying it and its encryption state.
-			if !c.recoveringICE() || time.Since(lost) >= 20*time.Second {
-				c.wire.progress("paths-lost", "transport", "所有数据路径不可用，开始恢复连接", fmt.Sprintf("recoveringICE=%t elapsed=%s", c.recoveringICE(), time.Since(lost).Round(time.Millisecond)), "warning")
+			if !c.recoveringPath() || time.Since(lost) >= 20*time.Second {
+				c.wire.progress("paths-lost", "transport", "所有数据路径不可用，开始恢复连接", fmt.Sprintf("recoveringPath=%t elapsed=%s", c.recoveringPath(), time.Since(lost).Round(time.Millisecond)), "warning")
 				_ = c.Close()
 				return
 			}
@@ -241,7 +241,7 @@ func (c *Client) Path() string {
 	if strings.HasPrefix(path, "P2P") {
 		return path
 	}
-	if c.wire.relaySocket() == nil {
+	if c.wire.relaySocket() == nil && c.wire.native.relay.Load() == nil {
 		return "Disconnected"
 	}
 	return path
@@ -266,7 +266,8 @@ func (c *Client) Call(ctx context.Context, r control.Request, out any) (callErr 
 		c.mu.Lock()
 		cached = c.cache[cacheKey]
 		c.mu.Unlock()
-		if !r.Progress {
+		if cached.revision != "" && (!r.Progress || (r.Method == "transcript" && r.HistoryItems > 0)) {
+			r.Progress = false
 			r.Revision = cached.revision
 		}
 	}

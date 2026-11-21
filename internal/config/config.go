@@ -2,12 +2,11 @@ package config
 
 import (
 	"crypto/rand"
-	"database/sql"
+
 	"encoding/hex"
-	"encoding/json"
-	"errors"
+
 	"fmt"
-	"github.com/monkeyWie/reignhub/pkg/localstate"
+
 	"os"
 	"path/filepath"
 	"sync"
@@ -18,21 +17,22 @@ type Config struct {
 	ServiceURL string `json:"serviceUrl,omitempty"`
 	DeviceName string `json:"deviceName,omitempty"`
 	// AgentEnabled is a local integration preference. Missing entries default on.
-	AgentEnabled  map[string]bool  `json:"agentEnabled,omitempty"`
-	Agents        map[string]Agent `json:"agents,omitempty"`
-	DataDir       string           `json:"-"`
-	Listen        string           `json:"listen"`
-	RemoteListen  string           `json:"remoteListen"`
-	RemoteEnabled bool             `json:"remoteEnabled"`
-	DesktopListen string           `json:"desktopListen"`
-	CodexCLI      string           `json:"codexCli"`
-	CodexApp      string           `json:"codexApp"`
-	TLSCert       string           `json:"tlsCert,omitempty"`
-	TLSKey        string           `json:"tlsKey,omitempty"`
-	RelayURL      string           `json:"relayUrl,omitempty"`
-	RelayToken    string           `json:"relayToken,omitempty"`
-	HostID        string           `json:"hostId,omitempty"`
-	STUN          []string         `json:"stun,omitempty"`
+	AgentEnabled          map[string]bool  `json:"agentEnabled,omitempty"`
+	Agents                map[string]Agent `json:"agents,omitempty"`
+	DataDir               string           `json:"-"`
+	Listen                string           `json:"listen"`
+	RemoteListen          string           `json:"remoteListen"`
+	RemoteEnabled         bool             `json:"remoteEnabled"`
+	RemoteTerminalEnabled bool             `json:"remoteTerminalEnabled,omitempty"`
+	DesktopListen         string           `json:"desktopListen"`
+	CodexCLI              string           `json:"codexCli"`
+	CodexApp              string           `json:"codexApp"`
+	TLSCert               string           `json:"tlsCert,omitempty"`
+	TLSKey                string           `json:"tlsKey,omitempty"`
+	RelayURL              string           `json:"relayUrl,omitempty"`
+	RelayToken            string           `json:"relayToken,omitempty"`
+	HostID                string           `json:"hostId,omitempty"`
+	STUN                  []string         `json:"stun,omitempty"`
 }
 
 func (c Config) AgentIsEnabled(id string) bool {
@@ -63,18 +63,7 @@ func Load(dir string) (Config, error) {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return c, err
 	}
-	err := localstate.Get(filepath.Join(dir, "settings.db"), "config", &c)
-	if errors.Is(err, sql.ErrNoRows) {
-		// Preserve explicit settings from older builds without deleting their file.
-		data, readErr := os.ReadFile(filepath.Join(dir, "config.json"))
-		if readErr == nil {
-			if err = json.Unmarshal(data, &c); err != nil {
-				return c, fmt.Errorf("invalid legacy config: %w", err)
-			}
-		} else if !os.IsNotExist(readErr) {
-			return c, readErr
-		}
-	} else if err != nil {
+	if err := readSettings(dir, &c); err != nil {
 		return c, err
 	}
 
@@ -87,7 +76,7 @@ var saveMu sync.Mutex
 func (c Config) Save() error {
 	saveMu.Lock()
 	defer saveMu.Unlock()
-	return localstate.Put(filepath.Join(c.DataDir, "settings.db"), "config", c)
+	return writeSettings(c)
 }
 
 func AccessKey(dir string) (string, error) {

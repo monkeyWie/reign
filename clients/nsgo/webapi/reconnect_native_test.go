@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -76,7 +77,7 @@ func TestReconnectReusesConnectionThenCachedPairingAndFallsBack(t *testing.T) {
 	var err error
 	id := server.URL + "|" + host
 	saved := Object{"id": id, "service": server.URL, "connectionId": "654321", "name": "test host", "host": host, "public": "host-public", "key": key, "relayOnly": true}
-	if err = storage.Put("devices", []Object{saved}); err != nil {
+	if err = storage.SaveEnvironment(context.Background(), saved); err != nil {
 		t.Fatal(err)
 	}
 	if err = storage.Put("identity:"+server.URL, Object{"token": token}); err != nil {
@@ -97,6 +98,10 @@ func TestReconnectReusesConnectionThenCachedPairingAndFallsBack(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("browser did not publish authenticated profile")
+	}
+	devices, err := h.saved()
+	if err != nil || len(devices) != 1 || str(devices[0], "platform") != runtime.GOOS {
+		t.Fatal("browser pairing did not retain the verified host platform")
 	}
 	first := h.client(id)
 	if resolves.Load() != 0 {
@@ -132,7 +137,7 @@ func TestReconnectReusesConnectionThenCachedPairingAndFallsBack(t *testing.T) {
 		t.Fatalf("full discovery fallback count: %d", resolves.Load())
 	}
 	saved["reconnectDisabled"] = true
-	if err = storage.Put("devices", []Object{saved}); err != nil {
+	if err = storage.SaveEnvironment(context.Background(), saved); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = reconnect(setup); err == nil {

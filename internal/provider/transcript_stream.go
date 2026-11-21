@@ -10,6 +10,26 @@ import (
 const TranscriptTextChunkSize = 2048
 
 type transcriptObserverKey struct{}
+type recentTurnsKey struct{}
+type historyItemsKey struct{}
+
+func WithHistoryItems(ctx context.Context, n int) context.Context {
+	return context.WithValue(ctx, historyItemsKey{}, n)
+}
+func HistoryItems(ctx context.Context) int { n, _ := ctx.Value(historyItemsKey{}).(int); return n }
+
+// RecentTurns bounds the opening page for turn-paginated sources.
+// Historical continuation requests use the source's regular page size.
+func WithRecentTurns(ctx context.Context, n int) context.Context {
+	return context.WithValue(ctx, recentTurnsKey{}, n)
+}
+
+func RecentTurns(ctx context.Context) int {
+	if n, ok := ctx.Value(recentTurnsKey{}).(int); ok && n >= 1 && n <= 30 {
+		return n
+	}
+	return 30
+}
 
 // WithTranscriptObserver delivers immutable history fragments in source order.
 // The final Transcript is still authoritative; fragments may be interrupted.
@@ -72,6 +92,7 @@ type TranscriptBuffer struct {
 func (b *TranscriptBuffer) Add(fragment Transcript) error {
 	b.Seen = true
 	b.StreamEpoch, b.StreamCursor = fragment.StreamEpoch, fragment.StreamCursor
+	b.PartialTurn = fragment.PartialTurn
 	b.Session, b.NextCursor = fragment.Session, fragment.NextCursor
 	if fragment.Queue != nil {
 		b.Queue = fragment.Queue

@@ -11,8 +11,17 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/monkeyWie/reignhub/internal/connectivity"
 	"github.com/monkeyWie/reignhub/internal/relay"
 )
+
+func dial(ctx context.Context, p Pairing, role string) (*websocket.Conn, *websocket.Conn, string, error) {
+	return dialWithTimeout(ctx, p, role, connectivity.StageTimeout)
+}
+func dialWithTimeout(ctx context.Context, p Pairing, role string, timeout time.Duration) (*websocket.Conn, *websocket.Conn, string, error) {
+	ws, data, welcome, err := dialService(ctx, p, role, timeout, Options{RelayOnly: true, DisableNative: true})
+	return ws, data, welcome.Peer, err
+}
 
 func delayedWelcomeServer(t *testing.T, signalDelay, relayDelay time.Duration) *httptest.Server {
 	t.Helper()

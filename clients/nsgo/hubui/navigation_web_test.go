@@ -48,30 +48,27 @@ func testBrowserBackStaysInCompactWorkspace(t *testing.T) {
 	length := win.Get("history").Get("length").Int()
 	openDemoChat(t, app)
 	app.Type("id:chat-input", "返回后保留的草稿")
-	pressBrowserBack(t, app)
-	app.WaitFor("id:session-sidebar", time.Second)
-	app.Press(sessionSelector("demo-device", "codex-app", "demo-chat"))
-	app.WaitUntil(time.Second, func() bool { return app.Find("id:chat-input").Text == "返回后保留的草稿" })
-	// An in-app Back must not leave an extra browser step behind.
-	app.Press("id:back-sessions")
-	pressBrowserBack(t, app)
-	app.WaitFor("id:session-sidebar", time.Second)
+	input := app.Find("id:chat-input").ID
 	for range 3 {
 		pressBrowserBack(t, app)
-		app.Find("id:session-sidebar")
-		if app.Exists("id:chat-input") {
-			t.Fatal("root Back reopened the conversation")
+		if app.Find("id:chat-input").ID != input {
+			t.Fatal("root Back replaced the conversation")
 		}
 	}
-	if win.Get("location").Get("href").String() != url || win.Get("history").Get("length").Int() != length {
-		t.Fatal("Back left the workspace or grew its boundary history")
-	}
+	showSessionDirectory(t, app)
 	app.Press("id:connect-device")
-	app.Find("id:dialog-connect")
+	app.WaitFor("id:dialog-connect", time.Second)
 	pressBrowserBack(t, app)
 	app.WaitUntil(time.Second, func() bool { return !app.Exists("id:dialog-connect") })
 	app.Find("id:session-sidebar")
-	app.Find("role:button ReignHub 官网")
+	pressBrowserBack(t, app)
+	app.WaitUntil(time.Second, func() bool { return !app.Exists("id:mobile-sidebar") })
+	if app.Find("id:chat-input").ID != input || app.Find("id:chat-input").Text != "返回后保留的草稿" {
+		t.Fatal("drawer Back changed the conversation or its draft")
+	}
+	if win.Get("location").Get("href").String() != url || win.Get("history").Get("length").Int() != length {
+		t.Fatal("drawer navigation left the workspace or added browser history")
+	}
 }
 
 func testBrowserBackStaysInWideWorkspace(t *testing.T) {

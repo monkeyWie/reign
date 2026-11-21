@@ -1,7 +1,10 @@
 package hubui
 
 import (
+	"context"
 	"time"
+
+	"github.com/monkeyWie/reignhub/pkg/persistence"
 
 	"github.com/nsgo-dev/nsgo/core"
 )
@@ -9,8 +12,26 @@ import (
 type workspaceCache struct{ providers, sessions []Object }
 
 func (s *State) rememberSession() {
+	if s.cancelPageRead != nil {
+		s.cancelPageRead()
+		s.cancelPageRead = nil
+	}
 	s.persistSnapshot()
+	s.confirmedRowKeys = nil
+	s.landmarks = nil
+	s.landmarksKey = ""
+	s.landmarksVersion++
+	s.historyPrefix = historyPrefix{}
+	s.openingRow = historyRowID{}
+	s.livePage = nil
+	s.reading = nil
+	s.readingPages = nil
+	s.readingOverlap = nil
+	s.resetImages()
 	if s.selected == nil || s.transcript == nil {
+		return
+	}
+	if s.snapshots != nil && s.snapshots.storage != nil {
 		return
 	}
 	if s.sessionCache == nil {
@@ -70,35 +91,81 @@ func (s *State) loadCachedWorkspace(target string) {
 	}()
 }
 
-func (s *State) loadCachedSession() {
-	key, generation := s.key(), s.sessionGeneration
-	target, provider, session := s.target, str(s.selected, "providerId"), str(s.selected, "id")
-	s.transcriptLoading = s.transcript == nil
-	go func() {
-		request := Object{"method": "transcript", "provider": provider, "session": session}
-		v, err := s.api.Call(s.ctx, "client.cached", nil, target, request)
+func (s *State) cancelSessionEntry() {
+	if s.cancelEntry != nil {
+		s.cancelEntry()
+		s.cancelEntry = nil
+	}
+}
+
+// Switch the heading, editor and history together when the local page is
+// ready. A slow store gets the usual loading view and can never hold navigation.
+func (s *State) prepareSession(session Object, target string) {
+	route := persistence.Session{Env: target, Provider: str(session, "providerId"), ID: str(session, "id")}
+	ctx, cancel := context.WithCancel(s.ctx)
+	s.cancelEntry = cancel
+	// Keep a single read alive across the handoff if the disk is slow.
+	var opened bool
+	var generation uint64
+	open := func(page Object) {
+		s.cancelEntry = nil
+		s.openSession(session, target, page, true)
+		generation = s.sessionGeneration
+		opened = true
+		s.cancelPageRead = cancel
+	}
+	timer := time.AfterFunc(100*time.Millisecond, func() {
 		s.cx.Post(func() {
-			if s.ctx.Err() != nil || s.key() != key || s.sessionGeneration != generation {
+			if ctx.Err() == nil && !opened {
+				open(nil)
+				s.transcriptLoading = true
+				s.changed()
+			}
+		})
+	})
+	dao := s.snapshots.storage
+	go func() {
+		defer timer.Stop()
+		page, err := dao.ReadPage(ctx, route, persistence.PageQuery{})
+		s.cx.Post(func() {
+			if ctx.Err() != nil {
 				return
 			}
-			s.transcriptLoading = false
-			if err == nil && v != nil && s.transcript == nil {
-				cached := object(v)
-				s.setTranscript(cached)
-				// A disk baseline may arrive after the initial watch was launched.
-				// Resume only before any remote baseline or snapshot has started.
-				if resume := object(cached["resume"]); str(resume, "epoch") != "" && s.stream != nil && s.stream.current() && !s.stream.baseline && !s.stream.snapshotInFlight {
-					s.streamKey, s.streamEpoch, s.streamCursor = key, str(resume, "epoch"), number(resume, "cursor")
-					s.startSessionWatch()
-				}
-			} else if err == nil && v != nil {
-				s.restoreOutgoing(object(v))
-				s.reconcileOutgoing(time.Time{})
-				s.rebuildMessages()
+			var cached Object
+			if err == nil {
+				cached = page.View()
 			}
-			s.changed()
+			if !opened {
+				open(cached)
+			} else if generation == s.sessionGeneration {
+				s.applyCachedTranscript(cached)
+			}
+			s.cancelPageRead = nil
+			cancel()
 		})
 	}()
+}
+
+func (s *State) loadCachedSession(pageRead bool) {
+	key, generation := s.key(), s.sessionGeneration
+	target, provider, session := s.target, str(s.selected, "providerId"), str(s.selected, "id")
+	s.transcriptLoading = !pageRead && s.transcript == nil
+	if !pageRead {
+		go func() {
+			request := Object{"method": "transcript", "provider": provider, "session": session}
+			v, err := s.api.Call(s.ctx, "client.cached", nil, target, request)
+			s.cx.Post(func() {
+				if s.ctx.Err() != nil || s.key() != key || s.sessionGeneration != generation {
+					return
+				}
+				var cached Object
+				if err == nil && v != nil {
+					cached = object(v)
+				}
+				s.applyCachedTranscript(cached)
+			})
+		}()
+	}
 	go func() {
 		v, err := s.api.Call(s.ctx, "client.cached", nil, target, Object{"method": "models", "provider": provider, "session": session})
 		s.cx.Post(func() {
@@ -108,6 +175,25 @@ func (s *State) loadCachedSession() {
 			}
 		})
 	}()
+}
+
+func (s *State) applyCachedTranscript(cached Object) {
+	s.transcriptLoading = false
+	if cached != nil && s.transcript == nil {
+		s.openingRow = firstHistoryRow(cached)
+		s.setTranscript(cached)
+		// A disk baseline may arrive after the initial watch was launched.
+		// Resume only before any remote baseline or snapshot has started.
+		if resume := object(cached["resume"]); str(resume, "epoch") != "" && s.stream != nil && s.stream.current() && !s.stream.baseline && !s.stream.snapshotInFlight {
+			s.streamKey, s.streamEpoch, s.streamCursor = s.key(), str(resume, "epoch"), number(resume, "cursor")
+			s.startSessionWatch()
+		}
+	} else if cached != nil {
+		s.restoreOutgoing(cached)
+		s.reconcileOutgoing(time.Time{})
+		s.rebuildMessages()
+	}
+	s.changed()
 }
 
 func (s *State) cataloguePending() bool {

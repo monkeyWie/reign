@@ -8,13 +8,12 @@ services:
     restart: unless-stopped
     volumes:
       - device-data:/data
+      - ./config.json:/config.json:ro
     ports:
       - "${REIGNHUB_HTTP_PORT:-26330}:26330/tcp"
       - "${REIGNHUB_UDP_PORT:-26331}:26331/udp"
       - "${REIGNHUB_TCP_PORT:-26331}:26331/tcp"
-    command:
-      - "--state=/data/reignhub.db"
-      - "--self-stun=${REIGNHUB_SELF_STUN:-}"
-      - "--tcp-stun-public=${REIGNHUB_TCP_STUN:-}"
+      - "${REIGNHUB_NATIVE_UDP_PORT:-${REIGNHUB_NATIVE_PORT:-26332}}:26332/udp"
+      - "${REIGNHUB_NATIVE_TCP_PORT:-${REIGNHUB_NATIVE_PORT:-26332}}:26332/tcp"
 volumes:
   device-data:

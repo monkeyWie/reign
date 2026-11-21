@@ -28,13 +28,7 @@ func (s *State) brand(cx *core.Scope, size core.Points, icon bool) core.Node {
 	} else if s.api.CanHost() {
 		brand.Role, brand.Label = core.RoleButton, "ReignHub · "+locales.For(cx).WorkspaceHome()
 		brand.Tooltip = tooltipCard(cx, label(cx, locales.For(cx).WorkspaceHome(), 12, false))
-		brand.OnPress = func(core.PressEvent) {
-			if s.phoneNav != nil {
-				s.dialog.Set("local")
-			} else {
-				s.backSessions()
-			}
-		}
+		brand.OnPress = func(core.PressEvent) { s.showHome() }
 		brand.StyleFunc = func() core.Style {
 			return core.Style{Hover: &core.Style{Opacity: core.Alpha(.8)}, FocusVisible: &core.Style{OutlineWidth: 2, OutlineColor: palette(cx).focus}}
 		}
@@ -42,19 +36,18 @@ func (s *State) brand(cx *core.Scope, size core.Points, icon bool) core.Node {
 	return brand
 }
 
-// Overlays receive Back before this handler. Compact layouts then let the
-// native page stack pop; wider layouts return to the unified directory. Android's workspace root requires a second Back to leave.
+// Overlays receive Back first. Compact content is the workspace root, with
+// Android's second-Back confirmation; it never pops a conversation route.
 func (s *State) workspaceBack() bool {
-	if s.phoneNav != nil {
-		if s.phoneNav.Depth() > 0 {
-			s.clearRootBack()
-			return false
-		}
+	if s.mobileSidebarOpen.GetUntracked() {
+		s.closeMobileSidebar()
+		return true
+	}
+	if s.narrowLayout() {
 		return s.rootBack()
 	}
-	if s.narrowChat {
-		s.backSessions()
-
+	if s.selected != nil {
+		s.showHome()
 	}
 	return true
 }

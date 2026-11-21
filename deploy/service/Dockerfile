@@ -33,8 +33,8 @@ COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certifica
 USER 65532:65532
 COPY --from=build /reignhub-server /reignhub-server
 COPY --from=build --chown=65532:65532 /data /data
-WORKDIR /data
+COPY deploy/service/config.json /config.json
+WORKDIR /
 VOLUME /data
-EXPOSE 26330/tcp 26331/tcp 26331/udp
+EXPOSE 26330/tcp 26331/tcp 26331/udp 26332/tcp 26332/udp
 ENTRYPOINT ["/reignhub-server"]
-CMD ["--state=/data/reignhub.db"]

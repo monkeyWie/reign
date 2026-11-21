@@ -3,7 +3,7 @@ package servercmd
 
 import (
 	"context"
-	"encoding/json"
+
 	"errors"
 	"flag"
 	"fmt"
@@ -19,6 +19,8 @@ import (
 
 	"github.com/monkeyWie/reignhub/internal/connectivity"
 	"github.com/monkeyWie/reignhub/internal/deviceservice"
+	"github.com/monkeyWie/reignhub/internal/nativepath"
+	"github.com/monkeyWie/reignhub/internal/relay"
 	"github.com/monkeyWie/reignhub/internal/webui"
 )
 
@@ -26,102 +28,71 @@ import (
 var Version = "dev"
 
 type Config struct {
-	HTTP          bool   `json:"http"`
-	Signal        bool   `json:"signal"`
-	Relay         bool   `json:"relay"`
-	WebEnabled    bool   `json:"webEnabled"`
-	STUN          bool   `json:"stun"`
-	TCPSTUN       bool   `json:"tcpStun"`
-	Listen        string `json:"listen"`
-	State         string `json:"state"`
-	Web           string `json:"web"`
-	STUNListen    string `json:"stunListen"`
-	TCPSTUNListen string `json:"tcpStunListen"`
-	PublicSTUN    string `json:"publicStun"`
-	SelfSTUN      string `json:"selfStun"`
-	TCPSTUNPublic string `json:"tcpStunPublic"`
-	Origins       string `json:"origins"`
-	TLSCert       string `json:"tlsCert"`
-	TLSKey        string `json:"tlsKey"`
+	ExternalRelays []relay.NodeConfig              `json:"externalRelays"`
+	RelayControl   string                          `json:"relayControl"`
+	ExternalSTUN   connectivity.TransportAddresses `json:"externalStun"`
+	HTTP           bool                            `json:"http"`
+	API            bool                            `json:"api"`
+	Signal         bool                            `json:"signal"`
+	Relay          bool                            `json:"relay"`
+	WebEnabled     bool                            `json:"webEnabled"`
+	STUN           bool                            `json:"stun"`
+	TCPSTUN        bool                            `json:"tcpStun"`
+	Listen         string                          `json:"listen"`
+	State          string                          `json:"state"`
+	Web            string                          `json:"web"`
+	STUNListen     string                          `json:"stunListen"`
+	TCPSTUNListen  string                          `json:"tcpStunListen"`
+	PublicSTUN     string                          `json:"publicStun"`
+	SelfSTUN       string                          `json:"selfStun"`
+	TCPSTUNPublic  string                          `json:"tcpStunPublic"`
+	Origins        string                          `json:"origins"`
+	NativeListen   string                          `json:"nativeRelayListen"`
+	NativePublic   string                          `json:"nativeRelayPublic"`
+	TLSCert        string                          `json:"tlsCert"`
+	TLSKey         string                          `json:"tlsKey"`
 }
 
 func DefaultConfig() Config {
-	return Config{HTTP: true, Signal: true, Relay: true, WebEnabled: true, STUN: true, TCPSTUN: true,
-		Listen: ":26330", State: "data/reignhub.db", STUNListen: ":" + connectivity.DefaultSTUNPort, TCPSTUNListen: ":" + connectivity.DefaultSTUNPort,
+	return Config{ExternalRelays: []relay.NodeConfig{}, ExternalSTUN: connectivity.TransportAddresses{}, HTTP: true, API: true, Signal: true, Relay: true, WebEnabled: true, STUN: true, TCPSTUN: true,
+		NativeListen: ":26332", Listen: ":26330", State: "data/reignhub.db", STUNListen: ":" + connectivity.DefaultSTUNPort, TCPSTUNListen: ":" + connectivity.DefaultSTUNPort,
 		PublicSTUN: strings.Join(connectivity.DefaultPolicy().PublicSTUN, ",")}
 }
 
-// ParseConfig applies defaults, then a strict JSON file, then CLI overrides.
-func ParseConfig(args []string, output io.Writer) (Config, bool, error) {
-	c := DefaultConfig()
-	var file string
-	for i, a := range args {
-		if strings.HasPrefix(a, "--config=") || strings.HasPrefix(a, "-config=") {
-			file = strings.SplitN(a, "=", 2)[1]
-		}
-		if a == "--config" || a == "-config" {
-			if i+1 >= len(args) {
-				return c, false, fmt.Errorf("--config requires a file")
-			}
-			file = args[i+1]
-		}
-	}
-	if file != "" {
-		f, err := os.Open(file)
-		if err != nil {
-			return c, false, err
-		}
-		defer f.Close()
-		d := json.NewDecoder(io.LimitReader(f, 1<<20))
-		d.DisallowUnknownFields()
-		if err = d.Decode(&c); err != nil {
-			return c, false, fmt.Errorf("config: %w", err)
-		}
-		if err = d.Decode(new(any)); err != io.EOF {
-			return c, false, fmt.Errorf("config must contain one JSON object")
-		}
-	}
-	f := flag.NewFlagSet("reignhub-server", flag.ContinueOnError)
-	f.SetOutput(output)
-	f.StringVar(&file, "config", file, "JSON config file; command-line flags override its values")
-	f.BoolVar(&c.HTTP, "http", c.HTTP, "enable HTTP device directory, pairing and selected WebSocket/Web features; false runs probes only")
-	f.BoolVar(&c.Signal, "signal", c.Signal, "enable signaling (requires HTTP)")
-	f.BoolVar(&c.Relay, "relay", c.Relay, "enable encrypted relay (requires signaling)")
-	f.BoolVar(&c.WebEnabled, "web-enabled", c.WebEnabled, "serve the embedded Web console")
-	f.BoolVar(&c.STUN, "stun", c.STUN, "enable UDP STUN discovery")
-	f.BoolVar(&c.TCPSTUN, "tcp-stun", c.TCPSTUN, "enable TCP STUN discovery")
-	f.StringVar(&c.Listen, "listen", c.Listen, "HTTP/HTTPS listen address")
-	f.StringVar(&c.State, "state", c.State, "SQLite database path (used only with HTTP)")
-	f.StringVar(&c.Web, "web", c.Web, "serve a built console directory instead of embedded assets")
-	f.StringVar(&c.STUNListen, "stun-listen", c.STUNListen, "UDP STUN listen address; expose directly")
-	f.StringVar(&c.TCPSTUNListen, "tcp-stun-listen", c.TCPSTUNListen, "TCP STUN listen address; expose directly")
-	f.StringVar(&c.PublicSTUN, "public-stun", c.PublicSTUN, "comma-separated public UDP STUN URLs; empty disables public discovery")
-	f.StringVar(&c.SelfSTUN, "self-stun", c.SelfSTUN, "advertised UDP STUN URLs; empty derives from request host and listener port")
-	f.StringVar(&c.TCPSTUNPublic, "tcp-stun-public", c.TCPSTUNPublic, "advertised TCP probe host:port list; empty derives from request host")
-	f.StringVar(&c.Origins, "origins", c.Origins, "additional allowed browser origins, comma-separated exact URLs")
-	f.StringVar(&c.TLSCert, "tls-cert", c.TLSCert, "TLS certificate PEM; otherwise terminate HTTPS at a reverse proxy")
-	f.StringVar(&c.TLSKey, "tls-key", c.TLSKey, "TLS private key PEM")
-	version := f.Bool("version", false, "print version and exit")
-	if err := f.Parse(args); err != nil {
-		return c, false, err
-	}
-	if f.NArg() != 0 {
-		return c, false, fmt.Errorf("unexpected arguments: %s", strings.Join(f.Args(), " "))
-	}
-	if *version {
-		return c, true, nil
-	}
-	return c, false, c.Validate()
-}
-
 func (c Config) Validate() error {
-	if !c.HTTP && !c.STUN && !c.TCPSTUN {
-		return fmt.Errorf("enable at least one of http, stun or tcp-stun")
+	if _, _, err := c.resolveNodes(); err != nil {
+		return err
+	}
+	return c.validateListeners()
+}
+func (c Config) resolveNodes() (connectivity.Endpoints, []nativepath.Endpoint, error) {
+	stun, err := c.ExternalSTUN.Resolve()
+	if err != nil {
+		return stun, nil, fmt.Errorf("externalStun: %w", err)
+	}
+	nodes, err := relay.ResolveNodes(c.ExternalRelays)
+	if err != nil {
+		return stun, nil, fmt.Errorf("externalRelays: %w", err)
+	}
+	return stun, nodes, nil
+}
+func (c Config) validateListeners() error {
+	if c.RelayControl != "" && (!relay.ValidControlOrigin(c.RelayControl) || c.NativeListen == "" || c.State == "") {
+		return errors.New("relayControl requires an HTTPS origin (HTTP allowed on loopback), state and nativeRelayListen")
+	}
+	if !c.HTTP && !c.STUN && !c.TCPSTUN && c.RelayControl == "" {
+		return fmt.Errorf("enable at least one HTTP, discovery or external relay listener")
 	}
 	if c.HTTP && c.Relay && !c.Signal {
 		return fmt.Errorf("relay requires signal; disable both for directory-only mode")
 	}
-	if c.HTTP && c.State == "" {
+	if c.HTTP && c.Signal && !c.API {
+		return fmt.Errorf("signal requires the device API")
+	}
+	if c.HTTP && !c.WebEnabled && !c.API {
+		return fmt.Errorf("HTTP requires the device API or Web console")
+	}
+	if c.HTTP && c.API && c.State == "" {
 		return fmt.Errorf("state path is required")
 	}
 	if (c.TLSCert == "") != (c.TLSKey == "") {
@@ -135,6 +106,12 @@ func (c Config) Validate() error {
 	for _, raw := range append(split(c.PublicSTUN), split(c.SelfSTUN)...) {
 		if !strings.HasPrefix(raw, "stun:") || strings.TrimPrefix(raw, "stun:") == "" {
 			return fmt.Errorf("invalid STUN URL: %q", raw)
+		}
+	}
+	if c.NativePublic != "" {
+		host, port, err := net.SplitHostPort(c.NativePublic)
+		if err != nil || host == "" || port == "" {
+			return errors.New("invalid native relay public host:port")
 		}
 	}
 	for _, raw := range split(c.TCPSTUNPublic) {
@@ -156,6 +133,7 @@ func split(value string) []string {
 
 // Runtime owns all listeners, sockets and the SQLite database.
 type Runtime struct {
+	native    *relay.NativeListener
 	HTTPAddr  net.Addr
 	UDPAddr   net.Addr
 	TCPAddr   net.Addr
@@ -168,7 +146,11 @@ type Runtime struct {
 }
 
 func Start(c Config) (_ *Runtime, err error) {
-	if err = c.Validate(); err != nil {
+	stun, nodes, err := c.resolveNodes()
+	if err != nil {
+		return nil, err
+	}
+	if err = c.validateListeners(); err != nil {
 		return nil, err
 	}
 	r := &Runtime{errors: make(chan error, 1)}
@@ -198,12 +180,20 @@ func Start(c Config) (_ *Runtime, err error) {
 		}
 		r.TCPAddr = r.tcp.Addr()
 	}
-	if c.HTTP {
+	if (c.HTTP && c.API) || c.RelayControl != "" {
 		r.directory, err = deviceservice.New(c.State, split(c.Origins))
 		if err != nil {
 			return nil, err
 		}
 		r.directory.RelayEnabled = c.Relay
+		r.directory.ConfigureNative(nodes, c.RelayControl)
+		r.directory.ExternalSTUN = stun
+		if (c.RelayControl != "" || c.HTTP && c.Signal && c.Relay) && c.NativeListen != "" {
+			r.native, err = r.directory.ListenNative(c.NativeListen, c.NativePublic)
+			if err != nil {
+				return nil, fmt.Errorf("native relay listen: %w", err)
+			}
+		}
 		r.directory.Network.PublicSTUN = split(c.PublicSTUN)
 		r.directory.Network.SelfSTUN = split(c.SelfSTUN)
 		r.directory.Network.TCPSTUN = split(c.TCPSTUNPublic)
@@ -213,6 +203,8 @@ func Start(c Config) (_ *Runtime, err error) {
 		if r.TCPAddr != nil {
 			_, r.directory.TCPSTUNPort, _ = net.SplitHostPort(r.TCPAddr.String())
 		}
+	}
+	if c.HTTP {
 		web := webui.Handler()
 		if c.WebEnabled && c.Web != "" {
 			web, err = webui.Directory(c.Web)
@@ -253,12 +245,12 @@ func handler(c Config, directory http.Handler, web http.Handler) http.Handler {
 			}
 			w.Header().Set("Cache-Control", "no-store")
 			_, _ = io.WriteString(w, "ok")
-		case r.URL.Path == "/api/account":
+		case c.API && r.URL.Path == "/api/account":
 			w.Header().Set("Content-Type", "application/json")
 			w.Header().Set("Cache-Control", "no-store")
 			_, _ = io.WriteString(w, `{"deployment":"self-hosted","account":null,"providers":[],"plans":[]}`)
-		case strings.HasPrefix(r.URL.Path, "/p2p/"):
-			if (r.URL.Path == "/p2p/signal" && !c.Signal) || (r.URL.Path == "/p2p/relay" && (!c.Signal || !c.Relay)) {
+		case c.API && strings.HasPrefix(r.URL.Path, "/p2p/"):
+			if (r.URL.Path == "/p2p/signal" && !c.Signal) || ((r.URL.Path == "/p2p/relay" || r.URL.Path == relay.NativeLeasePath) && (!c.Signal || !c.Relay)) {
 				http.NotFound(w, r)
 				return
 			}
@@ -284,6 +276,9 @@ func (r *Runtime) Close() error {
 			_ = r.http.Close()
 		}
 	}
+	if r.native != nil {
+		r.native.Close()
+	}
 	if r.directory != nil {
 		_ = r.directory.Close()
 	}
@@ -297,7 +292,7 @@ func (r *Runtime) Close() error {
 }
 
 func Run() {
-	c, version, err := ParseConfig(os.Args[1:], os.Stderr)
+	cmd, err := parseCommand(os.Args[1:], os.Stderr)
 	if errors.Is(err, flag.ErrHelp) {
 		return
 	}
@@ -305,8 +300,30 @@ func Run() {
 		log.Print(err)
 		os.Exit(2)
 	}
-	if version {
+	switch cmd.action {
+	case printVersion:
 		fmt.Println("reignhub-server " + Version)
+		return
+	case initConfig:
+		if err := writeDefaultConfig(cmd.file); err != nil {
+			log.Print(err)
+			os.Exit(1)
+		}
+		fmt.Println("Created", cmd.file)
+		return
+	}
+	c, err := loadConfig(cmd.file)
+	if err != nil {
+		log.Print(err)
+		os.Exit(2)
+	}
+	if cmd.action == printRelayPin {
+		pin, err := deviceservice.ReadRelayPin(c.State)
+		if err != nil {
+			log.Print(err)
+			os.Exit(1)
+		}
+		fmt.Println(pin)
 		return
 	}
 	r, err := Start(c)
@@ -315,7 +332,11 @@ func Run() {
 		os.Exit(1)
 	}
 	defer r.Close()
-	log.Printf("ReignHub server %s; HTTP=%v UDP STUN=%v TCP STUN=%v", Version, r.HTTPAddr, r.UDPAddr, r.TCPAddr)
+	var nativeAddr net.Addr
+	if r.native != nil {
+		nativeAddr = r.native.Addr()
+	}
+	log.Printf("ReignHub server %s; HTTP=%v UDP STUN=%v TCP STUN=%v native relay=%v", Version, r.HTTPAddr, r.UDPAddr, r.TCPAddr, nativeAddr)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	select {

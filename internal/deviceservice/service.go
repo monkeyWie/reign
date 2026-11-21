@@ -20,6 +20,8 @@ import (
 
 	"github.com/monkeyWie/reignhub/internal/connectivity"
 	"github.com/monkeyWie/reignhub/internal/device"
+
+	"github.com/monkeyWie/reignhub/internal/nativepath"
 	"github.com/monkeyWie/reignhub/internal/relay"
 	"github.com/monkeyWie/reignhub/pkg/database"
 	"gorm.io/gorm"
@@ -74,10 +76,12 @@ type Server struct {
 	nextCleanup  int64
 	RelayEnabled bool
 	relay        *relay.Server
+	nativeKey    ed25519.PrivateKey
 	ServiceID    string
 	Network      connectivity.Policy
 	STUNPort     string
 	TCPSTUNPort  string
+	ExternalSTUN connectivity.Endpoints
 }
 
 func hash(s string) string { v := sha256.Sum256([]byte(s)); return hex.EncodeToString(v[:]) }
@@ -116,17 +120,15 @@ func NewWithDB(db *gorm.DB, origins []string) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	key := Metadata{Key: "signing_seed", Value: base64.RawURLEncoding.EncodeToString(generated.Seed())}
+	key := Metadata{Key: signingSeedKey, Value: base64.RawURLEncoding.EncodeToString(generated.Seed())}
 	if err = db.Clauses(clause.OnConflict{DoNothing: true}).Create(&key).Error; err != nil {
 		return nil, err
 	}
-	if err = db.First(&key, "key = ?", key.Key).Error; err != nil {
+	seed, err := readSigningSeed(db)
+	if err != nil {
 		return nil, err
 	}
-	seed, err := base64.RawURLEncoding.DecodeString(key.Value)
-	if err != nil || len(seed) != ed25519.SeedSize {
-		return nil, fmt.Errorf("invalid stored service signing identity")
-	}
+	s.nativeKey = relayTLSKey(seed)
 	private := ed25519.NewKeyFromSeed(seed)
 	public := private.Public().(ed25519.PublicKey)
 	s.Network.ServiceID = s.ServiceID
@@ -156,6 +158,13 @@ func NewWithDB(db *gorm.DB, origins []string) (*Server, error) {
 		return id, role == "client" && s.DB.First(&grant, "host = ? AND client = ?", host, id).Error == nil
 	}
 	return s, nil
+}
+func (s *Server) ConfigureNative(nodes []nativepath.Endpoint, controlOrigin string) {
+	s.relay.ExternalRelays = nodes
+	s.relay.ControlOrigin = controlOrigin
+}
+func (s *Server) ListenNative(address, public string) (*relay.NativeListener, error) {
+	return s.relay.ListenNative(address, public, s.nativeKey)
 }
 func (s *Server) Close() error {
 	s.relay.Close()
@@ -218,7 +227,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(204)
 		return
 	}
-	if r.URL.Path == "/p2p/signal" || r.URL.Path == "/p2p/relay" {
+	if r.URL.Path == "/p2p/signal" || r.URL.Path == "/p2p/relay" || r.URL.Path == relay.NativeLeasePath {
 		s.relay.ServeHTTP(w, r)
 		return
 	}
@@ -232,6 +241,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if len(policy.TCPSTUN) == 0 && s.TCPSTUNPort != "" {
 			policy.TCPSTUN = []string{strings.TrimPrefix(connectivity.STUNURL(r.Host, s.TCPSTUNPort), "stun:")}
 		}
+		s.ExternalSTUN.AppendSTUN(&policy)
 		writeJSON(w, 200, struct {
 			connectivity.Policy
 			Protocol        int      `json:"protocol"`

@@ -162,7 +162,7 @@ func (p *Provider) observeStream(m rpc.Message) {
 			return
 		}
 		item := turn.Items[0]
-		if item.Role == "internal" {
+		if item.Role == "internal" || item.Type == "contextCompaction" && m.Method == "item/started" {
 			return
 		}
 		if item.Role == "tool" {

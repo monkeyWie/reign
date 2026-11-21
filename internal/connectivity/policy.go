@@ -1,5 +1,5 @@
 // Package connectivity contains the public/self-hosted STUN discovery policy.
-// Business traffic is direct WebRTC/TCP or our authenticated WS relay.
+// The signal welcome separately advertises optional native relay transport.
 package connectivity
 
 import (

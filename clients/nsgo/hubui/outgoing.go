@@ -3,6 +3,7 @@ package hubui
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/monkeyWie/reignhub/pkg/persistence"
 	"strings"
 	"time"
 )
@@ -98,6 +99,9 @@ func snapshotOutgoing(messages []*outgoingMessage) []*outgoingMessage {
 }
 
 func (s *State) queueOutgoing(body string, uploads []*Upload) *outgoingMessage {
+	if s.reading != nil {
+		s.latestPage()
+	}
 	s.restoreOutgoing(s.transcript)
 	now := time.Now()
 	m := &outgoingMessage{ID: fmt.Sprintf("local-%d", now.UnixNano()), Text: body, Model: s.model, Status: "sending", Timestamp: now.UnixMilli(), Known: map[string]bool{}}
@@ -117,7 +121,9 @@ func (s *State) queueOutgoing(body string, uploads []*Upload) *outgoingMessage {
 		}
 		a := Object{"id": u.ID, "name": u.Name, "mime": u.MIME, "kind": kind, "size": len(u.Data), "sha256": u.SHA256, "state": "ready"}
 		m.Attachments = append(m.Attachments, a)
-		s.images[s.key()+"|"+u.ID+"|false"] = u.Data
+		if kind == "image" {
+			s.cacheImage(s.key()+"|"+u.ID+"|false", u.Data)
+		}
 	}
 	s.outgoing[s.key()] = append(s.outgoing[s.key()], m)
 	s.submittedDraft, s.submittedDraftSession = s.draft.GetUntracked(), s.key()
@@ -127,11 +133,18 @@ func (s *State) queueOutgoing(body string, uploads []*Upload) *outgoingMessage {
 	// Append the local row directly. Hashing and snapshot serialization must
 	// not delay the send button's first pending frame.
 	s.messageRows = append(s.messageRows, Message{ID: m.ID, Role: "user", Text: m.Text, Timestamp: m.Timestamp, Attachments: m.Attachments, Delivery: m.Status})
-	s.scheduleSnapshot()
-	// Inverted lists count alignment from their bottom edge. Position 1
-	// aligns the top of a tall message and leaves its end below the viewport.
-	s.timeline.ScrollToIndexAt(0, 0, 0, false)
+	s.persistSending()
+	s.timeline.jumpToLatest()
 	return m
+}
+
+// Queue delivery immediately, including when the first transcript is still loading.
+func (s *State) persistSending() {
+	if s.snapshots != nil && s.snapshots.storage != nil {
+		s.writeSnapshot(s.target, str(s.selected, "providerId"), str(s.selected, "id"), Object{"_deliveryOnly": true, "localMessages": s.outgoing[s.key()]})
+		return
+	}
+	s.scheduleSnapshot()
 }
 
 func (s *State) retryOutgoing(id string) {
@@ -164,7 +177,7 @@ func (s *State) retryOutgoing(id string) {
 			}
 		}
 		s.messageRows = rows
-		s.scheduleSnapshot()
+		s.persistSending()
 		s.submitMessage(method, extra, m)
 		return
 	}
@@ -206,6 +219,10 @@ func (s *State) reconcileOutgoing(freshSince time.Time) {
 		for _, row := range rows {
 			if !used[row.ID] && matchesOutgoing(m, row) {
 				used[row.ID], found = true, true
+				if s.confirmedRowKeys == nil {
+					s.confirmedRowKeys = make(map[string]string)
+				}
+				s.confirmedRowKeys[row.ID] = m.ID
 				s.replaceOutgoingAnchor(m.ID, []string{row.ID})
 				for _, other := range s.outgoing[s.key()] {
 					if other != m {
@@ -220,6 +237,7 @@ func (s *State) reconcileOutgoing(freshSince time.Time) {
 		}
 		if found {
 			m.Status = "confirmed"
+			s.markOutgoingRemoved(m.ID)
 			continue
 		}
 		// Completed fresh history reconciles the local overlay for both accepted
@@ -227,11 +245,27 @@ func (s *State) reconcileOutgoing(freshSince time.Time) {
 		// prove absence; neither can a snapshot begun before this RPC settled.
 		if !freshSince.IsZero() && str(s.transcript, "nextCursor") == "" && m.Status != "sending" && m.Status != "uncertain" && !m.FinishedAt.IsZero() && !m.FinishedAt.After(freshSince) {
 			s.replaceOutgoingAnchor(m.ID, m.Anchors)
+			s.markOutgoingRemoved(m.ID)
 			continue
 		}
 		kept = append(kept, m)
 	}
 	s.outgoing[s.key()] = kept
+}
+
+// A different controller may own other pending sends in this same session.
+func (s *State) markOutgoingRemoved(id string) {
+	if s.snapshots == nil || s.snapshots.storage == nil {
+		return
+	}
+	if s.outgoingRemoved == nil {
+		s.outgoingRemoved = make(map[string]map[string]bool)
+	}
+	key := s.key()
+	if s.outgoingRemoved[key] == nil {
+		s.outgoingRemoved[key] = make(map[string]bool)
+	}
+	s.outgoingRemoved[key][id] = true
 }
 
 func (s *State) replaceOutgoingAnchor(id string, replacements []string) {
@@ -259,8 +293,35 @@ func (s *State) replaceOutgoingAnchor(id string, replacements []string) {
 	}
 }
 
+func (s *State) liveDisplay() Object {
+	display := s.livePage
+	if prefix := s.historyPrefix; len(prefix.pages) > 0 {
+		if prefix.end == persistence.Origin(display) {
+			return joinPages(pageView(prefix.pages), display, persistence.WindowSize)
+		}
+		// The live window moved. Its old prefix is no longer contiguous.
+		s.historyPrefix = historyPrefix{}
+	}
+	return display
+}
+
 func (s *State) rebuildMessages() {
-	s.messageRows = messages(s.transcript)
+	s.livePage = s.projectLivePage()
+	if s.reading != nil {
+		s.messageRows = messages(s.reading)
+		return
+	}
+	display := s.liveDisplay()
+	s.messageRows = messages(display)
+	if len(s.confirmedRowKeys) > 0 {
+		retained := make(map[string]string, len(s.confirmedRowKeys))
+		for _, row := range s.messageRows {
+			if key := s.confirmedRowKeys[row.ID]; key != "" {
+				retained[row.ID] = key
+			}
+		}
+		s.confirmedRowKeys = retained
+	}
 	if len(s.animateText) > 0 {
 		live := map[string]bool{}
 		for _, row := range s.messageRows {
@@ -288,9 +349,9 @@ func (s *State) rebuildMessages() {
 	// A turn-wide process summary can include records after a visible steer.
 	// Keep pending submissions after that steer, even when their immediate
 	// predecessor has moved into the earlier summary.
-	for _, turn := range objects(s.transcript["turns"]) {
+	for _, turn := range objects(display["turns"]) {
 		previous := -1
-		for _, item := range objects(turn["items"]) {
+		for _, item := range presentationItems(turn) {
 			id := str(turn, "id") + "|" + str(item, "id")
 			if str(item, "role") == "tool" {
 				id = str(turn, "id") + "|tools|" + str(item, "id")

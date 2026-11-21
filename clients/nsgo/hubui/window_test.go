@@ -29,6 +29,23 @@ func TestDesktopWindowFrame(t *testing.T) {
 			if app.Find("id:window-drag-region").Props.WindowDrag != core.WindowDragOn {
 				t.Fatal("missing drag region")
 			}
+			if os != core.OSMacOS {
+				bar := globalBounds(app.Find("id:window-toolbar"))
+				for _, id := range []string{"brand-home", "connect-device", "toggle-sidebar"} {
+					bounds := globalBounds(app.Find("id:" + id))
+					if bounds.Origin.Y < bar.Origin.Y || bounds.Origin.Y+bounds.Size.Height > bar.Origin.Y+bar.Size.Height {
+						t.Fatalf("%s occupies a second header row: %v, toolbar %v", id, bounds, bar)
+					}
+				}
+				app.Press("id:connect-device")
+				app.Find("id:dialog-connect")
+				app.Press("id:dialog-connect-close")
+				app.Press("id:toggle-sidebar")
+				app.Press("id:toggle-sidebar")
+				app.Find("id:brand-home")
+			} else if globalBounds(app.Find("id:brand-home")).Origin.Y < windowBarHeight {
+				t.Fatal("macOS sidebar heading overlaps the traffic-light row")
+			}
 			for _, id := range []string{"window-minimize", "window-maximize", "window-close"} {
 				if app.Exists("id:"+id) != (os == core.OSLinux) {
 					t.Fatalf("%s: only Linux needs app-drawn controls", id)

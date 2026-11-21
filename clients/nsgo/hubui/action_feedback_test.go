@@ -330,6 +330,7 @@ func TestApprovalFeedbackPreventsConflictsWithoutBlockingOtherApprovals(t *testi
 
 func TestTouchRowsShowPressFeedbackAndIconNames(t *testing.T) {
 	app := nsgotest.Start(t, func(cx *core.Scope) core.Node { return RootWithAPI(cx, newDemoAPI(), true) }, nsgotest.Size(390, 844), nsgotest.Environment(core.Environment{OS: core.OSAndroid, Idiom: core.IdiomPhone}))
+	showSessionDirectory(t, app)
 	app.WaitFor("id:device-demo-device", time.Second)
 	for _, id := range []string{"device-demo-device", sessionRowID("all", Object{"deviceId": "demo-device", "providerId": "codex-app", "id": "demo-chat"})} {
 		app.WaitFor("id:"+id, time.Second)
@@ -344,7 +345,7 @@ func TestTouchRowsShowPressFeedbackAndIconNames(t *testing.T) {
 			app.Press("id:dialog-device-close")
 		}
 	}
-	for _, id := range []string{"back-sessions", "attachment-cache", "attach-files"} {
+	for _, id := range []string{"mobile-menu", "attachment-cache", "attach-files"} {
 		if app.Find("id:"+id).Props.Label == "" {
 			t.Fatalf("%s has no accessible name", id)
 		}

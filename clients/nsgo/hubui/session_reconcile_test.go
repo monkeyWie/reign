@@ -108,7 +108,7 @@ func TestNotificationReconciliationCancelsOnNavigation(t *testing.T) {
 	f.events <- Object{"epoch": "live", "cursor": 1, "events": []Object{{"id": 1, "kind": "snapshot"}}}
 	app.WaitUntil(time.Second, func() bool { return len(f.snapshots) > 0 })
 	request := <-f.snapshots
-	app.Post(func() { s.cx.Post(s.backSessions) })
+	app.Post(func() { s.cx.Post(s.showHome) })
 	app.WaitUntil(time.Second, func() bool { return stream.ctx.Err() != nil })
 	request.reply <- lifecycleSyncTranscript("completed", "离开后不应显示", 0)
 	app.Post(func() { s.cx.Post(s.poll) })

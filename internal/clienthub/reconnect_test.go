@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -65,16 +66,24 @@ func TestReconnectReusesConnectionThenCachedPairingAndFallsBack(t *testing.T) {
 	defer h.Close()
 	id := server.URL + "|" + host
 	saved := Saved{ID: id, Service: server.URL, ConnectionID: "654321", Name: "test host", Host: host, Public: "host-public", Key: key, HasConnected: true, RelayOnly: true}
-	if err = h.DB.Put("saved:"+id, saved); err != nil {
+	if err = h.DB.SaveEnvironment(id, saved); err != nil {
 		t.Fatal(err)
 	}
-	if err = h.DB.Put("identity:"+server.URL, device.Identity{Token: token}); err != nil {
+	if err = h.DB.SaveIdentity(server.URL, "controller", device.Identity{Token: token}); err != nil {
 		t.Fatal(err)
 	}
 	setup, stop := context.WithTimeout(ctx, 10*time.Second)
 	defer stop()
 	if _, err = h.Reconnect(setup, id); err != nil {
 		t.Fatal(err)
+	}
+	var stored Saved
+	if err := h.DB.LoadEnvironment(id, &stored); err != nil || stored.Platform != runtime.GOOS {
+		t.Fatalf("existing pairing did not learn the verified host platform: %q, %v", stored.Platform, err)
+	}
+	rows, err := h.List()
+	if err != nil || len(rows) != 1 || rows[0]["platform"] != stored.Platform {
+		t.Fatal("verified host platform missing from device list")
 	}
 	first := h.connections[id]
 	if resolves.Load() != 0 {
@@ -102,7 +111,7 @@ func TestReconnectReusesConnectionThenCachedPairingAndFallsBack(t *testing.T) {
 		t.Fatalf("full discovery fallback count: %d", resolves.Load())
 	}
 	saved.ReconnectDisabled = true
-	if err = h.DB.Put("saved:"+id, saved); err != nil {
+	if err = h.DB.SaveEnvironment(id, saved); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = h.Reconnect(setup, id); err == nil {

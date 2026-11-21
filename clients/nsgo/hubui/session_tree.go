@@ -407,6 +407,9 @@ func (s *State) updateSelectedSummary() {
 		summary := object(s.transcript["session"])
 		if str(summary, "id") == str(row, "id") && str(summary, "providerId") == str(row, "providerId") {
 			for k, v := range summary {
+				if k == "title" && (strings.TrimSpace(str(row, "title")) != "" || strings.TrimSpace(str(summary, "title")) == "") {
+					continue
+				}
 				if k != "deviceId" {
 					next[k] = v
 				}

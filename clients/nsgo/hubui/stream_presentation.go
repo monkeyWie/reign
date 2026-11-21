@@ -12,7 +12,9 @@ import (
 // Keep the authoritative transcript untouched. Only new live suffixes are
 // revealed over a short interval; history, corrections and catch-up are instant.
 func smoothReply(cx *core.Scope, text func() string, animate func() bool) func() string {
-	shown := core.NewSignal(cx, "")
+	// A recycled row may mount with a complete or already streaming reply.
+	// Layout and draw that text immediately, then animate subsequent deltas.
+	shown := core.NewSignal(cx, core.Untracked(cx, text))
 	type input struct {
 		text    string
 		animate bool

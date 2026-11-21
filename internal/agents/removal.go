@@ -3,9 +3,8 @@ package agents
 import (
 	"context"
 	"errors"
-	"maps"
 
-	"github.com/monkeyWie/reignhub/pkg/localstate"
+	"github.com/monkeyWie/reignhub/pkg/appdb"
 )
 
 // ACP v1 and Pi have no portable native deletion command. Remove from this
@@ -34,18 +33,20 @@ func (p *Provider) RemoveSession(ctx context.Context, id string) error {
 	// Block a concurrent send/restore while persistence is in flight, without
 	// holding the Provider lock over disk or process operations.
 	s.removing = true
-	next := maps.Clone(p.removed)
-	if next == nil {
-		next = map[string]bool{}
-	}
-	next[id] = true
 	p.mu.Unlock()
-	err := localstate.Put(p.path(), p.id+":removed", next)
+	db, err := appdb.Open(p.path())
+	if err == nil {
+		_, err = db.ExecContext(ctx, "INSERT INTO removed_sessions(provider,session) VALUES(?,?) ON CONFLICT DO NOTHING", p.id, id)
+		db.Close()
+	}
 	p.mu.Lock()
 	s.removing = false
 	var rt runtimeAgent
 	if err == nil {
-		p.removed = next
+		if p.removed == nil {
+			p.removed = map[string]bool{}
+		}
+		p.removed[id] = true
 		rt = s.runtime
 		s.runtime = nil
 	}

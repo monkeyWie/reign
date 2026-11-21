@@ -12,12 +12,12 @@ import (
 
 func TestNavigationPreviewMatchesReplyInConversationOrder(t *testing.T) {
 	rows := []Message{
-		{ID: "answer-b", Role: "assistant", Text: "Second reply", Turn: "b"},
-		{ID: "user-b", Role: "user", Text: "Second instruction", Turn: "b"},
-		{ID: "later-a", Role: "assistant", Text: "Later reply", Turn: "a"},
-		{ID: "answer-a", Role: "assistant", Text: "First reply", Turn: "a"},
-		{ID: "tool", Role: "tool", Text: "Internal tool output", Turn: "a"},
 		{ID: "user-a", Role: "user", Text: "First instruction", Turn: "a"},
+		{ID: "tool", Role: "tool", Text: "Internal tool output", Turn: "a"},
+		{ID: "answer-a", Role: "assistant", Text: "First reply", Turn: "a"},
+		{ID: "later-a", Role: "assistant", Text: "Later reply", Turn: "a"},
+		{ID: "user-b", Role: "user", Text: "Second instruction", Turn: "b"},
+		{ID: "answer-b", Role: "assistant", Text: "Second reply", Turn: "b"},
 	}
 	targets := messageNavigationTargets(rows, 600)
 	if len(targets) != 2 || targets[0].id != "user-a" || targets[1].id != "user-b" {
@@ -28,10 +28,10 @@ func TestNavigationPreviewMatchesReplyInConversationOrder(t *testing.T) {
 		t.Fatalf("wrong preview: %+v", p)
 	}
 	for _, rows := range [][]Message{
-		{{ID: "new-answer", Role: "assistant", Text: "Unrelated", Turn: "b"}, {ID: "u", Role: "user", Turn: "a", Attachments: []Object{{"name": "image.png"}}}},
-		{{ID: "answer", Role: "assistant", Text: "Unrelated"}, {ID: "new-user", Role: "user"}, {ID: "u", Role: "user"}},
+		{{ID: "u", Role: "user", Turn: "a", Attachments: []Object{{"name": "image.png"}}}, {ID: "new-answer", Role: "assistant", Text: "Unrelated", Turn: "b"}},
+		{{ID: "u", Role: "user"}, {ID: "new-user", Role: "user"}, {ID: "answer", Role: "assistant", Text: "Unrelated"}},
 	} {
-		p := navigationPreview(rows, messageNavigationTarget{"u", len(rows) - 1})
+		p := navigationPreview(rows, messageNavigationTarget{id: "u", row: 0})
 		if p.response != "" || p.instruction == "" {
 			t.Fatalf("missing response borrowed another instruction's reply: %+v", p)
 		}
@@ -90,10 +90,10 @@ func testMessageNavigationPreviewAndWave(t *testing.T, dark bool) {
 	var owner *core.Scope
 	var source *core.Signal[[]Message]
 	messages := []Message{}
-	for i := 7; i >= 0; i-- {
+	for i := 0; i < 8; i++ {
 		messages = append(messages,
-			Message{ID: fmt.Sprintf("a%d", i), Turn: fmt.Sprint(i), Role: "assistant", Text: "Agent reply begins here. " + strings.Repeat("Long content to truncate. ", 1000)},
-			Message{ID: fmt.Sprintf("u%d", i), Turn: fmt.Sprint(i), Role: "user", Text: fmt.Sprintf("Instruction %d: ", i) + strings.Repeat("A long instruction. ", 20)})
+			Message{ID: fmt.Sprintf("u%d", i), Turn: fmt.Sprint(i), Role: "user", Text: fmt.Sprintf("Instruction %d: ", i) + strings.Repeat("A long instruction. ", 20)},
+			Message{ID: fmt.Sprintf("a%d", i), Turn: fmt.Sprint(i), Role: "assistant", Text: "Agent reply begins here. " + strings.Repeat("Long content to truncate. ", 1000)})
 	}
 	app := nsgotest.Start(t, func(cx *core.Scope) core.Node {
 		owner = cx
@@ -126,7 +126,7 @@ func testMessageNavigationPreviewAndWave(t *testing.T, dark bool) {
 
 	previewID := app.Find("id:message-navigation-preview").ID
 	next := append([]Message{}, messages...)
-	next[8].Text = "Streaming reply updated"
+	next[7].Text = "Streaming reply updated"
 	app.Post(func() { owner.Post(func() { source.Set(next) }) })
 	app.WaitFor("text:Streaming reply updated", time.Second)
 	if app.Find(id).ID != tickID || app.Find("id:message-navigation-preview").ID != previewID {

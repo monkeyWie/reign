@@ -146,7 +146,7 @@ func (s *State) persistDraft() {
 	s.writeDraft(s.target, str(s.selected, "providerId"), str(s.selected, "id"), s.drafts[s.key()])
 }
 func (s *State) writeDraft(target, provider, session string, d draftState) {
-	item := draftWrite{target: target, provider: provider, session: session, draft: composerdraft.Draft{Text: d.Text, Model: d.Model}, uploads: append([]*Upload(nil), d.Uploads...)}
+	item := draftWrite{target: target, provider: provider, session: session, draft: composerdraft.Draft{Text: d.Text, Model: d.Model, ModelBase: d.ModelBase}, uploads: append([]*Upload(nil), d.Uploads...)}
 	for _, u := range d.Uploads {
 		item.draft.Files = append(item.draft.Files, composerdraft.File{Name: u.Name, MIME: u.MIME, Size: len(u.Data), Data: u.Data})
 	}
@@ -188,7 +188,7 @@ func (s *State) loadDraft() {
 				s.changed()
 				return
 			}
-			draft := draftState{Text: d.Text, Model: d.Model}
+			draft := draftState{Text: d.Text, Model: d.Model, ModelBase: d.ModelBase}
 			for _, f := range d.Files {
 				draft.Uploads = append(draft.Uploads, &Upload{Name: f.Name, MIME: f.MIME, Data: f.Data, Status: "restored", Target: target, Provider: p, Session: id})
 			}
@@ -197,9 +197,7 @@ func (s *State) loadDraft() {
 			if s.key() == key {
 				s.draft.Set(draft.Text)
 				s.uploads = draft.Uploads
-				if draft.Model != "" {
-					s.model = draft.Model
-				}
+				s.restoreDraftModel(draft)
 				s.resumeDraftUploads()
 			}
 			s.changed()

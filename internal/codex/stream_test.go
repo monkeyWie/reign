@@ -175,3 +175,25 @@ func TestSessionPreviewIsBoundedWithoutChangingSourceText(t *testing.T) {
 		t.Fatal("preview truncated incorrectly")
 	}
 }
+
+func TestCompactionSurvivesHistoryAndLiveNormalization(t *testing.T) {
+	const item = `{"id":"compact","type":"contextCompaction","text":"PRIVATE_SUMMARY_SENTINEL"}`
+	turn := normalizeTurn(json.RawMessage(`{"id":"t","status":"completed","items":[` + item + `]}`))
+	if len(turn.Items) != 1 || turn.Items[0].Role != "system" || turn.Items[0].Text != "" {
+		t.Fatal("missing or unsanitized compaction in history")
+	}
+	p := &Provider{}
+	base, _ := p.stream().log.Watch(context.Background(), "session", "", 0)
+	for _, method := range []string{"item/started", "item/completed"} {
+		p.observeStream(rpc.Message{Method: method, Params: json.RawMessage(`{"threadId":"session","turnId":"t","item":` + item + `}`)})
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	batch, err := p.Watch(ctx, "session", base.Epoch, base.Cursor)
+	if err != nil || len(batch.Events) != 1 || batch.Events[0].ItemID != "compact" || batch.Events[0].Item == nil || batch.Events[0].Item.Text != "" {
+		t.Fatal("live compaction did not produce one sanitized event", err)
+	}
+	if ss := (thread{ID: "session"}).session(); ss.Title != "" {
+		t.Fatal("missing name became authoritative session title")
+	}
+}

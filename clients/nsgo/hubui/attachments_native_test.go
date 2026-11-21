@@ -26,6 +26,115 @@ type attachmentFixture struct {
 	finished atomic.Bool
 }
 
+type previewUploadAPI struct {
+	*attachmentFixture
+	writes chan struct{}
+	fail   atomic.Bool
+}
+
+func (f *previewUploadAPI) Call(ctx context.Context, method string, p Object, target string, r Object) (any, error) {
+	if method == "client.call" && str(r, "method") == "attachment.write" {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-f.writes:
+		}
+		if f.fail.Load() {
+			return nil, fmt.Errorf("fixture: upload unavailable")
+		}
+	}
+	return f.attachmentFixture.Call(ctx, method, p, target, r)
+}
+
+func TestBitmapPreviewBeforeUploadAndRetryRecovery(t *testing.T) {
+	f := &previewUploadAPI{attachmentFixture: &attachmentFixture{demoAPI: newDemoAPI(), store: assets.New(t.TempDir())}, writes: make(chan struct{})}
+	var s *State
+	app := nsgotest.Start(t, func(cx *core.Scope) core.Node {
+		s = newState(cx, f)
+		s.applyColors()
+		s.target, s.selected = "fixture", Object{"id": "session", "providerId": "codex-app"}
+		s.devices = []Object{{"id": "fixture", "connected": true}}
+		return core.View{Style: fill.Merge(core.Style{Padding: core.All(20)}), StyleFunc: func() core.Style { return core.Style{Background: palette(cx).background} }, Children: []core.Node{
+			button(cx, "paste-bitmap", "Paste image", nil, "ghost", func() {
+				s.paste(cx, core.PasteEvent{Files: []core.PastedFile{{MIME: "image/bmp", Data: clipboardBitmapFixture()}}})
+			}),
+			s.uploadPreviews(cx), core.Dynamic(func(cx *core.Scope) core.Node { return s.dialogView(cx, s.dialog.Get()) }),
+		}}
+	}, nsgotest.Size(390, 700))
+	app.Press("id:paste-bitmap")
+	app.WaitFor("id:upload-image-clipboard.png", 3*time.Second)
+	image := app.Find("id:upload-image-clipboard.png")
+	if _, err := png.Decode(bytes.NewReader(image.Image.Source.Data)); err != nil {
+		t.Fatal("preview is not PNG", err)
+	}
+	if f.finished.Load() {
+		t.Fatal("fixture must still be uploading")
+	}
+	app.Press("id:preview-upload-clipboard.png")
+	app.WaitFor("id:preview-image", time.Second)
+	if _, err := png.Decode(bytes.NewReader(app.Find("id:preview-image").Image.Source.Data)); err != nil {
+		t.Fatal("pending preview lost local bytes", err)
+	}
+	app.Screenshot("bitmap-preview-before-upload")
+	app.Press("id:preview-close")
+	f.fail.Store(true)
+	close(f.writes)
+	app.WaitFor("id:retry-upload-clipboard.png", 4*time.Second)
+	if app.Exists("id:upload-progress-clipboard.png") || app.Exists("id:upload-bar-clipboard.png") {
+		t.Fatal("failure still shows upload progress")
+	}
+	card, retry := globalBounds(app.Find("id:preview-upload-clipboard.png")), globalBounds(app.Find("id:retry-upload-clipboard.png"))
+	if retry.Origin.X+retry.Size.Width/2 != card.Origin.X+card.Size.Width/2 {
+		t.Fatalf("retry not centered beneath image: %v %v", card, retry)
+	}
+	app.Screenshot("upload-failed-centered-retry")
+	f.fail.Store(false)
+	app.Press("id:retry-upload-clipboard.png")
+	waitForReadyUploads(app, s, 1)
+	if app.Find("id:upload-image-clipboard.png").ID != image.ID {
+		t.Fatal("upload retry remounted its image")
+	}
+	a, _, err := f.store.Input(assets.Scope("codex-app", "session"), s.uploads[0].ID)
+	if err != nil || a.MIME != "image/png" {
+		t.Fatalf("host did not receive PNG: %+v %v", a, err)
+	}
+}
+
+func TestBitmapPreparationStaysWithItsDraftAfterNavigation(t *testing.T) {
+	f := &previewUploadAPI{attachmentFixture: &attachmentFixture{demoAPI: newDemoAPI(), store: assets.New(t.TempDir())}, writes: make(chan struct{})}
+	var s *State
+	app := nsgotest.Start(t, func(cx *core.Scope) core.Node {
+		s = newState(cx, f)
+		s.target, s.selected = "fixture", Object{"id": "original", "providerId": "codex-app"}
+		s.devices = []Object{{"id": "fixture", "connected": true}}
+		return core.View{Style: fill, Children: []core.Node{
+			button(cx, "paste-and-navigate", "Paste and navigate", nil, "ghost", func() {
+				s.addUpload("clipboard.bmp", "image/bmp", clipboardBitmapFixture())
+				s.rememberDraft()
+				s.selected = Object{"id": "other", "providerId": "codex-app"}
+				s.uploads = nil
+				s.changed()
+			}),
+			button(cx, "restore-original", "Restore draft", nil, "ghost", func() {
+				s.selected = Object{"id": "original", "providerId": "codex-app"}
+				s.uploads = s.drafts[s.key()].Uploads
+				s.changed()
+			}), s.uploadPreviews(cx),
+		}}
+	})
+	app.Press("id:paste-and-navigate")
+	close(f.writes)
+	app.WaitUntil(3*time.Second, f.finished.Load)
+	if app.Exists("id:upload-clipboard.png") || len(s.uploads) != 0 {
+		t.Fatal("prepared image leaked into the current session")
+	}
+	app.Press("id:restore-original")
+	app.Find("id:upload-image-clipboard.png")
+	if len(s.uploads) != 1 || s.uploads[0].Session != "original" || s.uploads[0].MIME != "image/png" {
+		t.Fatal("original draft lost its normalized image")
+	}
+}
+
 func (f *attachmentFixture) Call(ctx context.Context, method string, p Object, target string, r Object) (any, error) {
 	if method == "client.call" && strings.HasPrefix(str(r, "method"), "attachment.") {
 		b, _ := json.Marshal(r["params"])

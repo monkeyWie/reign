@@ -148,7 +148,7 @@ func (s *State) connectionSettings(cx *core.Scope) core.Node {
 		}
 		return connection
 	}
-	return contentSection(cx, "", "", label(cx, "本机服务", 18, false), dynamicText(cx, func() string { s.read(); return str(s.host, "serviceUrl") }, 14, true), dynamicText(cx, func() string { s.read(); return str(s.host, "name") }, 14, false), label(cx, "优先直连，自动回退到加密中继。", 13, true), button(cx, "settings-service", "配置服务", lucide.Network, "outline", func() { s.openSettingsDialog("service-settings") }), button(cx, "settings-password", "访问密码", lucide.LockKeyhole, "ghost", func() { s.openSettingsDialog("password") }))
+	return contentSection(cx, "", "", label(cx, "本机服务", 18, false), dynamicText(cx, func() string { s.read(); return str(s.host, "serviceUrl") }, 14, true), dynamicText(cx, func() string { s.read(); return str(s.host, "name") }, 14, false), label(cx, "优先直连，自动回退到加密中继。", 13, true), button(cx, "settings-service", "配置服务", lucide.Network, "outline", func() { s.openSettingsDialog("service-settings") }), button(cx, "settings-password", "访问密码", lucide.LockKeyhole, "ghost", func() { s.openSettingsDialog("password") }), sectionDivider(cx), s.terminalSettings(cx))
 }
 
 func (s *State) agentSettings(cx *core.Scope) core.Node {

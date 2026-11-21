@@ -2,6 +2,8 @@
 """Exercise a packaged server with temporary data and ephemeral listeners."""
 import argparse
 import json
+import os
+import struct
 from pathlib import Path
 import socket
 import subprocess
@@ -10,6 +12,53 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
+
+
+def check_probes(tcp_host, tcp_port, udp_host, udp_port):
+    request = struct.pack('!HHI', 1, 0, 0x2112a442) + os.urandom(12)
+    with socket.create_connection((tcp_host, int(tcp_port)), timeout=2) as tcp:
+        tcp.sendall(request)
+        response = b''
+        while len(response) < 20:
+            chunk = tcp.recv(1024)
+            assert chunk, 'STUN closed before a full response'
+            response += chunk
+        assert response[:2] == b'\x01\x01' and response[8:20] == request[8:20]
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as udp:
+        udp.settimeout(2)
+        udp.sendto(request, (udp_host, int(udp_port)))
+        response, _ = udp.recvfrom(1024)
+        assert response[:2] == b'\x01\x01' and response[8:20] == request[8:20]
+
+
+def check_probe_mode(executable, work):
+    # Both protocols share the specified port, while the HTTP port is occupied.
+    with socket.socket() as occupied:
+        occupied.bind(('127.0.0.1', 0))
+        occupied.listen()
+        with socket.socket() as free:
+            free.bind(('127.0.0.1', 0))
+            port = free.getsockname()[1]
+        state = work / 'probe-state.db'
+        file = work / 'probe.json'
+        file.write_text(json.dumps({'http': False, 'listen': f'127.0.0.1:{occupied.getsockname()[1]}',
+            'stunListen': f'127.0.0.1:{port}', 'tcpStunListen': f'127.0.0.1:{port}', 'state': state.name}))
+        with subprocess.Popen([str(executable), '--config', str(file)]) as process:
+            try:
+                deadline = time.monotonic() + 10
+                while True:
+                    try:
+                        check_probes('127.0.0.1', port, '127.0.0.1', port)
+                        break
+                    except ConnectionRefusedError:
+                        if process.poll() is not None or time.monotonic() >= deadline:
+                            raise
+                        time.sleep(0.05)
+                assert not state.exists()
+                print('Packaged server: TCP and UDP STUN passed in probe-only mode')
+            finally:
+                process.terminate()
+                process.wait(timeout=5)
 
 
 def main():
@@ -22,17 +71,30 @@ def main():
             binaries = [m for m in tar.getmembers() if m.isfile() and Path(m.name).name == 'reignhub-server']
             if len(binaries) != 1:
                 raise SystemExit('Expected one packaged server binary')
+            bundled_config = json.load(tar.extractfile(str(Path(binaries[0].name).parent / 'config.json')))
             executable = work / 'reignhub-server'
             executable.write_bytes(tar.extractfile(binaries[0]).read())
             executable.chmod(0o755)
+        # A binary-only install can initialize explicitly. Reinitializing
+        # must preserve operator edits and must never create a node identity.
+        subprocess.run([str(executable), '--init'], cwd=work, check=True)
+        config = work / 'config.json'
+        initial = config.read_bytes()
+        assert json.loads(initial) == bundled_config, 'archive and --init defaults differ'
+        assert bundled_config['externalStun'] == []
+        assert subprocess.run([str(executable), '--init'], cwd=work).returncode != 0
+        assert config.read_bytes() == initial and not (work / 'data').exists()
+        check_probe_mode(executable, work)
         with socket.socket() as sock:
             sock.bind(('127.0.0.1', 0))
             port = sock.getsockname()[1]
         base = f'http://127.0.0.1:{port}'
         with (work / 'server.log').open('w+') as log:
-            process = subprocess.Popen([str(executable), '--listen', f'127.0.0.1:{port}',
-                '--state', str(work / 'state/reignhub.db'), '--stun-listen', '127.0.0.1:0',
-                '--tcp-stun-listen', '127.0.0.1:0'], stdout=log, stderr=log)
+            cfg = json.loads(initial)
+            cfg.update(listen=f'127.0.0.1:{port}', state='state/reignhub.db', stunListen='127.0.0.1:0',
+                       tcpStunListen='127.0.0.1:0', nativeRelayListen='127.0.0.1:0')
+            config.write_text(json.dumps(cfg))
+            process = subprocess.Popen([str(executable)], cwd=work, stdout=log, stderr=log)
             try:
                 deadline = time.monotonic() + 20
                 while True:
@@ -71,25 +133,12 @@ def main():
                 with urllib.request.urlopen(req, timeout=3) as r:
                     network = json.load(r)
                     assert network['protocol'] == 1 and network['selfStun'] and network['tcpStun']
-                # Exercise the actual integrated probes, not just their advertised config.
-                import os, struct
-                request = struct.pack('!HHI', 1, 0, 0x2112a442) + os.urandom(12)
                 tcp_host, tcp_port = network['tcpStun'][0].rsplit(':', 1)
-                with socket.create_connection((tcp_host, int(tcp_port)), timeout=2) as tcp:
-                    tcp.sendall(request)
-                    response = b''
-                    while len(response) < 20:
-                        chunk = tcp.recv(1024)
-                        assert chunk, 'STUN closed before a full response'
-                        response += chunk
-                    assert response[:2] == b'\x01\x01' and response[8:20] == request[8:20]
                 udp_host, udp_port = network['selfStun'][0].removeprefix('stun:').rsplit(':', 1)
-                with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as udp:
-                    udp.settimeout(2)
-                    udp.sendto(request, (udp_host, int(udp_port)))
-                    response, _ = udp.recvfrom(1024)
-                    assert response[:2] == b'\x01\x01' and response[8:20] == request[8:20]
+                check_probes(tcp_host, tcp_port, udp_host, udp_port)
                 assert (work / 'state/reignhub.db').read_bytes()[:16] == b'SQLite format 3\x00'
+                pin = subprocess.check_output([str(executable), '--print-relay-pin', '--config', str(config)], text=True).strip()
+                assert len(pin) == 43
                 print('Packaged server: HTTP, embedded Web, SQLite and STUN discovery passed')
             finally:
                 process.terminate()

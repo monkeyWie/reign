@@ -17,17 +17,23 @@ func (s *State) actionPending(key string) bool {
 }
 
 func (s *State) runAction(key string, work func(context.Context) (any, error), done func(any), current ...func() bool) {
-	if s.ctx.Err() != nil || s.actionPending(key) {
+	s.runScopedAction(s.ctx, key, true, work, done, current...)
+}
+
+func (s *State) runScopedAction(owner context.Context, key string, showError bool, work func(context.Context) (any, error), done func(any), current ...func() bool) {
+	if owner.Err() != nil || s.actionPending(key) {
 		return
 	}
 	if s.actions == nil {
 		s.actions = map[string]bool{}
 	}
 	s.actions[key] = true
-	s.error, s.failure = "", nil
+	if showError {
+		s.error, s.failure = "", nil
+	}
 	s.changed()
 	go func() {
-		ctx, cancel := context.WithTimeout(s.ctx, 30*time.Second)
+		ctx, cancel := context.WithTimeout(owner, 30*time.Second)
 		defer cancel()
 		v, err := work(ctx)
 		s.cx.Post(func() {
@@ -35,11 +41,11 @@ func (s *State) runAction(key string, work func(context.Context) (any, error), d
 			if s.ctx.Err() != nil {
 				return
 			}
-			valid := len(current) == 0 || current[0]()
-			if valid && err != nil {
+			valid := owner.Err() == nil && (len(current) == 0 || current[0]())
+			if valid && err != nil && showError {
 				s.error, s.failure = err.Error(), nil
 				_ = errors.As(err, &s.failure)
-			} else if valid && done != nil {
+			} else if valid && err == nil && done != nil {
 				done(v)
 			}
 			s.changed()

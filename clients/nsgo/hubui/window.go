@@ -27,6 +27,10 @@ func (s *State) windowFrame(cx *core.Scope, content core.Node) core.Node {
 	bar := core.View{
 		TestID:  "window-toolbar",
 		Desktop: core.DesktopViewProps{WindowDrag: core.WindowDragOn},
+		// Windows searches native siblings from front to back for caption hits.
+		// Animated content can extend its hit-search area beyond its own bounds;
+		// keep the toolbar above that content without changing its flow layout.
+		Style: core.Style{ZIndex: 1},
 		StyleFunc: func() core.Style {
 			insets := desktop.TitleBar(cx)
 			return core.Style{
@@ -89,13 +93,28 @@ func (s *State) sidebarToggle(cx *core.Scope) core.Node {
 // The same control stays reachable after collapse, including in Web/full screen.
 // Native title-bar insets reserve space for platform-owned window controls.
 func (s *State) sidebarToolbarSlot(cx *core.Scope, leading func() core.Points) core.Node {
-	return core.View{Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, JustifyContent: core.JustifyEnd, Height: core.Pct(100), Padding: core.Edges{Right: 12}, FlexShrink: 0}, StyleFunc: func() core.Style {
+	return core.View{TestID: "sidebar-toolbar-slot", Desktop: core.DesktopViewProps{WindowDrag: core.WindowDragOn}, Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, JustifyContent: core.JustifyEnd, Height: core.Pct(100), Padding: core.Edges{Right: 12}, FlexShrink: 0}, StyleFunc: func() core.Style {
 		width := s.sidebarWidth() - leading()
 		if s.sidebarHidden.Get() {
 			width = 44
 		}
 		return core.Style{Width: core.Pt(max(56, width))}
-	}, Children: []core.Node{s.sidebarToggle(cx)}}
+	}, Children: []core.Node{
+		core.Show{When: func() bool { return s.inlineSidebarHeading(cx) && !s.sidebarHidden.Get() }, Then: func(cx *core.Scope) core.Node {
+			return core.Group{
+				core.View{Desktop: core.DesktopViewProps{WindowDrag: core.WindowDragOff}, Style: core.Style{Margin: core.Edges{Left: 12}}, Children: []core.Node{s.brand(cx, 16, true)}},
+				spacer(), s.addDeviceButton(cx),
+			}
+		}},
+		s.sidebarToggle(cx),
+	}}
+}
+
+// Only a native macOS window reserves a separate row for traffic lights.
+// Browsers (including on macOS) and full screen keep one sidebar header.
+func (s *State) inlineSidebarHeading(cx *core.Scope) bool {
+	trafficLights := customWindow(cx) && cx.Env().OS() == core.OSMacOS && !desktop.FullScreen(cx)
+	return !s.narrowLayout() && !trafficLights
 }
 
 // Continue the sidebar surface behind the native controls without affecting

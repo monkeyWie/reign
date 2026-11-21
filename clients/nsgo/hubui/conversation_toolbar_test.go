@@ -70,6 +70,11 @@ func TestConversationToolbarDetailsPreserveWorkspace(t *testing.T) {
 			s.changed()
 		})
 	})
+	app.Settle()
+	wide := globalBounds(app.Find("id:conversation-details"))
+	if wide.Size.Width <= 0 || wide.Size.Width > 360 {
+		t.Fatalf("long desktop title uses %g points", wide.Size.Width)
+	}
 	app.Resize(650, 820)
 	app.Settle()
 	titleBounds := globalBounds(app.Find("id:conversation-details"))
@@ -90,13 +95,13 @@ func TestConversationToolbarDetailsPreserveWorkspace(t *testing.T) {
 	}
 	app.Press("id:conversation-details")
 	app.Resize(390, 844)
-	app.WaitFor("id:back-sessions", time.Second)
+	app.WaitFor("id:mobile-menu", time.Second)
 	app.Find("id:conversation-header-fade")
 	if app.Exists("id:conversation-details") {
 		t.Fatal("wide toolbar remained in compact navigation")
 	}
 	app.Find("id:connection-status-remote")
-	app.Press("id:back-sessions")
+	app.Press("id:mobile-menu")
 	localSession := "id:" + sessionRowID("pinned", Object{"deviceId": "local", "providerId": "pi", "id": "design"})
 	app.WaitFor(localSession, time.Second)
 	app.Press(localSession)

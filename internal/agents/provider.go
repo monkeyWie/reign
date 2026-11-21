@@ -7,6 +7,8 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"github.com/monkeyWie/reignhub/pkg/appdb"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -19,7 +21,7 @@ import (
 	"github.com/monkeyWie/reignhub/internal/config"
 	"github.com/monkeyWie/reignhub/internal/device"
 	"github.com/monkeyWie/reignhub/internal/provider"
-	"github.com/monkeyWie/reignhub/pkg/localstate"
+	"github.com/monkeyWie/reignhub/pkg/persistence"
 )
 
 type runtimeAgent interface {
@@ -38,6 +40,11 @@ type session struct {
 	Imported  bool   `json:"imported,omitempty"`
 	runtimeMu sync.Mutex
 	persisted bool
+	revision  string
+	start     int
+	replace   bool
+	dirty     map[int]map[int]bool
+	timer     *time.Timer
 	runtime   runtimeAgent
 	opening   bool
 	sending   bool
@@ -90,7 +97,7 @@ func New(ctx context.Context, id string, def config.Agent, dir string, files *as
 	life, cancel := context.WithCancel(ctx)
 	return &Provider{id: id, def: def, dir: dir, assets: files, life: life, cancel: cancel, sessions: map[string]*session{}, approvals: map[string]*pendingApproval{}, log: provider.NewEventLog()}
 }
-func (p *Provider) path() string { return filepath.Join(p.dir, "agents.db") }
+func (p *Provider) path() string { return appdb.Path(p.dir) }
 func (p *Provider) Status(context.Context) provider.Status {
 	path, _ := resolveAgentExecutable(p.def)
 	p.mu.Lock()
@@ -151,21 +158,9 @@ func (p *Provider) Start(ctx context.Context) error {
 		p.lastError = err.Error()
 		return err
 	}
-	var removed map[string]bool
-	if err := localstate.Get(p.path(), p.id+":removed", &removed); err != nil && !isMissing(err) {
+	if err := p.restoreDirectory(ctx); err != nil {
 		_ = rt.Close()
 		return err
-	}
-	p.removed = removed
-	var index []sessionRef
-	if err := localstate.Get(p.path(), p.id+":sessions", &index); err != nil && !isMissing(err) {
-		_ = rt.Close()
-		return err
-	}
-	for _, info := range index {
-		if p.sessions[info.Session.ID] == nil {
-			p.sessions[info.Session.ID] = &session{Transcript: provider.Transcript{Session: info.Session}, NativeID: info.NativeID, Imported: info.Imported, persisted: true}
-		}
 	}
 	p.probe = rt
 	p.caps = rt.Capabilities()
@@ -187,6 +182,10 @@ func (p *Provider) Close() error {
 		p.probe = nil
 	}
 	for _, s := range p.sessions {
+		if s.timer != nil {
+			s.timer.Stop()
+			s.timer = nil
+		}
 		if s.runtime != nil {
 			runtimes = append(runtimes, s.runtime)
 			s.runtime = nil
@@ -199,6 +198,7 @@ func (p *Provider) Close() error {
 		for i := range s.Turns {
 			if s.Turns[i].Status == "inProgress" {
 				s.Turns[i].Status = "interrupted"
+				s.mark(i, -1)
 			}
 		}
 	}
@@ -278,22 +278,7 @@ func (p *Provider) load(id string) error {
 	if s.Turns != nil {
 		return nil
 	}
-	var saved session
-	if err := localstate.Get(p.path(), p.id+":session:"+id, &saved); err != nil {
-		return err
-	}
-	saved.runtime = s.runtime
-	saved.persisted = true
-	if saved.Session.ActiveTurnID != "" {
-		saved.Session.Status = "interrupted"
-		saved.Session.ActiveTurnID = ""
-	}
-	for i := range saved.Turns {
-		if saved.Turns[i].Status == "inProgress" {
-			saved.Turns[i].Status = "interrupted"
-		}
-	}
-	p.sessions[id] = &saved
+	s.Turns = []provider.Turn{}
 	return nil
 }
 func (p *Provider) Transcript(ctx context.Context, id, cursor string) (provider.Transcript, error) {
@@ -309,64 +294,35 @@ func (p *Provider) Transcript(ctx context.Context, id, cursor string) (provider.
 			return provider.Transcript{}, err
 		}
 	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	s := p.sessions[id]
-	t := s.Transcript
-	end := len(t.Turns)
+	if err := p.persist(id); err != nil {
+		return provider.Transcript{}, err
+	}
+	db, err := appdb.Open(p.path())
+	if err != nil {
+		return provider.Transcript{}, err
+	}
+	defer db.Close()
+	q := persistence.PageQuery{}
 	if cursor != "" {
-		n, err := strconv.Atoi(cursor)
-		if err != nil || n < 0 || n > end {
+		var c persistence.PageCursor
+		if _, err = fmt.Sscanf(cursor, "%d/%d", &c.Turn, &c.Item); err != nil {
 			return provider.Transcript{}, errors.New("消息分页游标无效")
 		}
-		end = n
+		q.Before = &c
 	}
-	start := max(0, end-50)
-	t.Turns = t.Turns[start:end]
-	t.NextCursor = ""
-	if start > 0 {
-		t.NextCursor = strconv.Itoa(start)
-	}
-	t.StreamEpoch, t.StreamCursor = p.log.Position()
-	raw, err := json.Marshal(t)
-	var copy provider.Transcript
-	if err == nil {
-		err = json.Unmarshal(raw, &copy)
-	}
-	return copy, err
-}
-func (p *Provider) persist(id string) error {
-	p.persistMu.Lock()
-	defer p.persistMu.Unlock()
-	p.mu.Lock()
-	s := p.sessions[id]
-	if s == nil || s.Turns == nil {
-		p.mu.Unlock()
-		return nil
-	}
-	raw, err := json.Marshal(s)
-
-	p.mu.Unlock()
+	page, err := db.ReadPage(ctx, p.historyKey(id), q)
 	if err != nil {
-		return err
+		return provider.Transcript{}, err
 	}
-	// Save transcript before publishing the index, so restart cannot discover an
-	// index entry whose history was never written.
-	if err = localstate.Put(p.path(), p.id+":session:"+id, json.RawMessage(raw)); err != nil {
-		return err
+	var t provider.Transcript
+	raw, err := json.Marshal(page.Transcript)
+	if err == nil {
+		err = json.Unmarshal(raw, &t)
 	}
-	p.mu.Lock()
-	if s := p.sessions[id]; s != nil {
-		s.persisted = true
+	if c := page.Before; c != nil {
+		t.NextCursor = fmt.Sprintf("%d/%d", c.Turn, c.Item)
 	}
-	index := []sessionRef{}
-	for _, s := range p.sessions {
-		if s.persisted {
-			index = append(index, sessionRef{Session: s.Session, NativeID: s.NativeID, Imported: s.Imported})
-		}
-	}
-	p.mu.Unlock()
-	return localstate.Put(p.path(), p.id+":sessions", index)
+	return t, err
 }
 func (p *Provider) Create(ctx context.Context, o provider.CreateOptions) (provider.Session, error) {
 	if err := p.ready(); err != nil {
@@ -517,6 +473,7 @@ func (p *Provider) SendAttachments(ctx context.Context, id, text, model string, 
 	}
 	user := provider.Item{ID: device.Random()[:16], Role: "user", Type: "userMessage", Text: text, Attachments: attachments, TimestampMS: ptr(s.Session.RecencyAt)}
 	s.Turns = append(s.Turns, provider.Turn{ID: turnID, Status: "inProgress", RecencyAt: s.Session.RecencyAt, Items: []provider.Item{user}})
+	s.mark(len(s.Turns)-1, 0)
 	p.log.Publish(provider.StreamEvent{SessionID: id, TurnID: turnID, Kind: "turn", Status: "inProgress", RecencyAt: s.Session.RecencyAt})
 	p.log.Publish(provider.StreamEvent{SessionID: id, TurnID: turnID, ItemID: user.ID, Kind: "item", Item: &user})
 	p.mu.Unlock()
@@ -552,17 +509,23 @@ func (p *Provider) finish(id, turn string, err error) {
 		s.Session.RecencyAt = max(s.Session.RecencyAt, s.Session.UpdatedAt)
 	}
 	if len(s.Turns) > 0 {
+		s.mark(len(s.Turns)-1, -1)
 		s.Turns[len(s.Turns)-1].Status = status
 		s.Turns[len(s.Turns)-1].RecencyAt = s.Session.RecencyAt
 		if err != nil && status == "failed" {
 			item := provider.Item{ID: device.Random()[:16], Role: "system", Type: "error", Text: err.Error()}
 			s.Turns[len(s.Turns)-1].Items = append(s.Turns[len(s.Turns)-1].Items, item)
+			s.mark(len(s.Turns)-1, len(s.Turns[len(s.Turns)-1].Items)-1)
 			p.log.Publish(provider.StreamEvent{SessionID: id, TurnID: turn, ItemID: item.ID, Kind: "item", Item: &item})
 		}
 	}
 	p.log.Publish(provider.StreamEvent{SessionID: id, TurnID: turn, Kind: "turn", Status: status, RecencyAt: s.Session.RecencyAt})
 	p.mu.Unlock()
-	_ = p.persist(id)
+	if e := p.persist(id); e != nil {
+		p.mu.Lock()
+		p.lastError = e.Error()
+		p.mu.Unlock()
+	}
 }
 func (p *Provider) text(id, text string) {
 	p.mu.Lock()
@@ -583,6 +546,8 @@ func (p *Provider) text(id, text string) {
 	}
 	offset := len(utf16.Encode([]rune(i.Text)))
 	i.Text += text
+	p.scheduleCommit(id, s)
+	s.mark(len(s.Turns)-1, len(t.Items)-1)
 	p.log.Publish(provider.StreamEvent{SessionID: id, TurnID: s.turn, ItemID: i.ID, Kind: "text", Delta: text, Offset: offset})
 }
 func (p *Provider) tool(id, toolID, title, status, kind string) {
@@ -596,6 +561,7 @@ func (p *Provider) tool(id, toolID, title, status, kind string) {
 	if status == "in_progress" || status == "pending" {
 		status = "inProgress"
 	}
+	p.scheduleCommit(id, s)
 	t := &s.Turns[len(s.Turns)-1]
 	item := provider.Item{ID: toolID, Role: "tool", Type: "commandExecution", Text: title, Status: status, Activities: []provider.Activity{{Kind: kind, Title: title}}}
 	found := false
@@ -612,12 +578,14 @@ func (p *Provider) tool(id, toolID, title, status, kind string) {
 				item.Activities = t.Items[i].Activities
 			}
 			t.Items[i] = item
+			s.mark(len(s.Turns)-1, i)
 			found = true
 			break
 		}
 	}
 	if !found {
 		t.Items = append(t.Items, item)
+		s.mark(len(s.Turns)-1, len(t.Items)-1)
 	}
 	p.log.Publish(provider.StreamEvent{SessionID: id, TurnID: s.turn, ItemID: toolID, Kind: "item", Item: &item})
 }
@@ -653,6 +621,7 @@ func (p *Provider) Steer(ctx context.Context, id, turn, text string) error {
 	if s != nil && s.sending {
 		item := provider.Item{ID: device.Random()[:16], Role: "user", Type: "userMessage", Text: text, TimestampMS: ptr(time.Now().UnixMilli())}
 		s.Turns[len(s.Turns)-1].Items = append(s.Turns[len(s.Turns)-1].Items, item)
+		s.mark(len(s.Turns)-1, len(s.Turns[len(s.Turns)-1].Items)-1)
 		s.Session.RecencyAt = max(s.Session.RecencyAt, *item.TimestampMS)
 		s.Session.UpdatedAt = max(s.Session.UpdatedAt, s.Session.RecencyAt)
 		s.assistant = ""
@@ -706,6 +675,15 @@ func (p *Provider) replaceHistory(id string, turns []provider.Turn) {
 	p.mu.Lock()
 	if s := p.sessions[id]; s != nil && !s.sending {
 		s.Turns = turns
+		s.start = 0
+		s.replace = true
+		s.dirty = nil
+		for i, t := range turns {
+			s.mark(i, -1)
+			for j := range t.Items {
+				s.mark(i, j)
+			}
+		}
 		s.Session.RecencyAt = max(s.Session.RecencyAt, provider.ConversationRecency(turns))
 		s.Imported = false
 	}
@@ -787,3 +765,23 @@ func (p *Provider) discoverOnce(ctx context.Context) error {
 }
 
 func (p *Provider) Managed() bool { return true }
+
+func (p *Provider) scheduleCommit(id string, s *session) {
+	if s.timer != nil || p.closed {
+		return
+	}
+	s.timer = time.AfterFunc(250*time.Millisecond, func() {
+		p.mu.Lock()
+		s.timer = nil
+		closed := p.closed
+		p.mu.Unlock()
+		if closed {
+			return
+		}
+		if err := p.persist(id); err != nil {
+			p.mu.Lock()
+			p.lastError = err.Error()
+			p.mu.Unlock()
+		}
+	})
+}

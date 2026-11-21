@@ -33,12 +33,15 @@ type Options struct {
 	TCPTrace       func(string, ...any) `json:"-"`
 	ICEServers     []webrtc.ICEServer
 	TCPSTUN        []string // TCP STUN host:port endpoints, discovered via /p2p/config
+	DisableNative  bool
+	DisableQUIC    bool
 	DisableTCP     bool
 	DisableWebRTC  bool
 	ResolveKey     func(string) (string, bool) `json:"-"`
 	RelayOnly      bool
 }
 type wire struct {
+	native            nativeState
 	meter             transport.Meter
 	progressMu        sync.Mutex
 	progressLast      map[string]connectivity.Progress
@@ -66,6 +69,7 @@ type wire struct {
 	chunks            map[string]*assembly
 	chunkBytes        int
 	sender            transport.Sender
+	quicBulkSender    transport.Sender
 	signalMu          sync.Mutex
 	candidates        []webrtc.ICECandidateInit
 	tcpMu             sync.Mutex
@@ -87,46 +91,26 @@ type assembly struct {
 	updated  time.Time
 }
 
-func dial(ctx context.Context, p Pairing, role string) (*websocket.Conn, *websocket.Conn, string, error) {
-	return dialWithTimeout(ctx, p, role, connectivity.StageTimeout)
-}
-
-func dialWithTimeout(ctx context.Context, p Pairing, role string, timeout time.Duration) (*websocket.Conn, *websocket.Conn, string, error) {
-	return dialWithRelayPolicy(ctx, p, role, timeout, true)
-}
-
-func dialWithRelayPolicy(ctx context.Context, p Pairing, role string, timeout time.Duration, requireRelay bool) (*websocket.Conn, *websocket.Conn, string, error) {
-	ws, peer, allowRelay, err := dialSignal(ctx, p, role, timeout)
+// A WebSocket-only relay can be verified eagerly in relay-only mode. With a
+// native listener, both fallback setups belong to the live peer instead.
+func dialService(ctx context.Context, p Pairing, role string, timeout time.Duration, opts Options) (*websocket.Conn, *websocket.Conn, relay.Frame, error) {
+	ws, welcome, err := dialSignal(ctx, p, role, timeout)
+	if err != nil || !opts.RelayOnly || !welcome.AllowRelay || (welcome.Native != nil && !opts.DisableNative) {
+		return ws, nil, welcome, err
+	}
+	connectivity.Report(ctx, "relay-ready", "准备备用中继通道", timeout)
+	setup, stop := context.WithTimeout(ctx, timeout)
+	defer stop()
+	data, err := openRelaySocket(setup, relayEndpoint(p, role, welcome.Peer), p.RelayToken, welcome.Peer)
 	if err != nil {
-		return nil, nil, "", err
+		_ = ws.CloseNow()
+		return nil, nil, relay.Frame{}, err
 	}
-	u, _ := url.Parse(relayEndpoint(p, role, peer))
-	var data *websocket.Conn
-	if allowRelay {
-		connectivity.Report(ctx, "relay-ready", "准备备用中继通道", timeout)
-		connectivity.Note(ctx, "relay-endpoint", "relay", "中继服务地址", u.Scheme+"://"+u.Host+"/p2p/relay", "info")
-		relayCtx, stopRelay := context.WithTimeout(ctx, timeout)
-		defer stopRelay()
-		u.Path = "/p2p/relay"
-		data, err = openRelaySocket(relayCtx, u.String(), p.RelayToken, peer)
-		if err != nil {
-			if requireRelay || ctx.Err() != nil {
-				ws.CloseNow()
-				return nil, nil, "", err
-			}
-			connectivity.Note(ctx, "relay-ready", "relay", "备用中继暂不可用，继续尝试 P2P 直连", err.Error(), "warning")
-		}
-	}
-	if data != nil {
-		connectivity.Note(ctx, "relay-ready", "relay", "备用中继通道已就绪", u.Host+"/p2p/relay · 优先直连", "success")
-	} else if !allowRelay {
-		connectivity.Note(ctx, "relay-ready", "relay", "此服务未授予中继权限", u.Host, "warning")
-	}
-	return ws, data, peer, nil
+	return ws, data, welcome, nil
 }
-func dialSignal(ctx context.Context, p Pairing, role string, timeout time.Duration) (*websocket.Conn, string, bool, error) {
+func dialSignal(ctx context.Context, p Pairing, role string, timeout time.Duration) (*websocket.Conn, relay.Frame, error) {
 	if err := p.Validate(); err != nil {
-		return nil, "", false, err
+		return nil, relay.Frame{}, err
 	}
 	u, _ := url.Parse(p.Relay)
 	u.Path = "/p2p/signal"
@@ -139,26 +123,26 @@ func dialSignal(ctx context.Context, p Pairing, role string, timeout time.Durati
 	defer stopSignal()
 	ws, resp, err := dialWebSocket(signalCtx, u.String(), p.RelayToken, "signal")
 	if err != nil {
-		return nil, "", false, websocketDialFailure("建立信令连接", resp, err)
+		return nil, relay.Frame{}, websocketDialFailure("建立信令连接", resp, err)
 	}
 	ws.SetReadLimit(2 << 20)
 	_, raw, err := ws.Read(signalCtx)
 	if err != nil {
 		ws.CloseNow()
-		return nil, "", false, fmt.Errorf("等待信令服务响应失败: %w", err)
+		return nil, relay.Frame{}, fmt.Errorf("等待信令服务响应失败: %w", err)
 	}
 	stopSignal()
 	var f relay.Frame
 	if json.Unmarshal(raw, &f) != nil || f.Kind != "welcome" || f.Peer == "" {
 		ws.CloseNow()
-		return nil, "", false, errors.New("invalid relay handshake")
+		return nil, relay.Frame{}, errors.New("invalid relay handshake")
 	}
 	if f.Protocol != 1 {
 		ws.CloseNow()
-		return nil, "", false, errors.New("unsupported service protocol")
+		return nil, relay.Frame{}, errors.New("unsupported service protocol")
 	}
 	connectivity.Note(ctx, "signal", "signal", "信令连接已建立", u.Scheme+"://"+u.Host+"/p2p/signal", "success")
-	return ws, f.Peer, f.AllowRelay, nil
+	return ws, f, nil
 }
 
 func relayEndpoint(p Pairing, role, peer string) string {
@@ -249,11 +233,17 @@ func (w *wire) path() string {
 	w.mu.Lock()
 	direct := w.direct
 	w.mu.Unlock()
+	if w.native.direct.Load() != nil {
+		return "P2P · QUIC"
+	}
 	if direct {
 		return "P2P · WebRTC"
 	}
 	if w.tcpSnapshot() != nil {
 		return "P2P · TCP"
+	}
+	if link := w.native.relay.Load(); link != nil && !w.signalLost.Load() {
+		return "Relay · " + link.Network
 	}
 	if w.signalLost.Load() {
 		return "Disconnected"
@@ -284,7 +274,7 @@ func (w *wire) waitPath(ctx context.Context) error {
 	w.mu.Unlock()
 	// Give direct negotiation a short head start even when relay is permitted.
 	// P2P-only accounts must establish a direct path before any business RPC.
-	if w.relaySocket() == nil || (!w.host && !w.opts.RelayOnly && time.Now().Before(preferDirectUntil)) {
+	if w.relaySocket() == nil || (!w.host && (!w.opts.RelayOnly || w.native.relayNegotiated.Load()) && time.Now().Before(preferDirectUntil)) {
 		deadline := time.NewTimer(connectivity.StageTimeout)
 		defer deadline.Stop()
 		for {
@@ -294,7 +284,7 @@ func (w *wire) waitPath(ctx context.Context) error {
 			w.mu.Lock()
 			direct := w.direct
 			w.mu.Unlock()
-			if direct || w.tcpSnapshot() != nil {
+			if direct || w.tcpSnapshot() != nil || w.native.direct.Load() != nil || w.native.relay.Load() != nil {
 				break
 			}
 			select {
@@ -334,14 +324,21 @@ func (w *wire) sendContext(ctx context.Context, request string, data []byte) err
 		}
 		start, end := i*transport.ChunkSize, min((i+1)*transport.ChunkSize, len(data))
 		part, _ := json.Marshal(chunk{Request: request, ID: id, Index: i, Total: total, Encoding: encoding, RawSize: rawSize, Data: data[start:end]})
-		if err := w.sender.Send(ctx, w.ctx, priority, func() error { return w.sendPart(ctx, part) }); err != nil {
+		sender := &w.sender
+		// Independent QUIC flow control lets a small live RPC pass a bulk
+		// stream whose write is currently blocked by the remote window.
+		relayPath := w.native.relay.Load()
+		if priority == transport.Bulk && (w.native.direct.Load() != nil || (w.tcpSnapshot() == nil && relayPath != nil && relayPath.Network == "QUIC")) {
+			sender = &w.quicBulkSender
+		}
+		if err := sender.Send(ctx, w.ctx, priority, func() error { return w.sendPart(ctx, part, priority) }); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (w *wire) sendPart(ctx context.Context, part []byte) (sendErr error) {
+func (w *wire) sendPart(ctx context.Context, part []byte, priority transport.Priority) (sendErr error) {
 	defer func() {
 		if sendErr == nil {
 			w.meter.Sent(len(part))
@@ -360,7 +357,11 @@ func (w *wire) sendPart(ctx context.Context, part []byte) (sendErr error) {
 		direct = false
 	}
 	tcp := w.tcpSnapshot()
-	if !direct && tcp == nil && w.signalLost.Load() {
+	native := w.native.direct.Load()
+	if native == nil && !direct && tcp == nil && !w.signalLost.Load() {
+		native = w.native.relay.Load()
+	}
+	if native == nil && !direct && tcp == nil && w.signalLost.Load() {
 		return errors.New("直连路径已断开，且信令尚未恢复")
 	}
 	if err := ctx.Err(); err != nil {
@@ -369,6 +370,17 @@ func (w *wire) sendPart(ctx context.Context, part []byte) (sendErr error) {
 	sealed, err := crypto.seal(w.aad("chunk", true), part)
 	if err != nil {
 		return err
+	}
+	if native != nil {
+		var lane byte
+		if priority == transport.Bulk {
+			lane = 1
+		}
+		if err = native.Send(ctx, lane, sealed); err != nil {
+			native.Close()
+			return fmt.Errorf("native send failed; outcome uncertain: %w", err)
+		}
+		return nil
 	}
 	if !direct && tcp != nil {
 		if err = tcp.send(tcpChunk, sealed); err != nil {
@@ -560,8 +572,11 @@ func (w *wire) offer() {
 	if w.opts.RelayOnly {
 		return
 	}
+	if w.native.quicEnabled.Load() {
+		go w.startQUIC(quicSignal{})
+	}
 	w.startTCP()
-	if w.opts.DisableWebRTC {
+	if w.native.negotiated.Load() || w.opts.DisableWebRTC {
 		return
 	}
 	pc, err := w.setup()
@@ -605,6 +620,13 @@ func (w *wire) signal(raw []byte) {
 		Candidate *webrtc.ICECandidateInit `json:"candidate"`
 	}
 	if json.Unmarshal(raw, &signal) != nil {
+		return
+	}
+	if signal.Type == "native-quic" {
+		var s quicSignal
+		if json.Unmarshal(raw, &s) == nil {
+			w.startQUIC(s)
+		}
 		return
 	}
 	if signal.Type == "tcp-init" || signal.Type == "tcp-candidate" {
@@ -660,6 +682,9 @@ func (w *wire) signal(raw []byte) {
 var nextRequest atomic.Uint64
 
 type helloMessage struct {
+	Native      bool   `json:"native,omitempty"`
+	QUIC        bool   `json:"quic,omitempty"`
+	NativeRelay bool   `json:"nativeRelay,omitempty"`
 	RPC         int    `json:"rpc"`
 	ClientNonce string `json:"clientNonce"`
 	HostNonce   string `json:"hostNonce,omitempty"`
@@ -674,7 +699,7 @@ func (w *wire) cipher(kind string) *cryptor {
 	return w.crypto
 }
 func (w *wire) handshake(ctx context.Context) error {
-	raw, _ := json.Marshal(helloMessage{RPC: transport.Version, ClientNonce: w.clientNonce})
+	raw, _ := json.Marshal(helloMessage{RPC: transport.Version, ClientNonce: w.clientNonce, Native: !w.opts.DisableNative, QUIC: !w.opts.DisableQUIC && !w.opts.RelayOnly, NativeRelay: w.hasNativeRelay()})
 	if err := w.relaySendContext(ctx, "hello", raw); err != nil {
 		return err
 	}
@@ -738,6 +763,12 @@ func (w *wire) hello(raw []byte) {
 		w.mu.Unlock()
 		return
 	}
+	hello.Native = hello.Native && !w.opts.DisableNative
+	hello.QUIC = hello.Native && hello.QUIC && !w.opts.DisableQUIC && !w.opts.RelayOnly
+	hello.NativeRelay = hello.Native && hello.NativeRelay && w.hasNativeRelay()
+	w.native.negotiated.Store(hello.Native)
+	w.native.quicEnabled.Store(hello.QUIC)
+	w.native.relayNegotiated.Store(hello.NativeRelay)
 	w.crypto = crypto
 	w.tcpMu.Lock()
 	w.tcpKey = sha256.Sum256([]byte("reign/p2p/tcp/" + w.key + "/" + w.peer + "/" + hello.ClientNonce + "/" + hello.HostNonce))
@@ -747,6 +778,9 @@ func (w *wire) hello(raw []byte) {
 	if w.host {
 		response, _ := json.Marshal(hello)
 		_ = w.relaySend("hello", response)
+	}
+	if hello.NativeRelay {
+		go w.runNativeRelay()
 	}
 }
 func sessionCryptor(key, peer string, hello helloMessage, host bool) (*cryptor, error) {

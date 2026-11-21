@@ -9,7 +9,7 @@ const workspaceHistoryKey = "reignhubWorkspace"
 // The console mounts NSGo in an element so it can show its lightweight boot
 // screen. NSGo deliberately leaves browser history to an embedded app's host.
 // Keep a single boundary entry and route each browser Back through NSGo's
-// regular Back event, including dialog dismissal and compact page stacks.
+// regular Back event, including dialog and navigation-drawer dismissal.
 // Browsers cannot erase a tab's previous history; the boundary keeps ordinary
 // Back inside the workspace without adding entries on every render or reload.
 func (s *State) installWorkspaceNavigation() {

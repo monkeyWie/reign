@@ -144,6 +144,45 @@ func TestComposerImageTouchRemoval(t *testing.T) {
 	app.WaitUntil(time.Second, func() bool { return len(s.uploads) == 0 && !app.Exists("id:preview-upload-draft.png") })
 }
 
+func TestComposerUploadStatusLayout(t *testing.T) {
+	for _, dark := range []bool{false, true} {
+		t.Run(choose(dark, "dark", "light"), func(t *testing.T) {
+			app, s, f := composerImageFixture(t, nsgotest.Size(390, 500))
+			app.Post(func() {
+				s.cx.Post(func() {
+					s.setAppearance(choose(dark, "dark", "light"))
+					s.uploads = nil
+					for _, status := range []string{"queued", "uploading", "verifying", "failed", "ready"} {
+						sent := int64(len(f.data) / 2)
+						if status == "queued" {
+							sent = 0
+						}
+						if status == "verifying" {
+							sent = int64(len(f.data))
+						}
+						s.uploads = append(s.uploads, &Upload{Name: status + ".png", MIME: "image/png", Data: f.data, Status: status, Sent: sent, Error: "Network unavailable"})
+					}
+					s.changed()
+				})
+			})
+			app.WaitFor("id:retry-upload-failed.png", time.Second)
+			if app.Exists("role:progressbar") || app.Exists("id:upload-progress-failed.png") {
+				t.Fatal("upload footer duplicates progress and retry")
+			}
+			for _, name := range []string{"queued", "uploading", "verifying", "failed", "ready"} {
+				card := globalBounds(app.Find("id:upload-" + name + ".png"))
+				if card.Size.Width != 64 || card.Origin.X+card.Size.Width > 390 {
+					t.Fatalf("upload card overflows or grows for status: %v", card)
+				}
+			}
+			if app.Find("id:upload-progress-verifying.png").Text != "99%" {
+				t.Fatal("upload completed before confirmation")
+			}
+			app.Screenshot("upload-cards-" + choose(dark, "dark", "light"))
+		})
+	}
+}
+
 func TestPinnedDragPersistsOrderWithoutChangingSelection(t *testing.T) {
 	var s *State
 	app := nsgotest.Start(t, func(cx *core.Scope) core.Node {

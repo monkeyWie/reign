@@ -14,22 +14,28 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/monkeyWie/reignhub/internal/nativepath"
 )
 
 type Frame struct {
-	Protocol   int    `json:"protocol,omitempty"`
-	AllowRelay bool   `json:"allowRelay,omitempty"`
-	Grant      string `json:"grant,omitempty"`
-	Peer       string `json:"peer,omitempty"`
-	Device     string `json:"device,omitempty"`
-	Kind       string `json:"kind"`
-	Body       []byte `json:"body,omitempty"`
+	Native     *NativeWelcome `json:"nativeRelay,omitempty"`
+	Protocol   int            `json:"protocol,omitempty"`
+	AllowRelay bool           `json:"allowRelay,omitempty"`
+	Grant      string         `json:"grant,omitempty"`
+	Peer       string         `json:"peer,omitempty"`
+	Device     string         `json:"device,omitempty"`
+	Kind       string         `json:"kind"`
+	Body       []byte         `json:"body,omitempty"`
 }
 type connection struct {
-	ws     *websocket.Conn
-	device string
-	peer   string
-	data   *websocket.Conn
+	ws           *websocket.Conn
+	device       string
+	peer         string
+	data         *websocket.Conn
+	nativeTicket string
+	nativePin    string
+	native       *nativePair
+	life         context.Context
 }
 
 func (c *connection) send(f Frame) error {
@@ -44,26 +50,34 @@ type relayRoom struct {
 	clients map[string]*connection
 }
 type Server struct {
-	token            string
-	mu               sync.Mutex
-	rooms            map[string]*relayRoom
-	Authorize        func(credential, host, role string) (string, bool)
-	AuthorizeContext func(context.Context, string, string, string) (string, bool)
-	Grant            func(host, device, role string) string
-	RelayAllowed     func(host, device, role string) bool
-	Origins          []string
-	closed           bool
-	wg               sync.WaitGroup
-	ctx              context.Context
-	cancel           context.CancelFunc
+	ExternalRelays                      []nativepath.Endpoint
+	ControlOrigin                       string
+	externalPairs                       map[[2]string]*nativePair
+	nativePublic, nativePort, nativePin string
+	token                               string
+	mu                                  sync.Mutex
+	rooms                               map[string]*relayRoom
+	Authorize                           func(credential, host, role string) (string, bool)
+	AuthorizeContext                    func(context.Context, string, string, string) (string, bool)
+	Grant                               func(host, device, role string) string
+	RelayAllowed                        func(host, device, role string) bool
+	Origins                             []string
+	closed                              bool
+	wg                                  sync.WaitGroup
+	ctx                                 context.Context
+	cancel                              context.CancelFunc
 }
 
 func New(token string) *Server {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Server{token: token, rooms: make(map[string]*relayRoom), ctx: ctx, cancel: cancel}
+	return &Server{token: token, rooms: make(map[string]*relayRoom), externalPairs: make(map[[2]string]*nativePair), ctx: ctx, cancel: cancel}
 }
 func ID() string { var b [16]byte; _, _ = rand.Read(b[:]); return hex.EncodeToString(b[:]) }
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == NativeLeasePath {
+		s.serveLease(w, r)
+		return
+	}
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
@@ -209,6 +223,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			s.mu.Unlock()
+			f.Native = nil
 			if target != nil {
 				if target.send(f) != nil {
 					// A controller may disappear while a host reply is in flight.
@@ -221,7 +236,16 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	c := &connection{ws: ws, device: deviceID}
+	life, end := context.WithCancel(s.ctx)
+	defer end()
+	c := &connection{ws: ws, device: deviceID, life: life}
+	var native *NativeWelcome
+	if allowedRelay && r.Header.Get("Origin") == "" {
+		native = s.welcome(id, r.Host)
+		if native != nil {
+			c.nativeTicket, c.nativePin = native.Ticket, native.Pin
+		}
+	}
 	ticket := ""
 	if s.Grant != nil {
 		ticket = s.Grant(id, deviceID, role)
@@ -290,7 +314,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			_ = room.host.send(Frame{Peer: peer, Kind: "bye"})
 		}
 	}()
-	if err = c.send(Frame{Peer: peer, Kind: "welcome", Protocol: 1, AllowRelay: allowedRelay}); err != nil {
+	if err = c.send(Frame{Native: native, Peer: peer, Kind: "welcome", Protocol: 1, AllowRelay: allowedRelay}); err != nil {
 		return
 	}
 	// Ping bounds half-open connections and keeps common reverse proxies alive.
@@ -365,6 +389,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			f.Grant = ticket
 		}
 		s.mu.Unlock()
+		f.Native = nil
 		if target != nil {
 			if target.send(f) != nil {
 				_ = target.ws.CloseNow()

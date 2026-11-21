@@ -31,6 +31,7 @@ func TestMobileScannerEvents(t *testing.T) { testMobileDeviceAndScanner(t, core.
 func testMobileDeviceAndScanner(t *testing.T, os core.OS, scan bool) {
 	api := &mobileDemo{newDemoAPI()}
 	app := nsgotest.Start(t, func(cx *core.Scope) core.Node { return RootWithAPI(cx, api, true) }, nsgotest.Size(390, 844), nsgotest.Environment(core.Environment{OS: os, Idiom: core.IdiomPhone, Locale: "zh-CN"}))
+	showSessionDirectory(t, app)
 	app.WaitFor("id:device-second", time.Second)
 	app.Find("id:device-demo-device")
 	app.Find("id:device-second")
@@ -44,10 +45,10 @@ func testMobileDeviceAndScanner(t *testing.T, os core.OS, scan bool) {
 	app.WaitFor(sessionSelector("second", "codex-app", "demo-chat"), time.Second)
 	app.Press(sessionSelector("second", "codex-app", "demo-chat"))
 	app.WaitFor("id:chat-input", time.Second)
+	showSessionDirectory(t, app)
 	pressWorkspaceBack(t, app)
-	app.Find("id:session-sidebar")
-	pressWorkspaceBack(t, app)
-	app.Find("id:session-sidebar")
+	app.WaitUntil(time.Second, func() bool { return !app.Exists("id:mobile-sidebar") })
+	showSessionDirectory(t, app)
 	app.WaitFor(sessionSelector("demo-device", "codex-app", "demo-chat"), time.Second)
 	if !scan {
 		return

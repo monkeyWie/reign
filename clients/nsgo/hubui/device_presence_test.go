@@ -40,6 +40,7 @@ func TestDeviceListShowsServerPresenceWithoutConnecting(t *testing.T) {
 	app := nsgotest.Start(t, func(cx *core.Scope) core.Node {
 		return RootWithAPI(cx, f, true)
 	}, nsgotest.Size(390, 844))
+	showSessionDirectory(t, app)
 	app.WaitFor("text:在线", 2*time.Second)
 	if f.calls.Load() != 0 || f.reads.Load() != 1 {
 		t.Fatal("presence started a connection or duplicated its batch")
@@ -108,8 +109,9 @@ func TestOfflineDeviceOpensCacheAndConnectsOnceWhenPresenceReturns(t *testing.T)
 		s = newState(cx, f)
 		s.width.Set(390)
 		s.initialize()
-		return s.phonePages(cx)
+		return s.compactWorkspace(cx)
 	}, nsgotest.Size(390, 844))
+	showSessionDirectory(t, app)
 	app.WaitFor("text:离线", time.Second)
 	app.WaitFor(sessionSelector("demo-device", "codex-app", "demo-chat"), time.Second)
 	app.Press(sessionSelector("demo-device", "codex-app", "demo-chat"))

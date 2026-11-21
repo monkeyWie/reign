@@ -52,9 +52,8 @@ func validateQuestionDecision(a provider.Approval, d provider.Decision) error {
 // Mid-turn async prompts are agentMessage metadata, not app-server requests.
 // Only the latest turn is actionable. A new turn expires its predecessor's
 // unanswered prompts; an accepted reply hides exactly the matching question ID.
-func asyncQuestionRequests(state map[string]any, dismissed map[string]bool) []any {
-	turns, _, err := stateTurns(state)
-	if err != nil || len(turns) == 0 {
+func asyncQuestionRequests(id string, turns []map[string]any, dismissed map[string]bool) []any {
+	if len(turns) == 0 {
 		return nil
 	}
 	turn := turns[len(turns)-1]
@@ -115,7 +114,7 @@ func asyncQuestionRequests(state map[string]any, dismissed map[string]bool) []an
 		if len(questions) == 0 {
 			continue
 		}
-		params := map[string]any{"threadId": state["id"], "turnId": turn["id"], "questions": questions}
+		params := map[string]any{"threadId": id, "turnId": turn["id"], "questions": questions}
 		// Updating/answering part of a form invalidates stale drafts and decisions.
 		key := fmt.Sprintf("async:%s:%s:%x", stringValue(turn["id"]), itemID, sha256.Sum256(rawJSON(questions)))
 		requests = append(requests, map[string]any{"method": asyncQuestionMethod, "requestId": key, "params": decodeObject(rawJSON(params))})
@@ -147,7 +146,11 @@ func (b *appIPC) answerAsyncQuestions(ctx context.Context, id, owner string, req
 	}
 	state := decodeObject(raw)
 	current := false
-	for _, value := range asyncQuestionRequests(state, b.p.dismissedQuestions(id, owner, string(rawJSON(request["requestId"])))) {
+	turns, _, err := stateTurns(state)
+	if err != nil {
+		return err
+	}
+	for _, value := range asyncQuestionRequests(id, turns, b.p.dismissedQuestions(id, owner, string(rawJSON(request["requestId"])))) {
 		if object(value)["requestId"] == request["requestId"] {
 			current = true
 			break
@@ -168,7 +171,6 @@ func (b *appIPC) answerAsyncQuestions(ctx context.Context, id, owner string, req
 	}
 	text := questionReplyOpen + "\n" + string(rawJSON(replies)) + "\n" + questionReplyClose
 	message := ipcInput([]any{map[string]any{"type": "text", "text": text}})
-	turns, _, _ := stateTurns(state)
 	method := "thread-follower-start-turn"
 	params := map[string]any{"conversationId": id, "turnStart": map[string]any{"request": ipcTurnStart(state, id, message, ""), "context": map[string]any{"useAppServerPermissionDefault": true}}}
 	if turns[len(turns)-1]["status"] == "inProgress" {

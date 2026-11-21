@@ -15,10 +15,11 @@ import (
 	"github.com/monkeyWie/reignhub/internal/deviceservice"
 	"github.com/monkeyWie/reignhub/internal/provider"
 	"github.com/monkeyWie/reignhub/internal/remote"
-	"github.com/monkeyWie/reignhub/internal/store"
+
+	"github.com/monkeyWie/reignhub/pkg/appdb"
 	"golang.org/x/crypto/bcrypt"
 	"os"
-	"path/filepath"
+
 	"sort"
 	"strings"
 	"sync"
@@ -64,6 +65,7 @@ type Manager struct {
 func New(c config.Config, d *control.Dispatcher, ice func(config.Config) remote.Options) *Manager {
 	m := &Manager{cfg: c, d: d, ice: ice, pending: map[string]deviceservice.Pair{}, intents: map[string]Intent{}, attempts: map[string][]time.Time{}, agentAttempts: map[string]context.CancelFunc{}, agentWake: map[string]chan struct{}{}, status: "尚未配置设备服务"}
 	d.ProviderEnabled = m.agentEnabled
+	d.RemoteTerminalAllowed = func() bool { m.mu.Lock(); defer m.mu.Unlock(); return m.cfg.RemoteTerminalEnabled }
 	for id := range d.Providers {
 		m.agentWake[id] = make(chan struct{}, 1)
 	}
@@ -71,12 +73,13 @@ func New(c config.Config, d *control.Dispatcher, ice func(config.Config) remote.
 }
 func (m *Manager) save() error { return saveIdentity(m.path, m.state) }
 func saveIdentity(path string, s saved) error {
-	db, err := store.Open(path)
+	db, err := appdb.Open(path)
 	if err != nil {
 		return err
 	}
 	defer db.Close()
-	return db.Put("host:"+device.Fingerprint(s.Identity.Service), s)
+	s.Grants = nil
+	return db.SaveIdentity(s.Identity.Service, "host", s)
 }
 func (m *Manager) Network() control.NetworkStatus {
 	m.mu.Lock()
@@ -251,23 +254,36 @@ func (m *Manager) register(ctx context.Context, c config.Config) error {
 	if e != nil {
 		return e
 	}
-	path := filepath.Join(c.DataDir, "identity.db")
+	path := appdb.Path(c.DataDir)
 	s := saved{Grants: map[string]Grant{}}
-	db, e := store.Open(path)
+	db, e := appdb.Open(path)
 	if e != nil {
 		return e
 	}
-	e = db.Get("host:"+device.Fingerprint(service), &s)
-	_ = db.Close()
-	if errors.Is(e, sql.ErrNoRows) {
-		legacy := filepath.Join(c.DataDir, "host-"+device.Fingerprint(service)[:16]+".json")
-		if err := device.Load(legacy, &s); err != nil && !os.IsNotExist(err) {
+	defer db.Close()
+	e = db.LoadIdentity(service, "host", &s)
+	if e == nil {
+		rows, err := db.QueryContext(ctx, "SELECT client,value FROM host_grants WHERE service=?", service)
+		if err != nil {
 			return err
 		}
-		if s.Identity.Token != "" {
-			if err := saveIdentity(path, s); err != nil {
+		s.Grants = map[string]Grant{}
+		for rows.Next() {
+			var id string
+			var b []byte
+			var g Grant
+			if err = rows.Scan(&id, &b); err == nil {
+				err = json.Unmarshal(b, &g)
+			}
+			if err != nil {
+				rows.Close()
 				return err
 			}
+			s.Grants[id] = g
+		}
+		err = errors.Join(rows.Err(), rows.Close())
+		if err != nil {
+			return err
 		}
 	}
 	if e != nil && !errors.Is(e, sql.ErrNoRows) {
@@ -403,7 +419,7 @@ func (m *Manager) respond(ctx context.Context, id string, allow bool) error {
 		m.mu.Lock()
 		old, had := m.state.Grants[g.Client]
 		m.state.Grants[g.Client] = g
-		e = m.save()
+		e = m.saveGrant(g.Client, &g)
 		if e != nil {
 			if had {
 				m.state.Grants[g.Client] = old
@@ -439,6 +455,23 @@ func (m *Manager) Local(ctx context.Context, r control.Request) (any, error) {
 		}
 	}
 	switch r.Method {
+	case "host.terminal.enabled":
+		if in.Enabled == nil {
+			return nil, fmt.Errorf("缺少远程终端开关状态")
+		}
+		m.configMu.Lock()
+		defer m.configMu.Unlock()
+		m.mu.Lock()
+		cfg := m.cfg
+		m.mu.Unlock()
+		cfg.RemoteTerminalEnabled = *in.Enabled
+		if err := cfg.Save(); err != nil {
+			return nil, err
+		}
+		m.mu.Lock()
+		m.cfg.RemoteTerminalEnabled = *in.Enabled
+		m.mu.Unlock()
+		return nil, nil
 	case "host.agent.enabled":
 		if in.Enabled == nil {
 			return nil, fmt.Errorf("缺少 Agent 开关状态")
@@ -507,7 +540,7 @@ func (m *Manager) Local(ctx context.Context, r control.Request) (any, error) {
 				status = "离线"
 			}
 		}
-		return map[string]any{"deviceId": i.ID, "connectionId": i.ConnectionID, "public": i.Public, "name": i.Name, "serviceUrl": m.cfg.ServiceURL, "status": status, "network": network, "passwordEnabled": m.state.PasswordHash != "", "pending": pending, "grants": grants, "qr": map[string]any{"version": 2, "service": i.Service, "connectionId": i.ConnectionID, "public": i.Public}}, nil
+		return map[string]any{"deviceId": i.ID, "connectionId": i.ConnectionID, "public": i.Public, "name": i.Name, "serviceUrl": m.cfg.ServiceURL, "status": status, "network": network, "passwordEnabled": m.state.PasswordHash != "", "remoteTerminalEnabled": m.cfg.RemoteTerminalEnabled, "pending": pending, "grants": grants, "qr": map[string]any{"version": 2, "service": i.Service, "connectionId": i.ConnectionID, "public": i.Public}}, nil
 	case "host.configure":
 		url, e := device.ServiceURL(in.ServiceURL)
 		if e != nil {
@@ -551,8 +584,10 @@ func (m *Manager) Local(ctx context.Context, r control.Request) (any, error) {
 		m.mu.Lock()
 		i := m.state.Identity
 		network := m.network
-		delete(m.state.Grants, in.Client)
-		e := m.save()
+		e := m.saveGrant(in.Client, nil)
+		if e == nil {
+			delete(m.state.Grants, in.Client)
+		}
 		m.mu.Unlock()
 		if e != nil {
 			return nil, e
@@ -598,9 +633,27 @@ func (m *Manager) updateClientInfo(id string, info device.ClientInfo) error {
 	updated := old
 	updated.Info, updated.Name = info, info.Name
 	m.state.Grants[id] = updated
-	if err := m.save(); err != nil {
+	if err := m.saveGrant(id, &updated); err != nil {
 		m.state.Grants[id] = old
 		return err
 	}
 	return nil
+}
+
+func (m *Manager) saveGrant(id string, g *Grant) error {
+	db, err := appdb.Open(m.path)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	if g == nil {
+		_, err = db.Exec("DELETE FROM host_grants WHERE service=? AND client=?", m.state.Identity.Service, id)
+		return err
+	}
+	data, err := json.Marshal(g)
+	if err != nil {
+		return err
+	}
+	_, err = db.Exec("INSERT INTO host_grants VALUES(?,?,?) ON CONFLICT(service,client) DO UPDATE SET value=excluded.value", m.state.Identity.Service, id, data)
+	return err
 }

@@ -2,140 +2,160 @@ package assets
 
 import (
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
-	"encoding/json"
+	"errors"
 	"fmt"
+	"github.com/monkeyWie/reignhub/pkg/appdb"
 	"os"
 	"path/filepath"
-	"sort"
 	"sync"
 	"time"
 )
 
-// Cache is a bounded, disposable controller cache, separate from the host's
-// attachment archive. Device namespaces include the service and host identity.
+// Downloaded bodies are immutable private files. A transaction publishes their
+// filenames and evicts the least recently used entries.
 type Cache struct {
-	Root  string
-	Limit int64
-	mu    sync.Mutex
-}
-type cacheEntry struct {
-	Device  string `json:"device"`
-	Key     string `json:"key"`
-	Size    int64  `json:"size"`
-	Touched int64  `json:"touched"`
+	Root, Database string
+	Limit          int64
+	mu             sync.Mutex
 }
 
-func (c *Cache) name(device, key string) string { return digest(device + "\x00" + key) }
-func (c *Cache) Get(device, key string) ([]byte, error) {
+func (c *Cache) open() (*appdb.Handle, error) {
+	path := c.Database
+	if path == "" {
+		path = appdb.Path(c.Root)
+	}
+	return appdb.Open(path)
+}
+func (c *Cache) Get(env, key string) ([]byte, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	name := c.name(device, key)
-	metaPath := filepath.Join(c.Root, name+".json")
-	b, e := os.ReadFile(metaPath)
-	if os.IsNotExist(e) {
+	db, err := c.open()
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+	var file string
+	err = db.QueryRow("UPDATE download_cache SET touched=? WHERE env=? AND key=? RETURNING file", time.Now().UnixNano(), env, key).Scan(&file)
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
-	if e != nil {
-		return nil, e
+	if err != nil {
+		return nil, err
 	}
-	var entry cacheEntry
-	if json.Unmarshal(b, &entry) != nil || entry.Device != device || entry.Key != key {
+	b, err := os.ReadFile(filepath.Join(c.Root, filepath.Base(file)))
+	if os.IsNotExist(err) {
 		return nil, nil
 	}
-	b, e = os.ReadFile(filepath.Join(c.Root, name+".bin"))
-	if e != nil {
-		return nil, nil
-	}
-	entry.Touched = time.Now().UnixMilli()
-	_ = writeJSON(metaPath, entry)
-	return b, nil
+	return b, err
 }
-func (c *Cache) Put(device, key string, b []byte) error {
+func (c *Cache) Put(env, key string, b []byte) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	limit := c.Limit
 	if limit <= 0 {
 		limit = 128 << 20
 	}
-	if int64(len(b)) > MaxFileSize || int64(len(b)) > limit {
+	if int64(len(b)) > min(limit, MaxFileSize) {
 		return fmt.Errorf("附件超过缓存容量")
 	}
-	if e := os.MkdirAll(c.Root, 0700); e != nil {
-		return e
+	if err := os.MkdirAll(c.Root, 0700); err != nil {
+		return err
 	}
-	entries, _ := os.ReadDir(c.Root)
-	all := []struct {
-		name  string
-		entry cacheEntry
-	}{}
-	var total int64
-	name := c.name(device, key)
-	for _, entry := range entries {
-		if filepath.Ext(entry.Name()) != ".json" {
-			continue
+	f, err := os.CreateTemp(c.Root, "download-*")
+	if err != nil {
+		return err
+	}
+	file := f.Name()
+	committed := false
+	defer func() {
+		if !committed {
+			_ = os.Remove(file)
 		}
-		raw, e := os.ReadFile(filepath.Join(c.Root, entry.Name()))
-		var value cacheEntry
-		if e != nil || json.Unmarshal(raw, &value) != nil {
-			continue
+	}()
+	_, err = f.Write(b)
+	err = errors.Join(err, f.Close())
+	if err != nil {
+		return err
+	}
+	db, err := c.open()
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var garbage []string
+	var replaced string
+	err = tx.QueryRow("SELECT file FROM download_cache WHERE env=? AND key=?", env, key).Scan(&replaced)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if replaced != "" {
+		garbage = append(garbage, replaced)
+	}
+	_, err = tx.Exec("INSERT INTO download_cache VALUES(?,?,?,?,?) ON CONFLICT(env,key) DO UPDATE SET file=excluded.file,size=excluded.size,touched=excluded.touched", env, key, filepath.Base(file), len(b), time.Now().UnixNano())
+	if err != nil {
+		return err
+	}
+	var size int64
+	if err = tx.QueryRow("SELECT coalesce(sum(size),0) FROM download_cache").Scan(&size); err != nil {
+		return err
+	}
+	for size > limit {
+		var name string
+		var n int64
+		err = tx.QueryRow("DELETE FROM download_cache WHERE (env,key)=(SELECT env,key FROM download_cache ORDER BY touched LIMIT 1) RETURNING file,size").Scan(&name, &n)
+		if err != nil {
+			return err
 		}
-		if entry.Name() == name+".json" {
-			continue
-		}
-		total += value.Size
-		all = append(all, struct {
-			name  string
-			entry cacheEntry
-		}{entry.Name(), value})
+		size -= n
+		garbage = append(garbage, name)
 	}
-	sort.Slice(all, func(i, j int) bool { return all[i].entry.Touched < all[j].entry.Touched })
-	for _, entry := range all {
-		if total+int64(len(b)) <= limit {
-			break
-		}
-		_ = os.Remove(filepath.Join(c.Root, entry.name))
-		_ = os.Remove(filepath.Join(c.Root, entry.name[:len(entry.name)-5]+".bin"))
-		total -= entry.entry.Size
+	if err = tx.Commit(); err != nil {
+		return err
 	}
-	f, e := os.CreateTemp(c.Root, ".cache-*")
-	if e != nil {
-		return e
-	}
-	defer os.Remove(f.Name())
-	_, e = f.Write(b)
-	ce := f.Close()
-	if e != nil {
-		return e
-	}
-	if ce != nil {
-		return ce
-	}
-	if e = os.Rename(f.Name(), filepath.Join(c.Root, name+".bin")); e != nil {
-		return e
-	}
-	return writeJSON(filepath.Join(c.Root, name+".json"), cacheEntry{Device: device, Key: key, Size: int64(len(b)), Touched: time.Now().UnixMilli()})
+	committed = true
+	return c.remove(garbage)
 }
-func (c *Cache) Clear(device string) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	entries, _ := os.ReadDir(c.Root)
-	for _, entry := range entries {
-		if filepath.Ext(entry.Name()) != ".json" {
-			continue
+func (c *Cache) remove(files []string) error {
+	for _, file := range files {
+		err := os.Remove(filepath.Join(c.Root, filepath.Base(file)))
+		if err != nil && !os.IsNotExist(err) {
+			return err
 		}
-		b, e := os.ReadFile(filepath.Join(c.Root, entry.Name()))
-		var v cacheEntry
-		if e != nil || json.Unmarshal(b, &v) != nil {
-			continue
-		}
-		if device != "" && v.Device != device {
-			continue
-		}
-		_ = os.Remove(filepath.Join(c.Root, entry.Name()))
-		_ = os.Remove(filepath.Join(c.Root, entry.Name()[:len(entry.Name())-5]+".bin"))
 	}
 	return nil
 }
-
+func (c *Cache) Clear(env string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	db, err := c.open()
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	rows, err := db.Query("DELETE FROM download_cache WHERE ?='' OR env=? RETURNING file", env, env)
+	if err != nil {
+		return err
+	}
+	var names []string
+	for rows.Next() {
+		var name string
+		if err = rows.Scan(&name); err != nil {
+			rows.Close()
+			return err
+		}
+		names = append(names, name)
+	}
+	err = errors.Join(rows.Err(), rows.Close())
+	if err != nil {
+		return err
+	}
+	return c.remove(names)
+}
 func Hash(data []byte) string { sum := sha256.Sum256(data); return hex.EncodeToString(sum[:]) }

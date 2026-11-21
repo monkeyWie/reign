@@ -62,7 +62,7 @@ func (s *State) errorAtComposer() bool {
 		return false
 	}
 	f := s.failure
-	return s.error != "" && f != nil && f.Error() == s.error && s.selected != nil && f.target == s.target && f.provider == str(s.selected, "providerId") && f.session == str(s.selected, "id") && (s.width.Get() >= wideBreakpoint || s.narrowChat)
+	return s.error != "" && f != nil && f.Error() == s.error && s.selected != nil && f.target == s.target && f.provider == str(s.selected, "providerId") && f.session == str(s.selected, "id") && s.conversationVisible()
 }
 
 func (s *State) errorOverlay(cx *core.Scope, composer bool) core.Node {

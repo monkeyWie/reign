@@ -1,4 +1,6 @@
 export { handleConsole } from "./console";
+import { externalStun } from "./external-stun";
+import { verifyRelayCheck } from "./external-relay";
 import { drizzle } from "drizzle-orm/d1";
 import { and, eq, gt, inArray } from "drizzle-orm";
 import { APIError, PROTOCOL, routes, type Device } from "@reignhub/protocol";
@@ -30,8 +32,8 @@ export function fail(error: unknown): Response {
     503,
   );
 }
-export async function body(request: Request): Promise<Record<string, unknown>> {
-  if (Number(request.headers.get("Content-Length") || 0) > 65536)
+async function bodyText(request: Request, limit: number): Promise<string> {
+  if (Number(request.headers.get("Content-Length") || 0) > limit)
     throw new APIError("REQUEST_TOO_LARGE", "请求过大", 413);
   const reader = request.body?.getReader();
   let raw = "";
@@ -42,7 +44,7 @@ export async function body(request: Request): Promise<Record<string, unknown>> {
       const { value, done } = await reader.read();
       if (done) break;
       size += value.byteLength;
-      if (size > 65536) {
+      if (size > limit) {
         await reader.cancel();
         throw new APIError("REQUEST_TOO_LARGE", "请求过大", 413);
       }
@@ -50,6 +52,10 @@ export async function body(request: Request): Promise<Record<string, unknown>> {
     }
     raw += dec.decode();
   }
+  return raw;
+}
+export async function body(request: Request): Promise<Record<string, unknown>> {
+  const raw = await bodyText(request, 65536);
   try {
     const value = JSON.parse(raw || "{}");
     if (!value || typeof value !== "object" || Array.isArray(value))
@@ -199,8 +205,32 @@ export async function handleCore(
         )
           .split(",")
           .filter(Boolean),
-        selfStun: (env.SELF_STUN || "").split(",").filter(Boolean),
-        tcpStun: (env.TCP_STUN || "").split(",").filter(Boolean),
+        ...externalStun(env),
+      });
+    } else if (url.pathname === routes.nativeLease) {
+      if (request.method !== "POST")
+        throw new APIError("METHOD_NOT_ALLOWED", "请使用 POST", 405);
+      const raw = await bodyText(request, 1024);
+      const pin = await verifyRelayCheck(env, request.headers, raw);
+      let check;
+      try {
+        check = JSON.parse(raw);
+      } catch {
+        check = null;
+      }
+      if (
+        !check ||
+        typeof check.host !== "string" ||
+        !/^[a-f0-9]{32}$/.test(check.host) ||
+        typeof check.peer !== "string" ||
+        !/^[a-f0-9]{32}$/.test(check.peer) ||
+        typeof check.clientTicket !== "string" ||
+        typeof check.hostTicket !== "string"
+      )
+        throw new APIError("RELAY_DENIED", "中继验证失败", 403);
+      result = await roomCall(env, check.host, "/native-lease", {
+        ...check,
+        pin,
       });
     } else if (
       url.pathname === routes.signal ||
@@ -236,6 +266,7 @@ export async function handleCore(
       const headers = new Headers();
       headers.set("Upgrade", "websocket");
       headers.set("x-reignhub-device", device.id);
+      if (!request.headers.has("Origin")) headers.set("x-reignhub-native", "1");
       if (request.headers.has("Sec-WebSocket-Protocol"))
         headers.set(
           "Sec-WebSocket-Protocol",

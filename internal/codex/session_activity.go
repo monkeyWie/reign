@@ -81,7 +81,7 @@ func (b *appIPC) activityState(id string) json.RawMessage {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if f := b.followed[id]; f != nil && f.owner != "" && f.err == nil {
-		return append(json.RawMessage(nil), f.state...)
+		return f.state
 	}
 	return nil
 }

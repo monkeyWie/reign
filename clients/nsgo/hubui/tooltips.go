@@ -79,7 +79,7 @@ func (s *State) groupInfo(cx *core.Scope, item func() directoryRow, compact bool
 		infoRow(cx, "group-info-title", func() *core.SVG {
 			switch item().Kind {
 			case "device":
-				return lucide.Monitor()
+				return s.hostIcon(cx, item().Target)
 			case "agent":
 				return agentIcon(item().Provider)
 			default:
@@ -134,10 +134,7 @@ func (s *State) sessionTooltip(cx *core.Scope, item func() directoryRow) base.To
 	tip := tooltipCard(cx, core.View{TestID: "session-hover-card", Style: core.Style{Gap: 10, MinWidth: core.Pt(0)}, Children: []core.Node{
 		infoRow(cx, "session-info-title", lucide.MessageCircle, func() string { return item().Title }, true),
 		infoRow(cx, "session-info-device", func() *core.SVG {
-			if str(item().Session, "deviceId") == "local" {
-				return lucide.Laptop()
-			}
-			return lucide.Monitor()
+			return s.hostIcon(cx, str(item().Session, "deviceId"))
 		}, func() string { s.read(); return s.environmentName(str(item().Session, "deviceId")) }, false),
 		infoRow(cx, "session-info-agent", func() *core.SVG { return sessionIcon(item().Session)() }, func() string {
 			s.read()

@@ -12,8 +12,8 @@ func TestKeyboardResizeIntermediateOffsetsDoNotLeaveLatest(t *testing.T) {
 		a.layout(core.Size{Width: 390, Height: 600})
 		for _, height := range []core.Points{300, 420, 600} {
 			size := core.Size{Width: 390, Height: height}
-			if layoutFirst && !a.layout(size) {
-				t.Fatal("resize did not restore the bottom")
+			if layoutFirst {
+				a.layout(size)
 			}
 			// Native clamping can report a position away from the bottom
 			// before the anchoring scroll reaches the platform.
@@ -31,7 +31,8 @@ func TestKeyboardResizeIntermediateOffsetsDoNotLeaveLatest(t *testing.T) {
 		a.layout(core.Size{Width: 390, Height: 300})
 		a.dragging, a.restoring = true, false
 		a.scroll(core.ScrollEvent{Size: a.size, ContentSize: core.Size{Height: 2000}, Offset: core.Point{Y: 900}})
-		if a.following || a.layout(core.Size{Width: 390, Height: 600}) {
+		a.layout(core.Size{Width: 390, Height: 600})
+		if a.following || a.restoring {
 			t.Fatal("resize pulled the reader out of history")
 		}
 	}
@@ -44,15 +45,14 @@ func TestInitialMeasurementsAndProgressiveContentKeepLatestIntent(t *testing.T) 
 		t.Fatal("unlaid page lost latest intent")
 	}
 	size := core.Size{Width: 390, Height: 600}
-	if !a.layout(size) {
-		t.Fatal("first viewport must explicitly anchor latest")
+	a.layout(size)
+	if !a.following {
+		t.Fatal("first viewport must keep latest intent")
 	}
 	// Android can report the unadjusted offset while first history and measured
 	// Markdown replace the empty/estimated list. Neither event is user input.
 	for _, height := range []core.Points{900, 2400, 3600} {
-		if !a.scroll(core.ScrollEvent{Size: size, ContentSize: core.Size{Height: height}, Offset: core.Point{Y: 0}}) {
-			t.Fatal("content measurement did not restore latest")
-		}
+		a.scroll(core.ScrollEvent{Size: size, ContentSize: core.Size{Height: height}, Offset: core.Point{Y: 0}})
 		if !a.following {
 			t.Fatal("initial content was mistaken for a history scroll")
 		}
@@ -63,7 +63,22 @@ func TestInitialMeasurementsAndProgressiveContentKeepLatestIntent(t *testing.T) 
 	a.restoring = false
 	a.scroll(core.ScrollEvent{Size: size, ContentSize: core.Size{Height: 3800}, Offset: core.Point{Y: 900}})
 	a.dragging = false
-	if a.following || a.scroll(core.ScrollEvent{Size: size, ContentSize: core.Size{Height: 4000}, Offset: core.Point{Y: 900}}) {
+	a.scroll(core.ScrollEvent{Size: size, ContentSize: core.Size{Height: 4000}, Offset: core.Point{Y: 900}})
+	if a.following || a.restoring {
 		t.Fatal("measurement pulled a reader out of history")
+	}
+}
+
+func TestStaleScrollCannotUndoHistoryNavigation(t *testing.T) {
+	a := messageScrollAnchor{size: core.Size{Width: 900, Height: 500}, content: core.Size{Height: 2000}}
+	// An old bottom report may arrive after an explicit history jump. It is
+	// still awaiting the framework's pending scroll and is not user intent.
+	a.scroll(core.ScrollEvent{Size: a.size, ContentSize: a.content, Offset: core.Point{Y: 1500}, Stale: true})
+	if a.following {
+		t.Fatal("stale bottom report undid history navigation")
+	}
+	a.scroll(core.ScrollEvent{Size: a.size, ContentSize: a.content, Offset: core.Point{Y: 900}})
+	if a.following || a.restoring {
+		t.Fatal("settled history position changed latest intent")
 	}
 }

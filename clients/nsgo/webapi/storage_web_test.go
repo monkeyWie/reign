@@ -4,11 +4,14 @@ package webapi
 
 import (
 	"fmt"
+	"github.com/monkeyWie/reignhub/pkg/persistence/testsupport"
 	"testing"
 	"time"
 )
 
 func browserStorage(t *testing.T) {
+	testsupport.CheckHistory(t, &Store{})
+	testsupport.CheckCompetingWriters(t, &Store{}, &Store{})
 	testDraftStorage(t, &Store{})
 	key := fmt.Sprintf("fixture-%d", time.Now().UnixNano())
 	s := &Store{}

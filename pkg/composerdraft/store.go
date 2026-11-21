@@ -26,9 +26,10 @@ type File struct {
 	Data []byte `json:"data,omitempty"`
 }
 type Draft struct {
-	Text  string `json:"text"`
-	Model string `json:"model"`
-	Files []File `json:"files"`
+	Text      string `json:"text"`
+	Model     string `json:"model"`
+	ModelBase string `json:"modelBase,omitempty"`
+	Files     []File `json:"files"`
 }
 
 func Prefix(target string) string {

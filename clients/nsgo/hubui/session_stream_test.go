@@ -354,7 +354,7 @@ func TestSmoothReplyOnlyAnimatesNewLiveSuffix(t *testing.T) {
 		scope = cx
 		cx.SetTheme(core.DefaultTheme())
 		text = core.NewSignal(cx, "历史内容🙂")
-		animate = core.NewSignal(cx, false)
+		animate = core.NewSignal(cx, true)
 		unrelated = core.NewSignal(cx, 0)
 		shown := smoothReply(cx, text.Get, func() bool { unrelated.Get(); return animate.Get() })
 		return core.Text{TestID: "reply", ContentFunc: shown}

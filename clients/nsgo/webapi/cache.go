@@ -1,9 +1,10 @@
 package webapi
 
 import (
-	"encoding/json"
+	"context"
+
 	"errors"
-	"strings"
+	"github.com/monkeyWie/reignhub/pkg/persistence"
 )
 
 // Read IndexedDB directly even when a live connection exists. No resolve,
@@ -16,60 +17,28 @@ func (a *API) cached(target string, command Object) (any, error) {
 			return nil, errors.New("only read snapshots can be loaded from cache")
 		}
 		if str(command, "method") == "transcript" && str(command, "cursor") == "" {
-			v, err := a.store.Get(snapshotKey(target, str(command, "provider"), str(command, "session")))
-			if err != nil || v != nil {
-				return v, err
+			page, err := a.store.ReadPage(context.Background(), persistence.Session{Env: target, Provider: str(command, "provider"), ID: str(command, "session")}, persistence.PageQuery{})
+			v := page.View()
+			if err != nil {
+				return nil, err
+			}
+			if v != nil {
+				return v, nil
 			}
 		}
-		b, err := json.Marshal(command)
-		if err != nil {
-			return nil, err
+		rows, e := a.store.LoadList(context.Background(), persistence.Session{Env: target, Provider: str(command, "provider"), ID: str(command, "session")}, persistence.ReadKind(str(command, "method")))
+		if rows == nil {
+			return nil, e
 		}
-		return a.store.Get("rpc:" + target + ":" + string(b))
+		return rows, e
 	}
 	providers, err := a.cached(target, Object{"method": "providers", "provider": "", "session": ""})
 	if err != nil {
 		return nil, err
 	}
-	keys, err := a.store.Keys()
+	sessions, err := a.store.ListSessions(context.Background(), persistence.DirectoryKey{Env: target})
 	if err != nil {
 		return nil, err
 	}
-	sessions := []Object{}
-	directories := map[string]bool{}
-	for _, key := range keys {
-		if !strings.HasPrefix(key, "directory:"+target+":") {
-			continue
-		}
-		v, err := a.store.Get(key)
-		if err != nil {
-			return nil, err
-		}
-		directories[key] = true
-		for _, session := range obj(obj(v)["items"]) {
-			sessions = append(sessions, obj(session))
-		}
-	}
-	for _, key := range keys {
-		prefix := "rpc:" + target + ":"
-		if !strings.HasPrefix(key, prefix) {
-			continue
-		}
-		var request Object
-		if json.Unmarshal([]byte(strings.TrimPrefix(key, prefix)), &request) != nil || str(request, "method") != "sessions" || str(request, "provider") == "" || str(request, "session") != "" || str(request, "cursor") != "" || directories["directory:"+target+":"+str(request, "provider")] {
-			continue
-		}
-		page, err := a.store.Get(key)
-		if err != nil {
-			return nil, err
-		}
-		sessions = append(sessions, arr(obj(page)["sessions"])...)
-	}
-
 	return Object{"providers": providers, "sessions": sessions}, nil
-}
-
-func snapshotKey(target, provider, session string) string {
-	b, _ := json.Marshal([]string{provider, session})
-	return "snapshot:" + target + ":" + string(b)
 }

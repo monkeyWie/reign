@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/monkeyWie/reignhub/internal/control"
 	"github.com/monkeyWie/reignhub/internal/provider"
 	"github.com/monkeyWie/reignhub/internal/readretry"
+	"github.com/monkeyWie/reignhub/pkg/persistence"
 )
 
 // All presentation state belongs to the UI loop. Watch, snapshots and approval
@@ -85,11 +87,18 @@ func (w *sessionStream) startSnapshot() {
 	// baseline should display catch-up dots or suppress the typing effect.
 	w.syncing(!w.baseline)
 	started, epoch := time.Now(), w.epoch
+	// When re-entering a cached conversation, older partial turns can move
+	// its measured tail or temporarily shorten an already complete answer.
+	// Keep that page readable until this initial verification completes.
+	verifyingPage := !w.verified && len(objects(w.s.transcript["turns"])) > 0 && len(w.s.messageRows) > 0
 	go func() {
 		previewCtx, stopPreviews := context.WithCancel(w.ctx)
 		defer stopPreviews()
 		observe := observeTranscriptPreviews(previewCtx, w.s.cx.Post, func(partial Object) {
-			if !w.current() || !w.snapshotMatches(epoch, partial) {
+			if verifyingPage || !w.current() || !w.snapshotMatches(epoch, partial) {
+				return
+			}
+			if str(partial, "partialTurn") != "" && len(objects(w.s.transcript["turns"])) != 0 {
 				return
 			}
 			if len(objects(partial["turns"])) == 0 {
@@ -106,7 +115,12 @@ func (w *sessionStream) startSnapshot() {
 		readCtx, stopRead := context.WithCancel(w.ctx)
 		defer stopRead()
 		ctx := provider.WithTranscriptObserver(readCtx, observe)
-		v, err := rpc(ctx, w.s.api, w.target, w.provider, w.session, "transcript", Object{"fresh": true, "progress": true})
+		options := Object{"fresh": true, "progress": true}
+		if w.target != control.LocalTarget {
+			options["recentTurns"] = 4
+			options["historyItems"] = persistence.PageSize
+		}
+		v, err := rpc(ctx, w.s.api, w.target, w.provider, w.session, "transcript", options)
 		stopPreviews()
 		w.s.cx.Post(func() {
 			if !w.current() {
@@ -152,6 +166,9 @@ func (w *sessionStream) startSnapshot() {
 			w.snapshotAgain = w.snapshotAgain || refresh
 			w.journal = nil
 			w.baseline = true
+			if str(t, "nextCursor") == "" {
+				t["_baseline"] = true
+			}
 			w.s.setTranscript(t)
 			w.s.reconcileOutgoing(started)
 			w.s.rebuildMessages()
@@ -220,6 +237,7 @@ func previewTranscript(old, partial Object) Object {
 	}
 	for _, turn := range objects(old["turns"]) {
 		if !seen[str(turn, "id")] {
+			seen[str(turn, "id")] = true
 			turns = append(turns, turn)
 		}
 	}
@@ -288,9 +306,15 @@ func (w *sessionStream) batch(b Object) {
 		}
 	}
 	w.checkpoint()
-	select {
-	case w.approvals <- struct{}{}:
-	default:
+	for _, event := range events {
+		switch str(event, "kind") {
+		case "approval", "turn", "snapshot":
+			select {
+			case w.approvals <- struct{}{}:
+			default:
+			}
+			return
+		}
 	}
 }
 func (w *sessionStream) run(epoch string, cursor int64) {

@@ -3,7 +3,9 @@ package clienthub
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/monkeyWie/reignhub/internal/assets"
 	"github.com/monkeyWie/reignhub/internal/connectivity"
@@ -12,14 +14,18 @@ import (
 	"github.com/monkeyWie/reignhub/internal/deviceservice"
 	"github.com/monkeyWie/reignhub/internal/remote"
 	"github.com/monkeyWie/reignhub/internal/store"
-	"github.com/monkeyWie/reignhub/pkg/composerdraft"
+	"github.com/monkeyWie/reignhub/pkg/appdb"
+
+	"github.com/monkeyWie/reignhub/pkg/persistence"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
 )
 
 type Saved struct {
+	Platform          string `json:"platform,omitempty"`
 	ID                string `json:"id"`
 	Service           string `json:"service"`
 	ConnectionID      string `json:"connectionId"`
@@ -65,11 +71,11 @@ func (h *Hub) caller(id string) control.Caller {
 }
 
 func New(dir string) (*Hub, error) {
-	db, e := store.Open(filepath.Join(dir, "client.db"))
+	db, e := store.Open(appdb.Path(dir))
 	if e != nil {
 		return nil, e
 	}
-	return &Hub{DB: db, Assets: &assets.Cache{Root: filepath.Join(dir, "asset-cache")}, connections: map[string]*remote.Client{}, busy: map[string]bool{}, generation: map[string]uint64{}}, nil
+	return &Hub{DB: db, Assets: &assets.Cache{Database: appdb.Path(dir), Root: filepath.Join(dir, "asset-cache")}, connections: map[string]*remote.Client{}, busy: map[string]bool{}, generation: map[string]uint64{}}, nil
 }
 
 // Close is called after the application's outstanding requests are canceled.
@@ -90,8 +96,8 @@ func (h *Hub) identity(ctx context.Context, service, name string) (device.Identi
 	if info := device.ClientInfoFrom(ctx); info.Name != "" {
 		name = info.Name
 	}
-	k := "identity:" + service
-	if e := h.DB.Get(k, &i); e == nil {
+
+	if e := h.DB.LoadIdentity(service, "controller", &i); e == nil {
 		if name != "" && name != i.Name {
 			if e := device.Post(ctx, service, i.Token, "/p2p/devices/presence", map[string]any{"name": name}, nil); e != nil {
 				return i, e
@@ -102,11 +108,13 @@ func (h *Hub) identity(ctx context.Context, service, name string) (device.Identi
 		info.Name = i.Name
 		if info != i.Info {
 			i.Info = info
-			if e := h.DB.Put(k, i); e != nil {
+			if e := h.DB.SaveIdentity(service, "controller", i); e != nil {
 				return i, e
 			}
 		}
 		return i, nil
+	} else if !errors.Is(e, sql.ErrNoRows) {
+		return i, e
 	}
 	i, e := device.NewIdentity(name)
 	if e != nil {
@@ -117,10 +125,10 @@ func (h *Hub) identity(ctx context.Context, service, name string) (device.Identi
 	if e != nil {
 		return i, e
 	}
-	return i, h.DB.Put(k, i)
+	return i, h.DB.SaveIdentity(service, "controller", i)
 }
 func (h *Hub) List() ([]map[string]any, error) {
-	keys, e := h.DB.Keys("saved:")
+	keys, e := h.DB.Environments()
 	if e != nil {
 		return nil, e
 	}
@@ -129,11 +137,11 @@ func (h *Hub) List() ([]map[string]any, error) {
 	local, name := h.local, h.localName
 	h.mu.Unlock()
 	if local != nil {
-		r = append(r, map[string]any{"id": control.LocalTarget, "name": name, "local": true, "connected": true, "path": "In-process"})
+		r = append(r, map[string]any{"id": control.LocalTarget, "name": name, "local": true, "platform": runtime.GOOS, "connected": true, "path": "In-process"})
 	}
 	for _, k := range keys {
 		var s Saved
-		if e = h.DB.Get(k, &s); e != nil {
+		if e = h.DB.LoadEnvironment(k, &s); e != nil {
 			return nil, e
 		}
 		path := "离线"
@@ -144,7 +152,7 @@ func (h *Hub) List() ([]map[string]any, error) {
 			path = c.Path()
 		}
 		connected := c != nil && path != "Disconnected"
-		r = append(r, map[string]any{"id": s.ID, "service": s.Service, "connectionId": s.ConnectionID, "name": s.Name, "host": s.Host, "public": s.Public, "path": path, "connected": connected, "network": func() any {
+		r = append(r, map[string]any{"id": s.ID, "service": s.Service, "connectionId": s.ConnectionID, "name": s.Name, "platform": s.Platform, "host": s.Host, "public": s.Public, "path": path, "connected": connected, "network": func() any {
 			if c != nil {
 				return c.Metrics()
 			}
@@ -156,18 +164,18 @@ func (h *Hub) List() ([]map[string]any, error) {
 
 // Presence reads saved hosts without initiating any peer connection.
 func (h *Hub) Presence(ctx context.Context) ([]device.DeviceStatus, error) {
-	keys, err := h.DB.Keys("saved:")
+	keys, err := h.DB.Environments()
 	if err != nil {
 		return nil, err
 	}
 	targets := []device.PresenceTarget{}
 	for _, key := range keys {
 		var saved Saved
-		if err = h.DB.Get(key, &saved); err != nil {
+		if err = h.DB.LoadEnvironment(key, &saved); err != nil {
 			return nil, err
 		}
 		var identity device.Identity
-		_ = h.DB.Get("identity:"+saved.Service, &identity)
+		_ = h.DB.LoadIdentity(saved.Service, "controller", &identity)
 		targets = append(targets, device.PresenceTarget{ID: saved.ID, Service: saved.Service, Host: saved.Host, Token: identity.Token})
 	}
 	return device.Presence(ctx, targets), ctx.Err()
@@ -181,7 +189,7 @@ func (h *Hub) Connect(ctx context.Context, service, code, public, password, name
 // or replays a user command after a network failure.
 func (h *Hub) Reconnect(ctx context.Context, id string) (Saved, error) {
 	var s Saved
-	if err := h.DB.Get("saved:"+id, &s); err != nil {
+	if err := h.DB.LoadEnvironment(id, &s); err != nil {
 		return s, err
 	}
 	if s.ReconnectDisabled || s.Key == "" || (s.Expires > 0 && s.Expires <= time.Now().Unix()) {
@@ -197,7 +205,7 @@ func (h *Hub) Reconnect(ctx context.Context, id string) (Saved, error) {
 		stop()
 		if err == nil {
 			var identity device.Identity
-			_ = h.DB.Get("identity:"+s.Service, &identity)
+			_ = h.DB.LoadIdentity(s.Service, "controller", &identity)
 			publishClientInfo(old, device.CurrentClientInfo(ctx, identity.Info))
 			return s, nil
 		}
@@ -247,7 +255,10 @@ func (h *Hub) connect(ctx context.Context, service, code, public, password, name
 	if public != "" && public != d.Public {
 		return Saved{}, fmt.Errorf("二维码公钥不匹配")
 	}
-	id := service + "|" + d.ID
+	id, e := h.DB.Route(ctx, service+"|"+d.ID)
+	if e != nil {
+		return Saved{}, e
+	}
 	h.mu.Lock()
 	if h.busy[id] {
 		h.mu.Unlock()
@@ -258,7 +269,7 @@ func (h *Hub) connect(ctx context.Context, service, code, public, password, name
 	h.mu.Unlock()
 	defer func() { h.mu.Lock(); delete(h.busy, id); h.mu.Unlock() }()
 	var s Saved
-	_ = h.DB.Get("saved:"+id, &s)
+	_ = h.DB.LoadEnvironment(id, &s)
 	if reconnectOnly && (s.ReconnectDisabled || s.Key == "" || (s.Expires > 0 && s.Expires <= time.Now().Unix())) {
 		return s, fmt.Errorf("自动重连已停止或授权已过期，请手动连接")
 	}
@@ -304,7 +315,7 @@ func (h *Hub) connect(ctx context.Context, service, code, public, password, name
 					return s, fmt.Errorf("无效主机授权")
 				}
 				s = Saved{ID: id, Service: service, ConnectionID: d.ConnectionID, Name: d.Name, Host: d.ID, Public: d.Public, Key: reply.Key, Expires: reply.Expires}
-				if e = h.DB.Put("saved:"+id, s); e != nil {
+				if e = h.DB.SaveEnvironment(id, s); e != nil {
 					return s, e
 				}
 				break
@@ -354,9 +365,12 @@ func (h *Hub) connect(ctx context.Context, service, code, public, password, name
 		_ = c.Close()
 		return s, fmt.Errorf("连接已取消")
 	}
+	if platform := device.NormalizePlatform(c.HostPlatform()); platform != "" {
+		s.Platform = platform
+	}
 	s.Name, s.ConnectionID = d.Name, d.ConnectionID
 	s.RelayOnly, s.ReconnectDisabled, s.HasConnected = relayOnly, false, true
-	if err := h.DB.Put("saved:"+id, s); err != nil {
+	if err := h.DB.SaveEnvironment(id, s); err != nil {
 		h.mu.Unlock()
 		_ = c.Close()
 		return s, err
@@ -384,9 +398,9 @@ func (h *Hub) Disconnect(id string) error {
 		defer c.Close()
 	}
 	var s Saved
-	if h.DB.Get("saved:"+id, &s) == nil {
+	if h.DB.LoadEnvironment(id, &s) == nil {
 		s.ReconnectDisabled = true
-		if err := h.DB.Put("saved:"+id, s); err != nil {
+		if err := h.DB.SaveEnvironment(id, s); err != nil {
 			return err
 		}
 	}
@@ -396,45 +410,44 @@ func (h *Hub) Forget(id string) error {
 	if id == control.LocalTarget {
 		return fmt.Errorf("本机环境不能移除")
 	}
-	_ = h.Assets.Clear(id)
+	if err := h.DB.ForgetHistory(context.Background(), id); err != nil {
+		return err
+	}
+	if err := h.Assets.Clear(id); err != nil {
+		return err
+	}
 	h.Disconnect(id)
-	keys, e := h.DB.Keys("rpc:" + id + ":")
-	if e != nil {
-		return e
-	}
-	directories, e := h.DB.Keys("directory:" + id + ":")
-	if e != nil {
-		return e
-	}
-	keys = append(keys, directories...)
-	snapshots, e := h.DB.Keys("snapshot:" + id + ":")
-	if e != nil {
-		return e
-	}
-	keys = append(keys, snapshots...)
-	drafts, e := h.DB.Keys(composerdraft.Prefix(id))
-	if e != nil {
-		return e
-	}
-	keys = append(keys, drafts...)
-	for _, k := range keys {
-		if e = h.DB.Delete(k); e != nil {
-			return e
-		}
-	}
-	return h.DB.Delete("saved:" + id)
+
+	return nil
 }
 func (h *Hub) Call(ctx context.Context, id string, r control.Request) (any, error) {
-	cacheRequest := r
-	cacheRequest.Fresh = false
-	raw, _ := json.Marshal(cacheRequest)
-	cacheKey := "rpc:" + id + ":" + string(raw)
+	scope := persistence.Session{Env: id, Provider: r.Provider, ID: r.Session}
+	kind := persistence.ReadKind(r.Method)
 	c := h.caller(id)
 	if c == nil || c.Path() == "Disconnected" {
 		if !r.Fresh && control.ReadOnly(r.Method) {
-			var data any
-			if h.DB.Get(cacheKey, &data) == nil {
-				return data, nil
+			if r.Method == "transcript" && r.Cursor == "" {
+				page, e := h.DB.ReadPage(ctx, persistence.Session{Env: id, Provider: r.Provider, ID: r.Session}, persistence.PageQuery{})
+				v := page.View()
+				if e != nil {
+					return nil, e
+				}
+				if v != nil {
+					return v, nil
+				}
+			}
+			if r.Method == "sessions" && r.Cursor == "" {
+				rows, e := h.DB.ListSessions(ctx, persistence.DirectoryKey{Env: id, Provider: r.Provider})
+				if e != nil {
+					return nil, e
+				}
+				if len(rows) > 0 {
+					return map[string]any{"sessions": rows}, nil
+				}
+			}
+			v, e := h.DB.LoadList(ctx, scope, kind)
+			if e != nil || v != nil {
+				return v, e
 			}
 		}
 		return nil, fmt.Errorf("设备离线：可以查看缓存，写操作需重新连接")
@@ -443,71 +456,59 @@ func (h *Hub) Call(ctx context.Context, id string, r control.Request) (any, erro
 	if e := c.Call(ctx, r, &out); e != nil {
 		return nil, e
 	}
-	if control.ReadOnly(r.Method) {
-		if e := h.DB.Put(cacheKey, out); e != nil {
+	if r.Method == "sessions" {
+		k := persistence.DirectoryKey{Env: id, Provider: r.Provider}
+		page, _ := out.(map[string]any)
+		if err := h.DB.WriteDirectory(ctx, k, persistence.DirectoryHead{}, persistence.DirectoryBatch{Preview: true, Upserts: persistence.Objects(page["sessions"])}); err != nil {
+			return nil, err
+		}
+	} else if kind.Table() != "" {
+		if e := h.DB.SaveList(ctx, scope, kind, persistence.Objects(out)); e != nil {
 			return nil, e
 		}
 	}
 	return out, nil
 }
-func (h *Hub) ApplyDirectory(id, provider string, delta store.Delta) ([]map[string]any, error) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	k := "directory:" + id + ":" + provider
-	var data struct {
-		Items  map[string]map[string]any `json:"items"`
-		Epoch  string                    `json:"epoch"`
-		Cursor int64                     `json:"cursor"`
-	}
-	_ = h.DB.Get(k, &data)
-	if data.Items == nil || delta.Reset {
-		data.Items = map[string]map[string]any{}
-	}
-	for _, b := range delta.Items {
-		var v map[string]any
-		if e := json.Unmarshal(b, &v); e != nil {
-			return nil, e
+func (h *Hub) applyDirectory(ctx context.Context, k persistence.DirectoryKey, old persistence.DirectoryHead, d store.Delta) ([]map[string]any, error) {
+	batch := persistence.DirectoryBatch{Head: persistence.DirectoryHead{Epoch: d.Epoch, Cursor: d.Cursor}, Reset: d.Reset}
+	for _, v := range d.Items {
+		var row persistence.Object
+		if err := json.Unmarshal(v, &row); err != nil {
+			return nil, err
 		}
-		data.Items[v["id"].(string)] = v
+		batch.Upserts = append(batch.Upserts, row)
 	}
-	for _, c := range delta.Changes {
+	for _, c := range d.Changes {
 		if c.Deleted {
-			delete(data.Items, c.ID)
-		} else {
-			var v map[string]any
-			if e := json.Unmarshal(c.Value, &v); e != nil {
-				return nil, e
-			}
-			data.Items[c.ID] = v
+			batch.Changes = append(batch.Changes, persistence.DirectoryChange{ID: c.ID})
+			continue
 		}
+		var row persistence.Object
+		if err := json.Unmarshal(c.Value, &row); err != nil {
+			return nil, err
+		}
+		batch.Changes = append(batch.Changes, persistence.DirectoryChange{ID: c.ID, Value: row})
 	}
-	data.Epoch = delta.Epoch
-	data.Cursor = delta.Cursor
-	if e := h.DB.Put(k, data); e != nil {
-		return nil, e
+	if err := h.DB.WriteDirectory(ctx, k, old, batch.Coalesced()); err != nil {
+		return nil, err
 	}
-	out := []map[string]any{}
-	for _, v := range data.Items {
-		out = append(out, v)
-	}
-	return out, nil
+	return h.DB.ListSessions(ctx, k)
 }
 func (h *Hub) Sync(ctx context.Context, id, p string) (any, error) {
-	var state struct {
-		Epoch  string
-		Cursor int64
-		Items  map[string]map[string]any
+	k := persistence.DirectoryKey{Env: id, Provider: p}
+	head, err := h.DB.DirectoryPosition(ctx, k)
+	if err != nil {
+		return nil, err
 	}
-	_ = h.DB.Get("directory:"+id+":"+p, &state)
 	c := h.caller(id)
 	if c == nil || c.Path() == "Disconnected" {
 		return nil, fmt.Errorf("设备离线：保留本地会话，连接后重试同步")
 	}
-	var delta store.Delta
-	if e := c.Call(ctx, control.Request{Method: "sync", Provider: p, Epoch: state.Epoch, After: state.Cursor}, &delta); e != nil {
-		return nil, e
+	var d store.Delta
+	if err = c.Call(ctx, control.Request{Method: "sync", Provider: p, Epoch: head.Epoch, After: head.Cursor}, &d); err != nil {
+		return nil, err
 	}
-	return h.ApplyDirectory(id, p, delta)
+	return h.applyDirectory(ctx, k, head, d)
 }
 
 // Display metadata must not delay a successful connection or data sync.

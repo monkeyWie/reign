@@ -210,6 +210,7 @@ func (f *lazyCatalogueAPI) Call(ctx context.Context, method string, p Object, ta
 func TestColdCatalogueIsUsableBeforeFullScanAndMessagesLoadOnOpen(t *testing.T) {
 	f := &lazyCatalogueAPI{demoAPI: newDemoAPI(), release: make(chan struct{})}
 	app := nsgotest.Start(t, func(cx *core.Scope) core.Node { return RootWithAPI(cx, f, true) }, nsgotest.Size(390, 844))
+	showSessionDirectory(t, app)
 	app.WaitFor("id:device-demo-device", time.Second)
 	app.WaitFor(sessionSelector("demo-device", "codex-app", "demo-chat"), time.Second)
 	// A different provider must remain usable while the App directory is blocked.
@@ -222,7 +223,7 @@ func TestColdCatalogueIsUsableBeforeFullScanAndMessagesLoadOnOpen(t *testing.T) 
 	app.WaitUntil(time.Second, func() bool { return f.transcripts.Load() > 0 })
 	app.WaitFor("id:message-demo-turn|demo-assistant", time.Second)
 	close(f.release)
-	app.Press("id:back-sessions")
+	app.Press("id:mobile-menu")
 	app.WaitFor(sessionSelector("demo-device", "codex-app", "older-chat"), time.Second)
 	// The independent history read may finish before the live join and need
 	// one reconciliation. Check which session was read, not that scheduling.
@@ -248,13 +249,14 @@ func (f *disappearingProviderAPI) Call(ctx context.Context, method string, p Obj
 func TestBackFromStalledHistoryPreservesCatalogueAcrossDiscoveryFailure(t *testing.T) {
 	f := &disappearingProviderAPI{independentStreamAPI: &independentStreamAPI{demoAPI: newDemoAPI(), snapshots: make(chan snapshotRequest, 4), events: make(chan Object, 8), approvalsStarted: make(chan struct{})}}
 	app := nsgotest.Start(t, func(cx *core.Scope) core.Node { return RootWithAPI(cx, f, true) }, nsgotest.Size(390, 844))
+	showSessionDirectory(t, app)
 	app.WaitFor("id:device-demo-device", time.Second)
 	app.WaitFor(sessionSelector("demo-device", "codex-app", "demo-chat"), time.Second)
 	app.Press(sessionSelector("demo-device", "codex-app", "demo-chat"))
 	app.WaitUntil(time.Second, func() bool { return len(f.snapshots) > 0 })
 	app.WaitFor("id:message-demo-turn|demo-assistant", time.Second)
 	f.missing.Store(true)
-	app.Press("id:back-sessions")
+	app.Press("id:mobile-menu")
 	app.WaitFor(sessionSelector("demo-device", "codex-app", "demo-chat"), time.Second)
 	ensureSidebarMenu(app)
 	app.Press("id:refresh-sessions")
@@ -352,4 +354,67 @@ func TestCatalogueSkipsUnavailableHistoryProviderAndResumesWhenReady(t *testing.
 			}
 		})
 	}
+}
+
+func TestSessionTitlesSurvivePartialMetadataAndAcceptRenames(t *testing.T) {
+	var s *State
+	app := nsgotest.Start(t, func(cx *core.Scope) core.Node {
+		s = workspaceLayoutFixture(cx)
+		return s.workspaceView(cx)
+	}, nsgotest.Size(1100, 820))
+	row := copyObject(s.selected)
+	key := "id:" + sessionRowID("pinned", row)
+	title := str(row, "title")
+	apply := func(name string, directory bool) {
+		t.Helper()
+		app.Post(func() {
+			s.cx.Post(func() {
+				next := copyObject(row)
+				next["title"] = name
+				if directory {
+					s.applyCataloguePage(str(row, "providerId"), []Object{next}, true)
+				} else {
+					s.setTranscript(Object{"session": next, "turns": s.transcript["turns"]})
+				}
+			})
+		})
+		app.Settle()
+	}
+	assertTitle := func(want string) {
+		t.Helper()
+		if actual := app.Find(key).Props.Label; !strings.HasPrefix(actual, want+" ·") {
+			t.Fatalf("directory title = %q, want %q", actual, want)
+		}
+	}
+	apply("", false)
+	assertTitle(title)
+	apply(" ", true)
+	assertTitle(title)
+	apply("Renamed fixture", true)
+	assertTitle("Renamed fixture")
+	apply(title, false)
+	assertTitle("Renamed fixture")
+}
+
+func TestIdleRemoteDirectoryBacksOffAndManualRefreshRunsImmediately(t *testing.T) {
+	var s *State
+	app := nsgotest.Start(t, func(cx *core.Scope) core.Node {
+		s = newState(cx, newDemoAPI())
+		s.devices = []Object{{"id": "demo-device", "connected": true}}
+		s.target = "demo-device"
+		return core.View{}
+	})
+	c := s.catalogue("demo-device")
+	for _, want := range []time.Duration{2, 4, 8, 16, 30, 30} {
+		app.Post(func() { c.nextPoll = time.Time{}; s.pollCatalogues() })
+		app.WaitUntil(time.Second, func() bool { return !c.polling && c.pollInterval == want*time.Second })
+	}
+	stamp := c.generation
+	app.Post(s.pollCatalogues)
+	app.Settle()
+	if c.generation != stamp {
+		t.Fatal("idle timer started an unnecessary directory scan")
+	}
+	app.Post(s.refreshSessions)
+	app.WaitUntil(time.Second, func() bool { return c.generation > stamp && !c.polling && c.pollInterval == 2*time.Second })
 }

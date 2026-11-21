@@ -19,40 +19,68 @@ const (
 
 // The original dial error remains the cause; diagnostic failures never replace it.
 type pipeAccessError struct {
-	cause     error
-	serverPID uint32
-	source    string
+	cause      error
+	serverPID  uint32
+	source     string
+	diagnostic error
 }
 
-func (e *pipeAccessError) Error() string { return e.cause.Error() }
+func (e *pipeAccessError) Error() string {
+	if e.diagnostic != nil {
+		return fmt.Sprintf("%v（连接来源诊断未完成：%v）", e.cause, e.diagnostic)
+	}
+	return e.cause.Error()
+}
 func (e *pipeAccessError) Unwrap() error { return e.cause }
 func (e *pipeAccessError) ConnectionGuidance() string {
+	if e.source == "" {
+		pid := ""
+		if e.serverPID != 0 {
+			pid = fmt.Sprintf("（PID %d）", e.serverPID)
+		}
+		return "Codex 连接访问被拒绝，暂未确认连接服务来源" + pid + "。请检查 SSH、VS Code 或其它终端中是否仍有使用 Codex 的实例；如有，请在对应环境中关闭该实例，然后重新打开桌面 Codex App 并重试。若仍失败，请确认 ReignHub 与 Codex App 由同一用户以相同权限级别运行"
+	}
 	return fmt.Sprintf("Codex 连接访问被拒绝，检测到连接服务可能来自 %s 环境（PID %d）。请在该环境中关闭使用 Codex 的实例，然后重新打开桌面 Codex App 并重试", e.source, e.serverPID)
 }
 
-func diagnosePipeAccess(ctx context.Context, path string, cause error, inspect func(context.Context, string) (uint32, string)) error {
-	if !errors.Is(cause, windows.ERROR_ACCESS_DENIED) || ctx.Err() != nil {
+func diagnosePipeAccess(ctx context.Context, path string, cause error, inspect func(context.Context, string) (uint32, string, error)) error {
+	if !errors.Is(cause, windows.ERROR_ACCESS_DENIED) {
 		return cause
+	}
+	// Failed or unknown diagnosis still needs actionable, explicitly unconfirmed
+	// guidance. Keep inspection errors separate from the original dial's cause.
+	result := &pipeAccessError{cause: cause}
+	if err := ctx.Err(); err != nil {
+		result.diagnostic = err
+		return result
 	}
 	ctx, cancel := context.WithTimeout(ctx, pipeDiagnosticBudget)
 	defer cancel()
-	pid, source := inspect(ctx, path)
-	if ctx.Err() != nil || pid == 0 || source == "" {
-		return cause
+	pid, source, err := inspect(ctx, path)
+	if ctx.Err() != nil {
+		result.diagnostic = ctx.Err()
+		return result
 	}
-	return &pipeAccessError{cause: cause, serverPID: pid, source: source}
+	result.serverPID, result.diagnostic = pid, err
+	if err == nil && pid != 0 {
+		result.source = source
+	}
+	return result
 }
 
-func inspectPipeSource(ctx context.Context, path string) (uint32, string) {
+func inspectPipeSource(ctx context.Context, path string) (uint32, string, error) {
 	pid, err := pipeServerProcessID(ctx, path)
-	if err != nil || pid == 0 {
-		return 0, ""
+	if err != nil {
+		return 0, "", err
+	}
+	if pid == 0 {
+		return 0, "", errors.New("连接服务未返回进程 ID")
 	}
 	processes, err := snapshotPipeProcesses(ctx)
 	if err != nil {
-		return 0, ""
+		return pid, "", fmt.Errorf("查询连接服务的父进程链失败：%w", err)
 	}
-	return pid, pipeProcessSource(ctx, pid, processes)
+	return pid, pipeProcessSource(ctx, pid, processes), nil
 }
 
 func pipeServerProcessID(ctx context.Context, path string) (uint32, error) {
@@ -61,7 +89,7 @@ func pipeServerProcessID(ctx context.Context, path string) (uint32, error) {
 	}
 	name, err := windows.UTF16PtrFromString(path)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("解析连接服务路径失败：%w", err)
 	}
 	// Zero desired access opens metadata only, without data read/write or server
 	// rights. Do not wait for a busy pipe or allow caller impersonation. This handle
@@ -69,7 +97,7 @@ func pipeServerProcessID(ctx context.Context, path string) (uint32, error) {
 	h, err := windows.CreateFile(name, 0, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE, nil,
 		windows.OPEN_EXISTING, windows.FILE_FLAG_OVERLAPPED|windows.SECURITY_SQOS_PRESENT|windows.SECURITY_ANONYMOUS, 0)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("打开连接服务的元数据句柄失败：%w", err)
 	}
 	defer windows.CloseHandle(h)
 	if err := ctx.Err(); err != nil {
@@ -77,7 +105,7 @@ func pipeServerProcessID(ctx context.Context, path string) (uint32, error) {
 	}
 	var pid uint32
 	if err := windows.GetNamedPipeServerProcessId(h, &pid); err != nil {
-		return 0, err
+		return 0, fmt.Errorf("查询连接服务进程 ID 失败：%w", err)
 	}
 	return pid, ctx.Err()
 }

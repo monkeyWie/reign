@@ -155,8 +155,9 @@ func (s *State) finishSessionRemoval(ss Object) {
 }
 
 func (s *State) clearRemovedSelection(target, agent, id string) {
+	s.cancelSessionEntry()
 	if s.target == target && str(s.selected, "id") == id && agentFamily(str(s.selected, "providerId")) == agentFamily(agent) {
-		s.backSessions()
+		s.showHome()
 		if s.watchCancel != nil {
 			s.watchCancel()
 		}

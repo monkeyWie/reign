@@ -13,6 +13,9 @@ import (
 var ErrUnavailable = errors.New("provider unavailable")
 
 type Capabilities struct {
+	// Terminal is supplied by the desktop host, independently of the Agent.
+	Terminal         bool `json:"terminal,omitempty"`
+	TerminalProfiles bool `json:"terminalProfiles,omitempty"`
 	// SessionRemoval describes the implemented outcome: archive, detach or delete.
 	// Empty means the Provider does not support removing a session.
 	SessionRemoval     string `json:"sessionRemoval,omitempty"`
@@ -148,6 +151,16 @@ type Attachment struct {
 	Inline    bool   `json:"inline,omitempty"`
 }
 
+type AttachmentParams struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Size      int64  `json:"size"`
+	SHA256    string `json:"sha256"`
+	Offset    int64  `json:"offset"`
+	Data      string `json:"data"`
+	Thumbnail bool   `json:"thumbnail"`
+}
+
 // AttachmentSender is optional; providers map stored resources to native input.
 type AttachmentSender interface {
 	SendAttachments(context.Context, string, string, string, []string) error
@@ -172,6 +185,7 @@ type Turn struct {
 }
 
 type Transcript struct {
+	PartialTurn  string        `json:"partialTurn,omitempty"` // First turn begins partway through its item list.
 	StreamEpoch  string        `json:"streamEpoch,omitempty"`
 	StreamCursor int64         `json:"streamCursor,omitempty"`
 	Session      Session       `json:"session"`

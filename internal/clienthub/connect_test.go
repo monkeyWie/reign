@@ -53,7 +53,7 @@ func TestGrantWithoutSuccessfulConnectionDoesNotEnableAutoReconnect(t *testing.T
 	}
 	defer h.Close()
 	saved := Saved{ID: "host", Key: "approved-key", Expires: time.Now().Add(time.Hour).Unix()}
-	if err := h.DB.Put("saved:host", saved); err != nil {
+	if err := h.DB.SaveEnvironment("host", saved); err != nil {
 		t.Fatal(err)
 	}
 	devices, err := h.List()
@@ -64,7 +64,7 @@ func TestGrantWithoutSuccessfulConnectionDoesNotEnableAutoReconnect(t *testing.T
 		t.Fatal("approval alone enabled automatic retries")
 	}
 	saved.HasConnected = true
-	if err := h.DB.Put("saved:host", saved); err != nil {
+	if err := h.DB.SaveEnvironment("host", saved); err != nil {
 		t.Fatal(err)
 	}
 	devices, err = h.List()

@@ -12,15 +12,28 @@ import (
 func TestMain(m *testing.M) { nsgotest.Main(m) }
 func startDemo(t *testing.T, w, h core.Points) *nsgotest.App {
 	t.Helper()
-	return nsgotest.Start(t, func(cx *core.Scope) core.Node { return RootWithAPI(cx, &localDemo{newDemoAPI()}, true) }, nsgotest.Size(w, h), nsgotest.Environment(core.Environment{OS: core.OSMacOS, Idiom: core.IdiomDesktop, Locale: "zh-CN"}))
+	app := nsgotest.Start(t, func(cx *core.Scope) core.Node { return RootWithAPI(cx, &localDemo{newDemoAPI()}, true) }, nsgotest.Size(w, h), nsgotest.Environment(core.Environment{OS: core.OSMacOS, Idiom: core.IdiomDesktop, Locale: "zh-CN"}))
+	showSessionDirectory(t, app)
+	return app
 }
+func showSessionDirectory(t *testing.T, app *nsgotest.App) {
+	t.Helper()
+	if app.Exists("id:mobile-menu") && !app.Find("id:mobile-menu").Props.Expanded {
+		app.WaitUntil(time.Second, func() bool { return !app.Exists("id:mobile-sidebar") })
+		app.Press("id:mobile-menu")
+	}
+	app.WaitFor("id:session-sidebar", 3*time.Second)
+}
+
 func openDemoChat(t *testing.T, app *nsgotest.App) {
 	t.Helper()
+	showSessionDirectory(t, app)
 	app.WaitFor("id:device-demo-device", 3*time.Second)
 	app.WaitFor(sessionSelector("demo-device", "codex-app", "demo-chat"), 5*time.Second)
 	app.Press(sessionSelector("demo-device", "codex-app", "demo-chat"))
 	app.WaitFor("id:chat-input", 3*time.Second)
 	app.WaitFor("id:message-demo-turn|demo-assistant", 5*time.Second)
+	app.WaitUntil(time.Second, func() bool { return !app.Exists("id:mobile-sidebar") })
 }
 func TestDesktopNavigationAndDrafts(t *testing.T) {
 	app := startDemo(t, 1320, 880)
@@ -67,15 +80,17 @@ func TestPhoneNavigation(t *testing.T) {
 	}
 	app.Type("id:chat-input", "手机草稿")
 	app.Screenshot("phone-conversation")
-	app.Press("id:back-sessions")
+	app.Press("id:mobile-menu")
 	app.Find("id:session-sidebar")
 	app.Screenshot("phone-sessions")
 	app.Press(sessionSelector("demo-device", "codex-app", "demo-chat"))
 	app.WaitUntil(time.Second, func() bool { return app.Find("id:chat-input").Text == "手机草稿" })
 	pressWorkspaceBack(t, app)
-	app.Find("id:session-sidebar")
+	app.Find("id:chat-input")
+	showSessionDirectory(t, app)
 	pressWorkspaceBack(t, app)
-	app.Find("id:session-sidebar")
+	app.WaitUntil(time.Second, func() bool { return !app.Exists("id:mobile-sidebar") })
+	showSessionDirectory(t, app)
 	app.Press("id:device-demo-device")
 	app.Find("id:dialog-device")
 	app.Press("id:dialog-device-close")

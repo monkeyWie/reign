@@ -31,6 +31,10 @@ func TestTurnStatusDoesNotLoadMetadataOrImportMessageAttachments(t *testing.T) {
 			}
 			result := json.RawMessage(`{}`)
 			if m.Method == "thread/turns/list" {
+				var args struct{ ItemsView string }
+				if json.Unmarshal(m.Params, &args) != nil || args.ItemsView != "notLoaded" {
+					t.Error("status requested item bodies")
+				}
 				result = json.RawMessage(`{"data":[{"id":"task","status":"completed","items":[{"type":"userMessage","content":[{"type":"localImage","path":"/unavailable/image.png"}]}]}]}`)
 			} else if m.Method != "initialize" {
 				t.Errorf("status check performed unrelated RPC %s", m.Method)

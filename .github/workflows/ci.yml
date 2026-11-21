@@ -389,9 +389,11 @@ jobs:
         run: |
           mkdir -p build/server-smoke
           tar -xzf "dist/release/reignhub-server-$VERSION-linux-amd64.tar.gz" -C build/server-smoke
+          cat > build/server-smoke/config.json <<'JSON'
+          {"listen":"127.0.0.1:18788","state":"state.db","stunListen":"127.0.0.1:0","tcpStunListen":"127.0.0.1:0","nativeRelayListen":"127.0.0.1:0"}
+          JSON
           "build/server-smoke/reignhub-server-$VERSION-linux-amd64/reignhub-server" \
-            --listen 127.0.0.1:18788 --state build/server-smoke/state.db \
-            --stun-listen 127.0.0.1:0 --tcp-stun-listen 127.0.0.1:0 > /tmp/reignhub-go-server.log 2>&1 &
+            --config build/server-smoke/config.json > /tmp/reignhub-go-server.log 2>&1 &
           server_pid=$!
           trap 'kill "$server_pid" 2>/dev/null || true' EXIT
           for attempt in $(seq 1 60); do
@@ -402,11 +404,13 @@ jobs:
       - name: Verify Docker deployment with a non-root read-only runtime
         run: |
           docker build --build-arg VERSION="$VERSION" -f deploy/service/Dockerfile -t reignhub-server:ci .
+          cat > build/server-smoke/container.json <<'JSON'
+          {"state":"/data/reignhub.db","selfStun":"stun:127.0.0.1:19031","tcpStunPublic":"127.0.0.1:19031"}
+          JSON
           docker run -d --rm --name reignhub-server-ci --read-only \
             --tmpfs /data:rw,noexec,nosuid,size=64m,uid=65532,gid=65532 \
             -p 127.0.0.1:18789:26330/tcp -p 127.0.0.1:19031:26331/tcp -p 127.0.0.1:19031:26331/udp \
-            reignhub-server:ci --state=/data/reignhub.db \
-            --self-stun=stun:127.0.0.1:19031 --tcp-stun-public=127.0.0.1:19031
+            -v "$PWD/build/server-smoke/container.json:/config.json:ro" reignhub-server:ci
           trap 'docker rm -f reignhub-server-ci > /dev/null 2>&1 || true' EXIT
           for attempt in $(seq 1 60); do
             if curl -fsS http://127.0.0.1:18789/healthz > /dev/null; then break; fi
@@ -420,41 +424,10 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  probe:
-    name: Build optional Linux TCP/UDP probes
-    needs: [metadata, test]
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    env:
-      VERSION: ${{ needs.metadata.outputs.version }}
-    steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: actions/setup-go@v7.0.0
-        with:
-          go-version-file: go.mod
-          cache-dependency-path: go.sum
-      - run: python3 scripts/platform/package-probe.py --version "$VERSION" --output dist/release
-      - run: python3 scripts/ci/smoke-probe.py --archive "dist/release/reignhub-probe-$VERSION-linux-amd64.tar.gz"
-      - name: Add probe checksums
-        run: |
-          python3 - <<'PY'
-          import sys
-          from pathlib import Path
-          sys.path.insert(0, 'scripts/ci')
-          from release import checksum
-          for p in Path('dist/release').glob('*.tar.gz'): checksum(p)
-          PY
-      - uses: actions/upload-artifact@v7.0.2
-        with:
-          name: probe-linux
-          path: dist/release/*
-          if-no-files-found: error
-          retention-days: 14
-
   assemble:
     name: Verify complete release bundle
     needs:
-      [metadata, test, windows-provider, clients, android, probe, web, server]
+      [metadata, test, windows-provider, clients, android, web, server]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     env:
@@ -465,10 +438,6 @@ jobs:
         with:
           pattern: clients-*
           merge-multiple: true
-          path: dist/release
-      - uses: actions/download-artifact@v8.0.2
-        with:
-          name: probe-linux
           path: dist/release
       - uses: actions/download-artifact@v8.0.2
         with:
@@ -508,15 +477,19 @@ jobs:
       - name: Prepare release notes
         run: |
           cat > build-notes.md <<'NOTES'
-          ReignHub native clients, Cloudflare Worker with NSGo Web, standalone Go servers, and optional probes.
+          Access your agents from anywhere. Open the same project on your desktop, phone or browser. Agents and their working files stay on your computer.
+
+          - Conversation history loads in pages as you scroll. Native and browser clients persist individual messages and keep a bounded window in memory.
+          - Desktop sessions include terminal tabs. Hosts manage paired devices’ terminal access in Connection settings.
+          - Native peers can negotiate QUIC or TCP paths. The open-source Go server and Cloudflare Worker can advertise your own STUN and pinned relay nodes.
 
           - macOS DMG: open and drag ReignHub into Applications. Builds are ad hoc signed and not notarized.
           - Windows setup EXE: includes installation, shortcuts and an uninstaller.
           - Linux: DEB, Arch Linux packages and AppImage for x64 and arm64; GTK 4 is required.
           - Android packages ending in `-debug.apk` use a temporary development signing key and cannot update previous builds with another key. A configured persistent signing identity removes this suffix.
           - iOS `-unsigned.ipa` requires your own signing/provisioning before installation.
-          - Standalone reignhub-server binaries embed Web, use SQLite, and enable TCP/UDP discovery by default. Configure with --config server.json or --help. Package-manager definitions are included separately.
-          - Probe binaries use TCP/UDP 26331 and do not contain Web or account services.
+          - Standalone reignhub-server binaries embed Web, use SQLite, and enable TCP/UDP discovery by default. Edit the bundled config.json before starting. Package-manager definitions are included separately.
+          - To run a STUN and native relay node, set `http` to false and `relayControl` to your control service HTTPS origin. Open 26331 and 26332 on UDP and TCP. Follow the [open-source self-hosting guide](https://reignhub.app/docs/self-hosting).
           - Verify downloads against `SHA256SUMS` or the individual `.sha256` files.
           - Native clients default to https://reignhub.app; self-hosted services can be configured in settings. Web uses its current origin.
           NOTES

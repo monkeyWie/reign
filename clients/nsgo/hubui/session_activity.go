@@ -40,7 +40,7 @@ func (s *State) observeSessionActivity(target string, incoming []Object) {
 		if status != "idle" && status != "completed" && status != "failed" && status != "interrupted" && status != "systemerror" {
 			continue
 		}
-		viewed := s.target == target && activityIdentity(s.selected) == key && !s.backgrounded && (!s.narrowLayout() || s.narrowChat)
+		viewed := s.target == target && activityIdentity(s.selected) == key && !s.backgrounded && s.conversationVisible()
 		if s.sessionActivity[trackingKey] == "running" && (status == "idle" || status == "completed") && !viewed && !s.unreadSessions[key] {
 			s.unreadSessions[key] = true
 			changed = true

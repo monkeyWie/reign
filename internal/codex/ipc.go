@@ -39,7 +39,7 @@ type followedThread struct {
 	owner                                  string
 	version                                int
 	revision                               int64
-	state                                  json.RawMessage
+	state                                  json.RawMessage // Immutable once published. Readers may retain a revision.
 	err                                    error
 	changed                                chan struct{}
 	queue                                  *provider.MessageQueue
@@ -295,7 +295,7 @@ func (b *appIPC) waitState(ctx context.Context, id, owner string) (json.RawMessa
 			b.mu.Unlock()
 			return nil, errors.New("Codex 会话持有者已变化")
 		}
-		state, err, ch := append(json.RawMessage(nil), f.state...), f.err, f.changed
+		state, err, ch := f.state, f.err, f.changed
 		b.mu.Unlock()
 		if err != nil {
 			return nil, err
@@ -412,7 +412,7 @@ func (b *appIPC) Broadcast(m codexipc.Message) {
 	}
 	change := v.Change
 	rebased := change.Type == "snapshot" && change.Revision < f.revision
-	old := append(json.RawMessage(nil), f.state...)
+	old := f.state
 	var next json.RawMessage
 	var err error
 	switch change.Type {
@@ -432,7 +432,7 @@ func (b *appIPC) Broadcast(m codexipc.Message) {
 			var patch jsonpatch.Patch
 			patch, err = decodeIPCPatches(change.Patches)
 			if err == nil {
-				next, err = patch.ApplyWithOptions(f.state, &jsonpatch.ApplyOptions{SupportNegativeIndices: false, AccumulatedCopySizeLimit: 32 << 20})
+				next, err = applyIPCPatches(f.state, patch)
 			}
 		}
 	default:
@@ -440,13 +440,13 @@ func (b *appIPC) Broadcast(m codexipc.Message) {
 		return
 	}
 	var accepted map[string]bool
+	var state map[string]any
+	var turns []map[string]any
 	if err == nil {
-		var state struct{ ID string }
-		if len(next) > codexipc.MaxFrame || json.Unmarshal(next, &state) != nil || state.ID != id {
+		if len(next) > codexipc.MaxFrame || json.Unmarshal(next, &state) != nil || stringValue(state["id"]) != id {
 			err = errors.New("IPC 会话状态结构无效")
 		} else {
-			var turns []map[string]any
-			turns, _, err = stateTurns(decodeObject(next))
+			turns, _, err = stateTurns(state)
 			if err == nil {
 				accepted = acceptedQueueMessages(turns)
 			}
@@ -462,7 +462,7 @@ func (b *appIPC) Broadcast(m codexipc.Message) {
 		b.p.stream().log.Publish(provider.StreamEvent{Kind: "snapshot", SessionID: id})
 		return
 	}
-	f.state = append(json.RawMessage(nil), next...)
+	f.state = next
 	f.revision = change.Revision
 	f.version = m.Version
 	f.err = nil
@@ -475,7 +475,7 @@ func (b *appIPC) Broadcast(m codexipc.Message) {
 	f.accepted = accepted
 	b.signal(f)
 	b.mu.Unlock()
-	b.p.observeIPCState(id, m.Source, old, next)
+	b.p.observeIPCState(id, m.Source, old, state, turns)
 	if queueChanged || rebased {
 		b.p.stream().log.Publish(provider.StreamEvent{Kind: "snapshot", SessionID: id})
 	}

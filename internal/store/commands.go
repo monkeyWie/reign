@@ -2,6 +2,7 @@ package store
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -15,13 +16,21 @@ func (d *DB) Execute(r control.Request, run func() control.Response) control.Res
 		return control.Response{Error: "commandId required"}
 	}
 	raw, _ := json.Marshal(r)
+	digest := sha256.Sum256(raw)
+	owner := r.ReceiptOwner
+	if owner == "" {
+		owner = "local"
+	}
 	d.mu.Lock()
 	var previous, response []byte
-	var state string
-	e := d.QueryRow("SELECT request,response,state FROM commands WHERE id=?", r.ID).Scan(&previous, &response, &state)
+	var state, storedOwner string
+	e := d.QueryRow("SELECT owner,request,response,state FROM command_receipts WHERE id=?", r.ID).Scan(&storedOwner, &previous, &response, &state)
 	if e == nil {
 		d.mu.Unlock()
-		if !bytes.Equal(previous, raw) {
+		if storedOwner != owner {
+			return control.Response{ID: r.ID, Error: "commandId belongs to a different controller"}
+		}
+		if !bytes.Equal(previous, digest[:]) {
 			return control.Response{ID: r.ID, Error: "commandId reused with different request"}
 		}
 		if state != "done" {
@@ -37,14 +46,14 @@ func (d *DB) Execute(r control.Request, run func() control.Response) control.Res
 		d.mu.Unlock()
 		return control.Response{ID: r.ID, Error: e.Error()}
 	}
-	_, e = d.Exec("INSERT INTO commands(id,request,state) VALUES(?,?,?)", r.ID, raw, "pending")
+	_, e = d.Exec("INSERT INTO command_receipts(owner,id,request,state) VALUES(?,?,?,?)", owner, r.ID, digest[:], "pending")
 	d.mu.Unlock()
 	if e != nil {
 		return control.Response{ID: r.ID, Error: e.Error()}
 	}
 	out := run()
 	b, _ := json.Marshal(out)
-	if _, e = d.Exec("UPDATE commands SET response=?,state='done' WHERE id=?", b, r.ID); e != nil {
+	if _, e = d.Exec("UPDATE command_receipts SET response=?,state='done' WHERE owner=? AND id=?", b, owner, r.ID); e != nil {
 		return control.Response{ID: r.ID, Error: fmt.Sprintf("outcomeUnknown: %v", e)}
 	}
 	return out

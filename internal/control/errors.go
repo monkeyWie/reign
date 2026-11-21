@@ -1,6 +1,9 @@
 package control
 
-import "errors"
+import (
+	"errors"
+	"github.com/monkeyWie/reignhub/internal/terminal"
+)
 
 const WriteOutcomeUnknown = "WRITE_OUTCOME_UNKNOWN"
 
@@ -19,6 +22,12 @@ func OutcomeUnknown(err error) bool {
 }
 
 func ErrorCode(err error) string {
+	if errors.Is(err, terminal.ErrMissing) {
+		return "TERMINAL_GONE"
+	}
+	if errors.Is(err, terminal.ErrDetached) {
+		return "TERMINAL_DETACHED"
+	}
 	if OutcomeUnknown(err) {
 		return WriteOutcomeUnknown
 	}

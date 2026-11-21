@@ -1,6 +1,7 @@
 package config
 
 import (
+	"github.com/monkeyWie/reignhub/pkg/appdb"
 	"os"
 	"path/filepath"
 	"sync"
@@ -70,7 +71,7 @@ func TestSQLiteSettingsSurviveReload(t *testing.T) {
 	if again.ServiceURL != c.ServiceURL || again.DeviceName != c.DeviceName {
 		t.Fatal("lost saved settings")
 	}
-	raw, err := os.ReadFile(filepath.Join(dir, "settings.db"))
+	raw, err := os.ReadFile(appdb.Path(dir))
 	if err != nil || len(raw) < 16 || string(raw[:16]) != "SQLite format 3\x00" {
 		t.Fatal("settings are not SQLite", err)
 	}

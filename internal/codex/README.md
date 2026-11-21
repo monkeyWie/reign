@@ -30,7 +30,16 @@ already be available. Mobile/browser clients remain remote controllers.
 - Reads and new sessions: use the private app-server where required. ReignHub-owned sessions publish follower state to the App. Shutting down this executor can interrupt its tasks; lock release does not guarantee seamless continuation in the App.
 - Creation source, current owner and IPC schema version are separate facts. A read or subscription does not force `resume` or acquire a second writer. Owner discovery failures do not authorize lock takeover. An uncertain write is not replayed through a different backend.
 
-See [IPC routing](ipc.go), [owner publishing](ipc_owner.go) and [runtime composition](runtime.go). Dated verification and its limitations are recorded in [the implementation report](../../docs/research/codex-ipc-implementation-2026-11-17.md) and [sync follow-up](../../docs/research/codex-ipc-and-sync-followup-2026-11-17.md).
+See [IPC routing](ipc.go), [owner publishing](ipc_owner.go) and [runtime composition](runtime.go).
+
+IPC state projections copy only the turn maps they modify and allocate new item
+sequence slices. Nested vendor items remain read-only; never round-trip entire
+turns through JSON merely to add projection fields. Event comparison skips
+unchanged raw turn projections before normalizing their items, while still
+comparing every turn ID so historical corrections are delivered. Approval
+synchronization remains independent of unchanged turn content.
+[`ipc_projection_test.go`](ipc_projection_test.go) checks corrections, UTF-16
+live deltas, unchanged updates and source immutability. Run `go test ./internal/codex -run "^$" -bench BenchmarkIPCObserveHistoryDelta -benchmem` to measure projection cost.
 
 Project metadata in [projects.go](projects.go) retains every configured root from
 `project/list` or the desktop assignment fallback in `Project.Roots`, including
@@ -39,6 +48,8 @@ for existing grouping and creation defaults. Git display metadata is supplied by
 the common host workspace resolver from the actual execution checkout; it does
 not use a possibly historical Codex creation-time branch. See the
 [Provider contract](../../docs/platform/agent-providers.md#project-identity-across-agents).
+
+Follower revisions are immutable. Applying a single shallow replacement copies the surrounding JSON bytes once. Compound patches keep transactional RFC 6902 semantics. Validation, queued follow-ups, stream events and approvals share the new revision’s turn projection. Text replay owns the appended suffix. The local IPC reader limits queued and currently dispatched broadcasts to 64 MiB of wire data and limits the queue to 64 entries. Overflow closes the connection and invokes the existing fresh-follow recovery.
 
 ## App follower writes
 
@@ -70,8 +81,7 @@ session-scoped `approvals` / `decide` endpoint calls. Synchronous
 descriptions and secret-input hints; their answers use the native RPC response or
 `thread-follower-submit-user-input` with `response.answers`.
 
-Async questions are different: installed App code (read-only inspection on
-2026-11-19, `X7tG` / `dNnb` / `uHDr` / `Avyg` modules) attaches
+For asynchronous questions, the App attaches
 `{ title, options?: string[] }[]` to `agentMessage.questions`. IDs are serialized
 `["request_user_input_async", itemID, index]`. The adapter projects unanswered
 questions from the latest in-progress/completed turn into optional forms. An
@@ -119,8 +129,11 @@ payloads. `TestInstalledAppTextInputContract` reads the installed ASAR and execu
 the actual failing renderer parser with synthetic input, reproducing the missing
 array failure before validating the normalized input. Run with the same
 `REIGNHUB_CODEX_ASAR` environment variable as the steer contract check. No live
-App writes, model execution or restart is involved. See the [verification
-notes](../../docs/research/verification/codex-input-2026-11-18/README.md).
+App writes, model execution or restart is involved.
+
+A context compaction item retains its ID and position as a system event in
+both history and live updates. Its display text is localized by the controller.
+Missing thread names and previews remain empty in Provider metadata.
 
 ## State and history diagnosis
 
@@ -179,17 +192,11 @@ notification path. Public Go/Worker service contracts are unchanged.
 handoff without a timer, session switch or real conversation. [Recovery fixtures](ipc_recovery_test.go)
 cover both schemas, invalidation followed by metadata traffic, fresh barriers,
 cancellation, backoff, owner loss and consumed queues. The
-[installed producer check](../../docs/research/verification/codex-stream-2026-11-19/validate.cjs)
-reads the packaged code and executes only its producer methods with synthetic
-state. On 2026-11-19 it confirmed revision 500 followed by a reconnect snapshot at
-1 and a patch at 2. Run it with:
+[installed producer check](testdata/installed-app/stream.cjs) exercises reconnect and patch revisions using a synthetic state.
 
 ```sh
-node docs/research/verification/codex-stream-2026-11-19/validate.cjs /Applications/ChatGPT.app/Contents/Resources/app.asar
+node internal/codex/testdata/installed-app/stream.cjs /Applications/ChatGPT.app/Contents/Resources/app.asar
 ```
-
-This verifies the upstream revision contract; it does not prove that every
-reported real-world stall was caused by that transition.
 
 Recent ordering uses fixed conversation boundaries, not `thread.updatedAt`.
 IPC turns supply `turnStartedAtMs` and completed `durationMs`; app-server turns
@@ -212,6 +219,11 @@ Sources and regressions: [state handling](ipc_state.go), [schema](ipc_schema.go)
 App-owned turns also contain `steeringUserMessage` items: read their `input`, preserve the local item ID and recorded creation time, and match acknowledged server representations by explicit server/client IDs. Never deduplicate equal text. Merge canonical history with the live item order; a steer can appear before existing Agent output. Item insertion, removal or replacement requires a snapshot because common item events append at the controller.
 
 Asset-bearing live updates invalidate history instead of publishing an unprocessed input envelope. The cancellable transcript reader imports both regular and steering image/file inputs. Keep already displayed cards until their imported replacements arrive. Plain text remains incremental. Regressions cover both verified state versions, acknowledgements, ordering and live image import in [message tests](ipc_messages_test.go).
+
+A change to IPC `latestModel` invalidates the transcript through the existing
+`kind: "snapshot"` notification, even when no turn or item changed. The refreshed
+Session exports the current model; unchanged metadata produces no extra read.
+This adds no polling and changes no Go/Worker public service contract.
 
 Preserve assistant `phase` in snapshots and item events so the controller can
 distinguish commentary from final answers. When one IPC update both finishes a
@@ -246,9 +258,16 @@ Diagnosis has a 200 ms cooperative budget, at most 16,384 snapshot entries and
 32 ancestry nodes, with cycle detection and cancellation checks between native
 calls. Synchronous Win32 calls themselves cannot be interrupted by the context;
 there is no pipe wait/retry or detached diagnostic goroutine. Handles close on
-all exits. Unknown sources, query failures, snapshot limits and cancellation keep the
-original permission error and generic user / privilege guidance. Error wrapping
-preserves `errors.Is` / `errors.As`, including the original `os.PathError`.
+all exits. Unknown sources, query failures, snapshot limits and cancellation keep
+the original permission error and explicitly unconfirmed recovery guidance. The
+fallback asks users to check for Codex instances in SSH, VS Code or other terminals,
+close the corresponding instance if present, reopen desktop Codex App, and check
+user / privilege alignment if denial persists. It never claims that another
+environment was detected. A successfully queried server PID remains available
+when its ancestry cannot be classified. Metadata-open, PID-query, process-snapshot
+and cancellation/timeout failures appear in the diagnostic error text instead of
+being silently discarded. These secondary failures do not replace the dial error
+in `errors.Is` / `errors.As`, including the original `os.PathError`.
 
 Exact, case-insensitive `sshd.exe` / `sshd-session.exe` ancestry produces an SSH
 hint; `Code.exe`, `Code - Insiders.exe`, `code-tunnel.exe` and
@@ -258,8 +277,9 @@ not authenticated origin: processes can exit and PIDs can be reused. Guidance
 says the service **may** come from that environment, identifies the pipe server
 PID (not an ancestor PID), and asks the user to close the corresponding Codex
 instance there, reopen desktop Codex App, and retry. The Provider consumes this
-optional guidance in `appIPCConnectionError`; otherwise its existing generic
-guidance remains. No process termination, ACL changes, elevation or App restart
+guidance in `appIPCConnectionError`, including when the Windows diagnostic cannot
+identify a source. Other platforms retain their generic permission guidance.
+No process termination, ACL changes, elevation or App restart
 is performed. This is local Provider diagnosis only; the Go/Worker public
 service contract and Worker implementation need no changes.
 
@@ -294,9 +314,7 @@ preparing, paused and uncertain submissions distinct; malformed state or owner
 loss is unknown, never proof that the queue is empty. Owned queues publish the
 same projection when they change. No queue write or replay is initiated by a read.
 
-Read-only inspection of the installed desktop bundle on 2026-11-19 confirmed
-that this broadcast is independent of conversation snapshots and offers no queue
-read request. For an existing queue at first open, [queue_storage.go](queue_storage.go)
+Queue broadcasts are independent of conversation snapshots. The desktop IPC interface offers no queue read request. For an existing queue at first open, [queue_storage.go](queue_storage.go)
 reads only its selected thread from `queued-follow-ups` in Codex home. An
 initialized `.codex-global-state.sqlite` schema v1 (`settings`, global scope)
 supersedes the older `.codex-global-state.json`; unknown/corrupt SQLite must not
@@ -318,9 +336,7 @@ broadcasts cannot reintroduce matching accepted entries. This only filters the
 projection: it never removes vendor entries, retries a send or resolves an
 unknown execution outcome by guessing. Failed queue sources remain unknown.
 
-Read-only inspection of VS Code extension `openai.chatgpt` 26.1111.21308 on
-2026-11-19 confirmed the same v3 broadcasts after queue writes and a separate
-`globalStorageUri/queued-follow-ups.json`, keyed directly by thread ID. Existing
+The VS Code extension publishes the same v3 broadcasts after queue writes. It stores queues in `globalStorageUri/queued-follow-ups.json`, keyed by thread ID. Existing
 queues need not be broadcast just because a follower connects. Compile-selected
 desktop discovery checks only the standard Code and Code - Insiders
 `User/globalStorage/openai.chatgpt/queued-follow-ups.json` paths beneath

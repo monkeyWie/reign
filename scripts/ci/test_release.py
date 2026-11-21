@@ -27,7 +27,6 @@ class ReleaseContractTests(unittest.TestCase):
             v = '1.2.3'
             names = release.desktop_assets(v)
             names += [f'reignhub-web-worker-{v}.tar.gz', f'reignhub-{v}-ios-unsigned.ipa', f'reignhub-{v}-android-arm64-debug.apk']
-            names += [f'reignhub-probe-{v}-linux-{a}.tar.gz' for a in ('amd64', 'arm64')]
             names += release.server_assets(v)
             args = SimpleNamespace(version=v, output=tmp)
             for name in names:
@@ -35,7 +34,7 @@ class ReleaseContractTests(unittest.TestCase):
                 path.write_bytes(b'fixture artifact')
                 release.checksum(path)
             release.verify(args)
-            self.assertEqual(len((output / 'SHA256SUMS').read_text().splitlines()), 22)
+            self.assertEqual(len((output / 'SHA256SUMS').read_text().splitlines()), 20)
             path.write_bytes(b'corrupted artifact')
             with self.assertRaises(SystemExit):
                 release.verify(args)

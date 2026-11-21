@@ -5,9 +5,11 @@ export interface CoreEnv {
   ROOMS: DurableObjectNamespace;
   ALLOWED_ORIGINS?: string;
   PUBLIC_STUN?: string;
+  EXTERNAL_STUN?: string | string[];
   SELF_STUN?: string;
   TCP_STUN?: string;
   PUBLIC_URL?: string;
+  EXTERNAL_RELAYS?: string | { addresses: string[]; pin: string }[];
 }
 export interface Policy {
   deployment: "self-hosted" | "saas";

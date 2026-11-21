@@ -1,7 +1,13 @@
 {
   "http": true,
+  "api": true,
   "signal": true,
   "relay": true,
+  "nativeRelayListen": ":26332",
+  "nativeRelayPublic": "",
+  "relayControl": "",
+  "externalRelays": [],
+  "externalStun": [],
   "webEnabled": true,
   "stun": true,
   "tcpStun": true,
@@ -12,5 +18,8 @@
   "publicStun": "stun:stun.cloudflare.com:3478,stun:stun.l.google.com:19302",
   "selfStun": "",
   "tcpStunPublic": "",
-  "origins": ""
+  "origins": "",
+  "web": "",
+  "tlsCert": "",
+  "tlsKey": ""
 }

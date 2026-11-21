@@ -57,6 +57,7 @@ type cached struct {
 	bytes    int
 }
 type Client struct {
+	hostPlatform string
 	meter        transport.Meter
 	mu           sync.Mutex
 	sender       transport.Sender
@@ -225,11 +226,14 @@ func connectOnce(ctx context.Context, p Pairing) (*Client, error) {
 	connectivity.Report(ctx, "verify", "正在验证设备响应", connectivity.StageTimeout)
 	go c.watchPaths()
 	verify, stop := context.WithTimeout(ctx, connectivity.StageTimeout)
-	_, e = c.Call(verify, Object{"method": "network"})
+	network, e := c.Call(verify, Object{"method": "network"})
 	stop()
 	if e != nil {
 		c.Close()
 		return nil, fmt.Errorf("设备响应验证失败: %w", e)
+	}
+	if status, ok := network.(Object); ok {
+		c.hostPlatform, _ = status["platform"].(string)
 	}
 	c.note("connected", "connected", "设备连接成功", c.Path(), "success")
 	c.meter.Connected()
@@ -683,7 +687,8 @@ func (c *Client) Call(ctx context.Context, request Object) (value any, callErr e
 	c.mu.Lock()
 	previous := c.cache[cacheKey]
 	c.mu.Unlock()
-	if read && previous.revision != "" && r["progress"] != true {
+	if read && previous.revision != "" && (r["progress"] != true || (method == "transcript" && r["historyItems"] != nil)) {
+		delete(r, "progress")
 		r["revision"] = previous.revision
 	}
 	requestID, _ := r["id"].(string)
@@ -899,6 +904,10 @@ func (c *Client) sendPart(part []byte, pc peer, crypto *cryptor, direct bool) (s
 	}
 	return nil
 }
+
+// HostPlatform is the OS reported during encrypted connection verification.
+func (c *Client) HostPlatform() string { return c.hostPlatform }
+
 func (c *Client) Path() string {
 	if c.ctx.Err() != nil {
 		return "Disconnected"

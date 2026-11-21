@@ -192,6 +192,10 @@ func TestWindowsDeniedPipeMetadataAndRecovery(t *testing.T) {
 	if !errors.Is(err, windows.ERROR_ACCESS_DENIED) || !errors.As(err, &original) {
 		t.Fatalf("expected original access denial: %v", err)
 	}
+	var guidance interface{ ConnectionGuidance() string }
+	if !errors.As(err, &guidance) || guidance.ConnectionGuidance() == "" {
+		t.Fatalf("actual denied dial lost recovery guidance: %v", err)
+	}
 	// The diagnostic has connected and closed a metadata-only client. A
 	// single-instance server must disconnect that finished client before accepting
 	// another one, just as a listener's accept loop does. Closing the client handle

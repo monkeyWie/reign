@@ -4,13 +4,17 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"github.com/monkeyWie/reignhub/pkg/persistence"
 	"sync"
 	"testing"
 )
 
 type memoryStore struct {
-	mu sync.Mutex
-	v  map[string][]byte
+	histories map[persistence.Session]Object
+	dirs      map[persistence.DirectoryKey]map[string]Object
+	heads     map[persistence.DirectoryKey]persistence.DirectoryHead
+	mu        sync.Mutex
+	v         map[string][]byte
 }
 
 func (s *memoryStore) Get(k string) (any, error) {
@@ -51,7 +55,9 @@ func TestOfflineDeviceIsolationAndForget(t *testing.T) {
 	s := &memoryStore{v: map[string][]byte{}}
 	a := New(s)
 	defer a.Close()
-	_ = s.Put("devices", []Object{{"id": "one", "key": "secret", "expires": 0}, {"id": "two", "key": "other", "expires": 0}})
+	for _, d := range []Object{{"id": "one", "key": "secret", "expires": 0}, {"id": "two", "key": "other", "expires": 0}} {
+		_ = s.SaveEnvironment(context.Background(), d)
+	}
 	v, e := a.Call(ctx, "client.list", nil, "", nil)
 	if e != nil || len(arr(v)) != 2 || str(arr(v)[0], "key") != "" {
 		t.Fatal("exposed pairing credential", v, e)
@@ -92,7 +98,7 @@ func TestCachedCatalogueAndStreamedSnapshotWithoutConnection(t *testing.T) {
 	for _, target := range []string{"one", "two"} {
 		b, _ := json.Marshal(Object{"method": "providers", "provider": "", "session": ""})
 		_ = s.Put("rpc:"+target+":"+string(b), []Object{{"id": "codex-app"}})
-		_ = s.Put("directory:"+target+":codex-app", Object{"items": Object{"chat": Object{"id": target, "providerId": "codex-app"}}})
+		_ = s.WriteDirectory(ctx, persistence.DirectoryKey{Env: target, Provider: "codex-app"}, persistence.DirectoryHead{}, persistence.DirectoryBatch{Upserts: []Object{{"id": target, "providerId": "codex-app"}}})
 		if _, err := a.Call(ctx, "client.snapshot", Object{"provider": "codex-app", "session": "chat", "transcript": Object{"turns": []Object{{"id": "streamed"}}}}, target, nil); err != nil {
 			t.Fatal(err)
 		}
@@ -132,12 +138,12 @@ func TestFirstPageMetadataSurvivesBeforeDirectorySync(t *testing.T) {
 		}
 	}
 	put(Object{"method": "providers", "provider": "", "session": ""}, []Object{{"id": "codex-app"}})
-	put(Object{"method": "sessions", "provider": "codex-app", "session": ""}, Object{"sessions": []Object{{"id": "preview", "providerId": "codex-app"}}})
+	_ = s.WriteDirectory(context.Background(), persistence.DirectoryKey{Env: "one", Provider: "codex-app"}, persistence.DirectoryHead{}, persistence.DirectoryBatch{Preview: true, Upserts: []Object{{"id": "preview", "providerId": "codex-app"}}})
 	v, err := a.Call(context.Background(), "client.cached", nil, "one", nil)
 	if err != nil || len(arr(obj(v)["sessions"])) != 1 {
 		t.Fatal("metadata page not cached", v, err)
 	}
-	if err = s.Put("directory:one:codex-app", Object{"items": Object{}}); err != nil {
+	if err = s.WriteDirectory(context.Background(), persistence.DirectoryKey{Env: "one", Provider: "codex-app"}, persistence.DirectoryHead{}, persistence.DirectoryBatch{Reset: true}); err != nil {
 		t.Fatal(err)
 	}
 	v, err = a.Call(context.Background(), "client.cached", nil, "one", nil)
@@ -151,8 +157,7 @@ func TestFreshReadCannotConfirmOfflineCache(t *testing.T) {
 	a := New(store)
 	defer a.Close()
 	command := Object{"method": "transcript", "provider": "codex-app", "session": "chat"}
-	raw, _ := json.Marshal(command)
-	_ = store.Put("rpc:one:"+string(raw), Object{"turns": []Object{}})
+	_ = store.ApplyHistory(context.Background(), persistence.Session{Env: "one", Provider: "codex-app", ID: "chat"}, persistence.Diff("", nil, Object{"turns": []Object{}}))
 	if v, e := a.Call(context.Background(), "client.call", nil, "one", command); e != nil || v == nil {
 		t.Fatal(v, e)
 	}
@@ -166,9 +171,7 @@ func TestOfflineSyncRetainsMetadataBeforeCompleteDirectory(t *testing.T) {
 	ctx := context.Background()
 	disk := &memoryStore{v: map[string][]byte{}}
 	a := New(disk)
-	r := Object{"method": "sessions", "provider": "codex-app", "session": ""}
-	key, _ := json.Marshal(r)
-	_ = disk.Put("rpc:one:"+string(key), Object{"sessions": []Object{{"id": "preview", "providerId": "codex-app"}}})
+	_ = disk.WriteDirectory(ctx, persistence.DirectoryKey{Env: "one", Provider: "codex-app"}, persistence.DirectoryHead{}, persistence.DirectoryBatch{Preview: true, Upserts: []Object{{"id": "preview", "providerId": "codex-app"}}})
 	if _, err := a.Call(ctx, "client.sync", Object{"provider": "codex-app"}, "one", nil); err == nil {
 		t.Fatal("offline sync claimed successful deletion")
 	}

@@ -7,7 +7,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=/opt/reignhub
-ExecStart=/opt/reignhub/reignhub-server --config /opt/reignhub/server.json --state /var/lib/reignhub/reignhub.db
+ExecStart=/opt/reignhub/reignhub-server --config /etc/reignhub/config.json
 DynamicUser=yes
 StateDirectory=reignhub
 StateDirectoryMode=0700

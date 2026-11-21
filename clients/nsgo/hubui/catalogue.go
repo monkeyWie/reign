@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"reflect"
 	"sort"
+	"strings"
 	"time"
 
+	"github.com/monkeyWie/reignhub/internal/control"
 	"github.com/monkeyWie/reignhub/internal/provider"
 )
 
@@ -20,6 +22,7 @@ type catalogueState struct {
 	loaded                                bool
 	completed                             map[string]bool
 	nextPoll                              time.Time
+	pollInterval                          time.Duration
 }
 
 func (s *State) catalogue(target string) *catalogueState {
@@ -47,6 +50,7 @@ func (s *State) cancelTargetCatalogue(target string) {
 	}
 	c.generation++
 	c.nextPoll = time.Time{}
+	c.pollInterval = 0
 	c.polling, c.manual = false, false
 	s.catalogueProgress()
 }
@@ -69,7 +73,7 @@ func (s *State) reconcileEnvironments() {
 		if !c.cached {
 			s.loadCachedWorkspace(id)
 		}
-		if !flag(d, "connected") && c.polling {
+		if !flag(d, "connected") && (c.polling || !c.nextPoll.IsZero()) {
 			s.cancelTargetCatalogue(id)
 		}
 	}
@@ -104,14 +108,14 @@ func (s *State) pollCatalogues() {
 		for _, session := range s.workspaces[target].sessions {
 			known[str(session, "providerId")] = true
 		}
-		go s.loadCatalogue(ctx, cancel, c, generation, target, known)
+		go s.loadCatalogue(ctx, cancel, c, generation, target, known, s.workspace(target))
 	}
 	s.catalogueProgress()
 	s.changed()
 }
 
 // Metadata only: no background transcript downloads for unselected sessions.
-func (s *State) loadCatalogue(ctx context.Context, cancel context.CancelFunc, instance *catalogueState, generation uint64, target string, known map[string]bool) {
+func (s *State) loadCatalogue(ctx context.Context, cancel context.CancelFunc, instance *catalogueState, generation uint64, target string, known map[string]bool, before workspaceCache) {
 	defer cancel()
 	current := func() bool {
 		return s.ctx.Err() == nil && s.catalogues[target] == instance && generation == s.catalogues[target].generation
@@ -190,9 +194,24 @@ func (s *State) loadCatalogue(ctx context.Context, cancel context.CancelFunc, in
 			return
 		}
 		c := s.catalogue(target)
+		after := s.workspace(target)
+		quiet := c.loaded && !c.manual && target != control.LocalTarget && reflect.DeepEqual(before.providers, after.providers) && reflect.DeepEqual(before.sessions, after.sessions)
+		if quiet && err == nil {
+			for _, session := range after.sessions {
+				if sessionRunning(session) {
+					quiet = false
+					break
+				}
+			}
+		}
+		if quiet {
+			c.pollInterval = min(max(c.pollInterval, 2*time.Second)*2, 30*time.Second)
+		} else {
+			c.pollInterval = 2 * time.Second
+		}
 		c.polling, c.manual, c.cancel = false, false, nil
 		c.loaded = true
-		c.nextPoll = time.Now().Add(2 * time.Second)
+		c.nextPoll = time.Now().Add(c.pollInterval)
 		s.catalogueProgress()
 		s.setConnectionIssue(target, "catalogue", err)
 		s.changed()
@@ -230,6 +249,12 @@ func (s *State) publishWorkspaces() {
 			}
 			entry := copyObject(session)
 			entry["deviceId"] = id
+			if s.selected != nil && id == s.target && str(entry, "id") == str(s.selected, "id") && str(entry, "providerId") == str(s.selected, "providerId") {
+				if title := str(entry, "title"); title != "" && title != str(s.selected, "title") {
+					s.selected = copyObject(s.selected)
+					s.selected["title"] = title
+				}
+			}
 			sessions = append(sessions, entry)
 		}
 	}
@@ -261,6 +286,9 @@ func (s *State) applyEnvironmentPage(target, providerID string, incoming []Objec
 		if str(session, "providerId") == providerID && visibleSession(session) {
 			key := providerID + "|" + str(session, "id")
 			next := copyObject(session)
+			if strings.TrimSpace(str(next, "title")) == "" {
+				next["title"] = previous[key]["title"]
+			}
 			next["recencyAt"] = max(number(previous[key], "recencyAt"), number(session, "recencyAt"))
 			merged[key] = next
 		}

@@ -138,6 +138,10 @@ func (s *State) upload(u *Upload) {
 	if u.active || u.cancelled.Load() || u.Status == "ready" {
 		return
 	}
+	if bitmapInput(u.Data) {
+		s.prepareBitmapUpload(u)
+		return
+	}
 	for _, queued := range s.uploadQueue {
 		if queued == u {
 			return
@@ -295,8 +299,25 @@ func (s *State) uploadPreviews(cx *core.Scope) core.Node {
 		// Bytes and metadata are immutable for this keyed upload. Only progress
 		// changes; remounting the image on every poll restarts native decoding.
 		var tile core.Node = chat.Attachment{Label: u.Name, Detail: fmt.Sprintf("%.1f KB", float64(len(u.Data))/1024), RemoveLabel: locales.For(cx).RemoveAttachment(), OnRemove: remove}
-		if strings.HasPrefix(u.MIME, "image/") || strings.HasSuffix(strings.ToLower(u.Name), ".png") || strings.HasSuffix(strings.ToLower(u.Name), ".jpg") {
-			preview := core.View{TestID: "preview-upload-" + u.Name, Role: core.RoleButton, Label: "预览图片 " + u.Name, OnPress: func(core.PressEvent) { s.previewDraftImage(u) }, Style: core.Style{Width: core.Pt(64), Height: core.Pt(64), CornerRadius: 8, Overflow: core.Hidden}, StyleFunc: func() core.Style { return pressStyle(cx) }, Children: []core.Node{chat.AttachmentPreview{Label: u.Name, Image: core.ImageSource{Data: u.Data}}}}
+		isImage := strings.HasPrefix(u.MIME, "image/") || strings.HasPrefix(http.DetectContentType(u.Data), "image/")
+		if isImage {
+			unreadable := core.NewSignal(cx, bitmapInput(u.Data))
+			image := core.Image{TestID: "upload-image-" + u.Name, Label: u.Name, Source: core.ImageSource{Data: u.Data}, ResizeMode: core.Cover,
+				Style: core.Style{Width: core.Pct(100), Height: core.Pct(100)}, OnError: func(error) { unreadable.Set(true) }}
+			preview := core.View{TestID: "preview-upload-" + u.Name, Role: core.RoleButton, Label: "预览图片 " + u.Name, Disabled: unreadable.Get,
+				Tooltip: tooltipCard(cx, dynamicText(cx, func() string {
+					if unreadable.Get() {
+						return "图片暂时无法预览"
+					}
+					return u.Name
+				}, 12, false)),
+				OnPress: func(core.PressEvent) { s.previewDraftImage(u) }, Style: core.Style{Width: core.Pt(64), Height: core.Pt(64), CornerRadius: 8, Overflow: core.Hidden},
+				StyleFunc: func() core.Style { return pressStyle(cx).Merge(core.Style{Background: palette(cx).muted}) }, Children: []core.Node{
+					core.Show{When: func() bool { return !unreadable.Get() }, Then: func(*core.Scope) core.Node { return image }},
+					core.Show{When: unreadable.Get, Then: func(cx *core.Scope) core.Node {
+						return core.View{Style: fill.Merge(core.Style{AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter}), Children: []core.Node{glyph(cx, lucide.Image, 20)}}
+					}},
+				}}
 			removeButton := contextualIconButton(cx, "remove-upload-"+u.Name, locales.For(cx).RemoveAttachment(), lucide.X, remove)
 			removeButton.Style.Padding = core.All(5)
 			removeButton.Children = []core.Node{core.View{Style: core.Style{Width: core.Pt(20), Height: core.Pt(20), CornerRadius: 10, AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter}, StyleFunc: func() core.Style { return core.Style{Background: palette(cx).elevated} }, Children: []core.Node{core.Icon{SVG: lucide.X(), Style: core.Style{Width: core.Pt(12), Height: core.Pt(12)}}}}}
@@ -305,29 +326,35 @@ func (s *State) uploadPreviews(cx *core.Scope) core.Node {
 				StyleFunc: func() core.Style { return contextualAffordance(cx, "draft-image", false) },
 				Children:  []core.Node{removeButton}}
 			tile = ui.ContextMenu{TestID: "upload-menu-" + u.Name,
-				Trigger:  core.View{Style: core.Style{Group: "draft-image", Width: core.Pt(64), Height: core.Pt(64)}, Children: []core.Node{preview, actions}},
-				Children: []core.Node{ui.MenuItem{TestID: "upload-remove-action", Text: locales.For(cx).RemoveAttachment(), Icon: lucide.X, OnSelect: remove}}}
-		}
-		status := core.Show{When: func() bool { s.read(); return u.Status != "ready" }, Then: func(cx *core.Scope) core.Node {
-			return core.Dynamic(func(cx *core.Scope) core.Node {
-				messages := locales.For(cx)
-				value := func() float32 { s.read(); return u.progressPercent() }
-				progress := dynamicText(cx, func() string { return i18n.FormatNumberSkeleton(i18n.Language(cx), float64(value())/100, "percent .#") }, 10, true)
-				progress.TestID = "upload-progress-" + u.Name
-				bar := ui.Progress{TestID: "upload-bar-" + u.Name, Label: messages.Upload(), Value: value, Style: core.Style{FlexGrow: 1, MinWidth: core.Pt(24)}}
-				queued := core.Show{When: func() bool { s.read(); return u.Status == "queued" }, Then: func(cx *core.Scope) core.Node {
-					return core.View{Label: messages.UploadQueued(), Tooltip: tooltipCard(cx, label(cx, messages.UploadQueued(), 12, false)), Children: []core.Node{glyph(cx, lucide.Clock, 12)}}
+				Trigger: core.View{Style: core.Style{Group: "draft-image", Width: core.Pt(64), Height: core.Pt(64)}, Children: []core.Node{preview, actions}},
+				Children: []core.Node{
+					core.Show{When: func() bool { s.read(); return u.Status == "failed" }, Then: func(cx *core.Scope) core.Node {
+						return ui.MenuItem{TestID: "upload-retry-action", Text: locales.For(cx).RetryUpload(), Icon: lucide.RotateCcw, OnSelect: func() { s.upload(u) }}
+					}},
+					ui.MenuItem{TestID: "upload-remove-action", Text: locales.For(cx).RemoveAttachment(), Icon: lucide.X, OnSelect: remove},
 				}}
-				retry := core.Show{When: func() bool { s.read(); return u.Status == "failed" }, Then: func(cx *core.Scope) core.Node {
-					v := button(cx, "retry-upload-"+u.Name, "", lucide.RotateCcw, "ghost", func() { s.upload(u) }).(core.View)
-					v.Label = messages.RetryUpload()
+		}
+		state := core.NewMemo(cx, func() string { s.read(); return u.Status })
+		status := core.View{TestID: "upload-status-" + u.Name, Style: core.Style{Height: core.Pt(30), Direction: core.Row, AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter, FlexShrink: 0}, Children: []core.Node{
+			core.Dynamic(func(cx *core.Scope) core.Node {
+				status := state.Get()
+				if status == "ready" {
+					return nil
+				}
+				messages := locales.For(cx)
+				if status == "failed" {
+					v := contextualIconButton(cx, "retry-upload-"+u.Name, messages.RetryUpload(), lucide.RotateCcw, func() { s.upload(u) })
 					v.Tooltip = tooltipCard(cx, dynamicText(cx, func() string { s.read(); return messages.UploadFailed(u.Error) }, 12, false))
 					return v
-				}}
-				return core.View{Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 4}, Children: []core.Node{bar, progress, queued, retry}}
-			})
+				}
+				value := func() float32 { s.read(); return u.progressPercent() }
+				progress := dynamicText(cx, func() string { return i18n.FormatNumberSkeleton(i18n.Language(cx), float64(value())/100, "percent .#") }, 11, true)
+				progress.TestID = "upload-progress-" + u.Name
+				return core.View{Role: core.RoleStatus, Label: choose(status == "queued", messages.UploadQueued(), messages.Upload()),
+					Tooltip: tooltipCard(cx, label(cx, choose(status == "queued", messages.UploadQueued(), messages.Upload()), 12, false)), Children: []core.Node{progress}}
+			}),
 		}}
-		return core.View{TestID: "upload-" + u.Name, Style: core.Style{Gap: 4}, Children: []core.Node{tile, status}}
+		return core.View{TestID: "upload-" + u.Name, Style: core.Style{FlexShrink: 0, MaxWidth: core.Pct(100)}, Children: []core.Node{tile, status}}
 	})
 	return core.View{Style: core.Style{Direction: core.Row, Wrap: core.Wrap, Gap: 8}, Children: []core.Node{rows}}
 }
@@ -446,17 +473,28 @@ func (s *State) attachmentBytesProgress(ctx context.Context, target, p, session 
 }
 func (s *State) loadImage(a Object, thumbnail bool) {
 	key := s.key() + "|" + str(a, "id") + fmt.Sprint("|", thumbnail)
-	if s.images[key] != nil || s.loadingImages[key] {
+	if s.images[key] != nil {
+		s.touchImage(key)
+		return
+	}
+	if s.loadingImages[key] {
 		return
 	}
 	s.loadingImages[key] = true
+	if s.imageContext == nil {
+		s.imageContext, s.imageCancel = context.WithCancel(s.ctx)
+	}
+	ctx := s.imageContext
 	target, p, id := s.target, str(s.selected, "providerId"), str(s.selected, "id")
 	go func() {
-		b, e := s.attachmentBytes(s.ctx, target, p, id, a, thumbnail)
+		b, e := s.attachmentBytes(ctx, target, p, id, a, thumbnail)
 		s.cx.Post(func() {
+			if ctx.Err() != nil {
+				return
+			}
 			delete(s.loadingImages, key)
 			if e == nil {
-				s.images[key] = b
+				s.cacheImage(key, b)
 			}
 			s.changed()
 		})
@@ -640,4 +678,41 @@ func (s *State) previewDraftImage(selected *Upload) {
 	s.preview = images
 	s.previewIndex.Set(index)
 	s.dialog.Set("preview")
+}
+
+const imageCacheBytes = 64 << 20
+
+func (s *State) touchImage(key string) {
+	for i, k := range s.imageOrder {
+		if k == key {
+			s.imageOrder = append(s.imageOrder[:i], s.imageOrder[i+1:]...)
+			break
+		}
+	}
+	s.imageOrder = append(s.imageOrder, key)
+}
+func (s *State) cacheImage(key string, data []byte) {
+	if s.images == nil {
+		s.images = map[string][]byte{}
+	}
+	s.imageBytes += len(data) - len(s.images[key])
+	s.images[key] = data
+	s.touchImage(key)
+	for s.imageBytes > imageCacheBytes && len(s.imageOrder) > 0 {
+		victim := s.imageOrder[0]
+		s.imageOrder = s.imageOrder[1:]
+		s.imageBytes -= len(s.images[victim])
+		delete(s.images, victim)
+	}
+}
+func (s *State) resetImages() {
+	if s.imageCancel != nil {
+		s.imageCancel()
+	}
+	s.imageContext = nil
+	s.imageCancel = nil
+	s.loadingImages = map[string]bool{}
+	s.images = map[string][]byte{}
+	s.imageOrder = nil
+	s.imageBytes = 0
 }

@@ -44,10 +44,19 @@ func (s *Store) open() error {
 	if !factory.Truthy() {
 		return errors.New("此浏览器不支持 IndexedDB")
 	}
-	r := factory.Call("open", "agenthub-nsgo-v1", 1)
+	r := factory.Call("open", "reignhub", 1)
 	upgrade := js.FuncOf(func(js.Value, []js.Value) any {
 		db := r.Get("result")
-		db.Call("createObjectStore", "cache")
+		db.Call("createObjectStore", "settings")
+		for _, table := range historyTables {
+			store := db.Call("createObjectStore", table)
+			if table == "turns" || table == "messages" {
+				store.Call("createIndex", "ordered", "order")
+			}
+		}
+		for _, table := range []string{"sessions", "directory_heads", "providers", "models", "approval_previews", "read_state", "drafts", "draft_files", "draft_blobs", "forgotten", "environments", "environment_routes", "identities", "download_cache", "download_sizes"} {
+			db.Call("createObjectStore", table)
+		}
 		return nil
 	})
 	r.Set("onupgradeneeded", upgrade)
@@ -65,7 +74,7 @@ func (s *Store) Get(key string) (any, error) {
 	if e := s.open(); e != nil {
 		return nil, e
 	}
-	r, e := request(s.db.Call("transaction", "cache", "readonly").Call("objectStore", "cache").Call("get", key))
+	r, e := request(s.db.Call("transaction", "settings", "readonly").Call("objectStore", "settings").Call("get", key))
 	if e != nil || !r.Truthy() {
 		return nil, e
 	}
@@ -87,7 +96,7 @@ func (s *Store) write(method string, args ...any) error {
 	if e := s.open(); e != nil {
 		return e
 	}
-	tx := s.db.Call("transaction", "cache", "readwrite")
+	tx := s.db.Call("transaction", "settings", "readwrite")
 	ch := make(chan error, 1)
 	ok := js.FuncOf(func(js.Value, []js.Value) any { ch <- nil; return nil })
 	bad := js.FuncOf(func(js.Value, []js.Value) any {
@@ -96,7 +105,7 @@ func (s *Store) write(method string, args ...any) error {
 	})
 	tx.Set("oncomplete", ok)
 	tx.Set("onabort", bad)
-	tx.Call("objectStore", "cache").Call(method, args...)
+	tx.Call("objectStore", "settings").Call(method, args...)
 	e := <-ch
 	tx.Set("oncomplete", js.Null())
 	tx.Set("onabort", js.Null())
@@ -110,7 +119,7 @@ func (s *Store) Keys() ([]string, error) {
 	if e := s.open(); e != nil {
 		return nil, e
 	}
-	r, e := request(s.db.Call("transaction", "cache", "readonly").Call("objectStore", "cache").Call("getAllKeys"))
+	r, e := request(s.db.Call("transaction", "settings", "readonly").Call("objectStore", "settings").Call("getAllKeys"))
 	if e != nil {
 		return nil, e
 	}

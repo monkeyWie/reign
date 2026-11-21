@@ -2,8 +2,8 @@ package hubui
 
 import "github.com/nsgo-dev/nsgo/core"
 
-// A selected conversation may remain cached underneath another page. Follow
-// the visible route rather than the selection or the background-service state.
+// The navigation drawer covers the conversation without stopping its watch.
+// Only the unobscured conversation holds the display awake.
 func (s *State) observeScreenAwake() {
 	set := screenAwake(s.cx)
 	mobileBrowser := false
@@ -16,11 +16,7 @@ func (s *State) observeScreenAwake() {
 		if !(isMobile(s.cx) || mobileBrowser) || s.cx.Env().Lifecycle() != core.LifecycleActive || s.selected == nil || s.target == "" {
 			return false
 		}
-		width := s.width.Get()
-		if width < compactBreakpoint {
-			return s.phoneRoute.Get() == "chat:"+s.key()
-		}
-		return true
+		return s.conversationVisible()
 	})
 	s.cx.Effect(func() { set(wanted.Get()) })
 }

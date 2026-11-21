@@ -2,6 +2,7 @@ package hubui
 
 import (
 	"fmt"
+	"github.com/monkeyWie/reignhub/pkg/persistence"
 	"math"
 	"slices"
 	"strings"
@@ -13,14 +14,14 @@ import (
 )
 
 type messageNavigationTarget struct {
-	id  string
-	row int
+	id     string
+	row    int
+	stored persistence.Landmark
 }
 
-// The timeline is reversed; navigation reads chronologically from top to bottom.
 func messageNavigationTargets(rows []Message, height core.Points) []messageNavigationTarget {
 	indices := []int{}
-	for i := len(rows) - 1; i >= 0; i-- {
+	for i := range rows {
 		if rows[i].Role == "user" {
 			indices = append(indices, i)
 		}
@@ -49,7 +50,7 @@ func navigationPreview(rows []Message, target messageNavigationTarget) messageNa
 	if preview.instruction == "" {
 		preview.instruction = choose(len(user.Attachments) > 0, "附件消息", "用户消息")
 	}
-	for i := target.row - 1; i >= 0; i-- {
+	for i := target.row + 1; i < len(rows); i++ {
 		m := rows[i]
 		if m.Role == "user" || user.Turn != "" && m.Turn != "" && m.Turn != user.Turn {
 			break
@@ -87,7 +88,28 @@ func navigationSnippet(text string, limit int) string {
 
 func (s *State) messageNavigation(cx *core.Scope, rows *core.Memo[[]Message], viewport *core.Signal[core.Size], navigate func(int)) core.Node {
 	targets := core.NewMemoFunc(cx, func() []messageNavigationTarget {
-		return messageNavigationTargets(rows.Get(), viewport.Get().Height)
+		if s.snapshots != nil && s.snapshots.storage != nil {
+			s.read()
+		}
+		view := rows.Get()
+		height := viewport.Get().Height
+		if !flag(s.transcript, "_localOlder") || len(s.landmarks) == 0 {
+			return messageNavigationTargets(view, height)
+		}
+		indices := map[string]int{}
+		for i, v := range view {
+			indices[v.ID] = i
+		}
+		out := []messageNavigationTarget{}
+		for _, i := range persistence.Samples(len(s.landmarks), min(24, max(1, int((height-48)/12)))) {
+			a := s.landmarks[i]
+			row, ok := indices[a.ID]
+			if !ok {
+				row = -1
+			}
+			out = append(out, messageNavigationTarget{id: a.ID, row: row, stored: a})
+		}
+		return out
 	}, slices.Equal[[]messageNavigationTarget])
 	hover := core.NewSignal(cx, float32(-100))
 	previewTarget := core.NewSignal(cx, "")
@@ -112,7 +134,13 @@ func (s *State) messageNavigation(cx *core.Scope, rows *core.Memo[[]Message], vi
 						return core.Style{Width: core.Pt(min(340, max(120, viewport.Get().Width-80))), Background: c.muted, Color: c.foreground, BorderColor: c.border, Shadows: []core.BoxShadow{{Offset: core.Point{Y: 6}, Blur: 18, Color: core.RGB(0).Faded(.15)}}}
 					},
 					Children: []core.Node{core.Dynamic(func(cx *core.Scope) core.Node {
-						preview := core.NewMemo(cx, func() messageNavigationPreview { return navigationPreview(rows.Get(), target()) })
+						preview := core.NewMemo(cx, func() messageNavigationPreview {
+							t := target()
+							if t.row < 0 {
+								return messageNavigationPreview{instruction: navigationSnippet(t.stored.Preview, 180)}
+							}
+							return navigationPreview(rows.Get(), t)
+						})
 						return core.View{TestID: "message-navigation-preview", Style: core.Style{Gap: 8}, Children: []core.Node{
 							core.Text{TestID: "navigation-instruction", ContentFunc: func() string { return preview.Get().instruction }, MaxLines: 1, Style: core.Style{FontSize: 13, FontWeight: core.FontWeightMedium}},
 							core.Show{When: func() bool { return preview.Get().response != "" }, Then: func(cx *core.Scope) core.Node {
@@ -120,7 +148,14 @@ func (s *State) messageNavigation(cx *core.Scope, rows *core.Memo[[]Message], vi
 							}},
 						}}
 					})},
-				}, OnMouseEnter: move, OnMouseMove: move, OnPress: func(core.PressEvent) { navigate(target().row) },
+				}, OnMouseEnter: move, OnMouseMove: move, OnPress: func(core.PressEvent) {
+					t := target()
+					if t.row >= 0 {
+						navigate(t.row)
+					} else {
+						s.openLandmark(t.stored, navigate)
+					}
+				},
 					Style: core.Style{Height: core.Pt(12), Width: core.Pt(44), JustifyContent: core.JustifyCenter, Padding: core.Edges{Left: 8}},
 					StyleFunc: func() core.Style {
 						return core.Style{FocusVisible: pressStyle(cx).FocusVisible, Active: &core.Style{Opacity: core.Alpha(.6)}}

@@ -81,9 +81,10 @@ func TestComposerDraftRestartRestoresTextFilesAndLastSession(t *testing.T) {
 			return s.workspaceView(cx)
 		})
 	}, nsgotest.Size(1100, 900), nsgotest.Environment(core.Environment{Idiom: core.IdiomDesktop, OS: core.OSMacOS, Locale: "zh-CN"}))
+	app.WaitUntil(5*time.Second, func() bool { return s.ready })
 	app.WaitFor(sessionSelector("demo-device", "codex-app", "demo-chat"), 5*time.Second)
 	app.Press(sessionSelector("demo-device", "codex-app", "demo-chat"))
-	app.WaitUntil(time.Second, func() bool { return !app.Find("id:chat-input").Props.Disabled })
+	app.WaitUntil(time.Second, func() bool { return app.Exists("id:chat-input") && !app.Find("id:chat-input").Props.Disabled })
 	app.Type("id:chat-input", "saved draft")
 	app.Post(func() {
 		s.uploads = []*Upload{{Name: "photo.png", MIME: "image/png", Data: []byte("image bytes"), Status: "failed"}, {Name: "report.txt", MIME: "text/plain", Data: []byte("report bytes"), Status: "failed"}}

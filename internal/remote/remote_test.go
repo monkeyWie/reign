@@ -64,12 +64,12 @@ func TestRelayAndP2P(t *testing.T) {
 		relayUnavailable bool
 	}{
 		{"Relay", Options{RelayOnly: true}, "Relay", false, false},
-		{"UDP", Options{DisableTCP: true}, "P2P · WebRTC", false, false},
-		{"TCP", Options{DisableWebRTC: true}, "P2P · TCP", false, false},
-		{"UDP free", Options{DisableTCP: true}, "P2P · WebRTC", true, false},
-		{"TCP free", Options{DisableWebRTC: true}, "P2P · TCP", true, false},
-		{"TCP relay unavailable", Options{DisableWebRTC: true}, "P2P · TCP", true, true},
-		{"UDP relay unavailable", Options{DisableTCP: true}, "P2P · WebRTC", true, true},
+		{"UDP", Options{DisableNative: true, DisableTCP: true}, "P2P · WebRTC", false, false},
+		{"TCP", Options{DisableQUIC: true, DisableWebRTC: true}, "P2P · TCP", false, false},
+		{"UDP free", Options{DisableNative: true, DisableTCP: true}, "P2P · WebRTC", true, false},
+		{"TCP free", Options{DisableQUIC: true, DisableWebRTC: true}, "P2P · TCP", true, false},
+		{"TCP relay unavailable", Options{DisableQUIC: true, DisableWebRTC: true}, "P2P · TCP", true, true},
+		{"UDP relay unavailable", Options{DisableNative: true, DisableTCP: true}, "P2P · WebRTC", true, true},
 	} {
 		name, opts := tc.name, tc.options
 		relayOnly := opts.RelayOnly

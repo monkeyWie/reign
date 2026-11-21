@@ -30,4 +30,4 @@ server {
 }
 
 # Both TCP and UDP 26331 are STUN probes, exposed directly (not HTTP proxy).
-# Behind this proxy, use --listen 127.0.0.1:26330.
+# Behind this proxy, set "listen" to "127.0.0.1:26330" in config.json.

@@ -5,7 +5,7 @@ import (
 	"context"
 	"crypto/ecdh"
 	"crypto/rand"
-	"encoding/base64"
+
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -14,12 +14,23 @@ import (
 	"github.com/monkeyWie/reignhub/internal/connectivity"
 	"github.com/monkeyWie/reignhub/internal/device"
 	"github.com/monkeyWie/reignhub/pkg/composerdraft"
+	"github.com/monkeyWie/reignhub/pkg/persistence"
 	"strings"
 	"sync"
 	"time"
 )
 
 type Storage interface {
+	persistence.HistoryDAO
+	persistence.DirectoryDAO
+	persistence.ReadDAO
+	composerdraft.DAO
+	Download(context.Context, string, string, Object) (any, error)
+	LoadIdentity(context.Context, string) (Object, error)
+	SaveIdentity(context.Context, string, Object) error
+	Environments() ([]Object, error)
+	SaveEnvironment(context.Context, Object) error
+	Route(context.Context, string) (string, error)
 	Get(string) (any, error)
 	Put(string, any) error
 	Delete(string) error
@@ -51,16 +62,7 @@ func (a *API) Close() {
 		c.Close()
 	}
 }
-func (a *API) saved() ([]Object, error) { v, e := a.store.Get("devices"); return arr(v), e }
-func (a *API) editDevices(fn func([]Object) []Object) error {
-	a.edit.Lock()
-	defer a.edit.Unlock()
-	v, e := a.saved()
-	if e != nil {
-		return e
-	}
-	return a.store.Put("devices", fn(v))
-}
+func (a *API) saved() ([]Object, error) { return a.store.Environments() }
 func (a *API) list() (any, error) {
 	v, e := a.saved()
 	if e != nil {
@@ -91,7 +93,7 @@ func (a *API) loadIdentity(ctx context.Context, service, name string) (Object, e
 	if info := device.ClientInfoFrom(ctx); info.Name != "" {
 		name = info.Name
 	}
-	v, e := a.store.Get("identity:" + service)
+	v, e := a.store.LoadIdentity(ctx, service)
 	if e != nil {
 		return nil, e
 	}
@@ -110,7 +112,7 @@ func (a *API) loadIdentity(ctx context.Context, service, name string) (Object, e
 		info.Name = str(i, "name")
 		if info != previous {
 			i["info"] = info
-			if e = a.store.Put("identity:"+service, i); e != nil {
+			if e = a.store.SaveIdentity(ctx, service, i); e != nil {
 				return nil, e
 			}
 		}
@@ -128,7 +130,7 @@ func (a *API) loadIdentity(ctx context.Context, service, name string) (Object, e
 	r["info"] = device.CurrentClientInfo(ctx, device.ClientInfo{Name: name})
 	r["private"] = hex.EncodeToString(k.Bytes())
 	r["public"] = pub
-	e = a.store.Put("identity:"+service, r)
+	e = a.store.SaveIdentity(ctx, service, r)
 	return r, e
 }
 func (a *API) current(id string, g int) bool {
@@ -165,7 +167,10 @@ func (a *API) connect(ctx context.Context, p Object) (any, error) {
 		return nil, errors.New("被控设备离线，请确认电脑上的 ReignHub 正在运行并已连接服务")
 	}
 	connectivity.Note(ctx, "lookup", "lookup", "已找到被控设备", str(d, "name"), "success")
-	id := service + "|" + str(d, "id")
+	id, e := a.store.Route(ctx, service+"|"+str(d, "id"))
+	if e != nil {
+		return nil, e
+	}
 	if str(d, "id") == "" || str(d, "public") == "" {
 		return nil, errors.New("无效设备信息")
 	}
@@ -277,19 +282,13 @@ func (a *API) connect(ctx context.Context, p Object) (any, error) {
 		c.Close()
 		return nil, errors.New("连接已取消")
 	}
+	if platform := device.NormalizePlatform(c.HostPlatform()); platform != "" {
+		s["platform"] = platform
+	}
 	s["name"], s["connectionId"] = d["name"], d["connectionId"]
 	s["relayOnly"] = p["relayOnly"] == true
 	s["reconnectDisabled"] = false
-	v, e := a.saved()
-	if e == nil {
-		out := []Object{}
-		for _, x := range v {
-			if x["id"] != id {
-				out = append(out, x)
-			}
-		}
-		e = a.store.Put("devices", append(out, s))
-	}
+	e = a.store.SaveEnvironment(ctx, s)
 	if e != nil {
 		a.edit.Unlock()
 		c.Close()
@@ -331,12 +330,12 @@ func (a *API) Call(ctx context.Context, method string, p Object, target string, 
 	case "client.cached":
 		return a.cached(target, command)
 	case "client.draft.get", "client.draft.put":
-		return composerdraft.Call(ctx, a.store, method, target, p)
+		return composerdraft.Dispatch(ctx, a.store, method, target, p)
 	case "client.snapshot":
 		if target == "" || str(p, "provider") == "" || str(p, "session") == "" || p["transcript"] == nil {
 			return nil, errors.New("invalid local transcript snapshot")
 		}
-		return nil, a.store.Put(snapshotKey(target, str(p, "provider"), str(p, "session")), p["transcript"])
+		return nil, a.ApplyHistory(ctx, persistence.Session{Env: target, Provider: str(p, "provider"), ID: str(p, "session")}, persistence.Diff("", nil, obj(p["transcript"])))
 	case "client.presence":
 		saved, err := a.saved()
 		if err != nil {
@@ -344,7 +343,7 @@ func (a *API) Call(ctx context.Context, method string, p Object, target string, 
 		}
 		targets := []device.PresenceTarget{}
 		for _, s := range saved {
-			identity, _ := a.store.Get("identity:" + str(s, "service"))
+			identity, _ := a.store.LoadIdentity(ctx, str(s, "service"))
 			targets = append(targets, device.PresenceTarget{ID: str(s, "id"), Service: str(s, "service"), Host: str(s, "host"), Token: str(obj(identity), "token")})
 		}
 		out := []Object{}
@@ -412,46 +411,39 @@ func (a *API) Call(ctx context.Context, method string, p Object, target string, 
 		if c != nil {
 			c.Close()
 		}
-		v, e := a.saved()
-		if e == nil {
-			out := []Object{}
-			for _, d := range v {
-				if d["id"] == id {
-					if method == "client.forget" {
-						continue
+		var e error
+		if method == "client.forget" {
+			e = a.store.ForgetHistory(ctx, id)
+		} else {
+			var v []Object
+			v, e = a.saved()
+			if e == nil {
+				for _, d := range v {
+					if d["id"] == id {
+						d["reconnectDisabled"] = true
+						e = a.store.SaveEnvironment(ctx, d)
+						break
 					}
-					d["reconnectDisabled"] = true
 				}
-				out = append(out, d)
 			}
-			e = a.store.Put("devices", out)
 		}
+
 		a.edit.Unlock()
 		if e != nil {
 			return nil, e
 		}
 		if method == "client.forget" {
-			_, _ = a.assetCache("client.assetCache.clear", id, nil)
-			keys, e := a.store.Keys()
+
+			_, e = a.Call(ctx, "client.assetCache.clear", nil, id, nil)
 			if e != nil {
 				return nil, e
 			}
-			for _, k := range keys {
-				if strings.HasPrefix(k, "directory:"+id+":") || strings.HasPrefix(k, "rpc:"+id+":") || strings.HasPrefix(k, "snapshot:"+id+":") || strings.HasPrefix(k, composerdraft.Prefix(id)) {
-					_ = a.store.Delete(k)
-				}
-			}
+
 		}
 		return nil, nil
 	case "client.call":
-		cacheCommand := Object{}
-		for k, v := range command {
-			if k != "fresh" {
-				cacheCommand[k] = v
-			}
-		}
-		b, _ := json.Marshal(cacheCommand)
-		key := "rpc:" + target + ":" + string(b)
+		kind := persistence.ReadKind(str(command, "method"))
+		scope := persistence.Session{Env: target, Provider: str(command, "provider"), ID: str(command, "session")}
 		read := false
 		switch str(command, "method") {
 		case "providers", "sessions", "models", "transcript", "approvals":
@@ -460,7 +452,22 @@ func (a *API) Call(ctx context.Context, method string, p Object, target string, 
 		c := a.client(target)
 		if c == nil || !c.Connected() {
 			if read && command["fresh"] != true {
-				v, e := a.store.Get(key)
+				if str(command, "method") == "transcript" && str(command, "cursor") == "" {
+					v, e := a.cached(target, command)
+					if e != nil || v != nil {
+						return v, e
+					}
+				}
+				if str(command, "method") == "sessions" && str(command, "cursor") == "" {
+					rows, e := a.store.ListSessions(ctx, persistence.DirectoryKey{Env: target, Provider: str(command, "provider")})
+					if e != nil {
+						return nil, e
+					}
+					if len(rows) > 0 {
+						return Object{"sessions": rows}, nil
+					}
+				}
+				v, e := a.store.LoadList(ctx, scope, kind)
 				if e != nil || v != nil {
 					return v, e
 				}
@@ -468,116 +475,45 @@ func (a *API) Call(ctx context.Context, method string, p Object, target string, 
 			return nil, errors.New("设备离线，请重新连接")
 		}
 		v, e := c.Call(ctx, command)
-		if e == nil && read {
-			_ = a.store.Put(key, v)
+		if e == nil && str(command, "method") == "sessions" {
+			e = a.store.WriteDirectory(ctx, persistence.DirectoryKey{Env: target, Provider: str(command, "provider")}, persistence.DirectoryHead{}, persistence.DirectoryBatch{Preview: true, Upserts: arr(obj(v)["sessions"])})
+		} else if e == nil && kind.Table() != "" {
+			e = a.store.SaveList(ctx, scope, kind, arr(v))
 		}
 		return v, e
 	case "client.sync":
-		key := "directory:" + target + ":" + str(p, "provider")
-		v, e := a.store.Get(key)
+		k := persistence.DirectoryKey{Env: target, Provider: str(p, "provider")}
+		old, e := a.store.DirectoryPosition(ctx, k)
 		if e != nil {
 			return nil, e
 		}
-		old := obj(v)
-		items := clone(obj(old["items"]))
 		c := a.client(target)
 		if c == nil || !c.Connected() {
 			return nil, errors.New("设备离线：保留本地会话，连接后重试同步")
 		}
-		v, e = c.Call(ctx, Object{"method": "sync", "provider": p["provider"], "epoch": old["epoch"], "after": num(old, "cursor")})
+		v, e := c.Call(ctx, Object{"method": "sync", "provider": k.Provider, "epoch": old.Epoch, "after": old.Cursor})
 		if e != nil {
 			return nil, e
 		}
 		d := obj(v)
-		if d["reset"] == true {
-			items = Object{}
-		}
-		for _, x := range arr(d["items"]) {
-			items[str(x, "id")] = x
-		}
-		for _, x := range arr(d["changes"]) {
-			if x["deleted"] == true {
-				delete(items, str(x, "id"))
+		batch := persistence.DirectoryBatch{Reset: d["reset"] == true, Head: persistence.DirectoryHead{Epoch: str(d, "epoch"), Cursor: num(d, "cursor")}, Upserts: arr(d["items"])}
+		for _, change := range arr(d["changes"]) {
+			if change["deleted"] == true {
+				batch.Changes = append(batch.Changes, persistence.DirectoryChange{ID: str(change, "id")})
 			} else {
-				items[str(x, "id")] = x["value"]
+				batch.Changes = append(batch.Changes, persistence.DirectoryChange{ID: str(change, "id"), Value: obj(change["value"])})
 			}
 		}
-		if e = a.store.Put(key, Object{"items": items, "cursor": d["cursor"], "epoch": d["epoch"]}); e != nil {
+		if e = a.store.WriteDirectory(ctx, k, old, batch.Coalesced()); e != nil {
 			return nil, e
 		}
-		out := []Object{}
-		for _, x := range items {
-			out = append(out, obj(x))
-		}
-		return out, nil
+		return a.store.ListSessions(ctx, k)
 	case "client.assetCache.get", "client.assetCache.put", "client.assetCache.clear":
-		return a.assetCache(method, target, p)
+		return a.store.Download(ctx, method, target, p)
 	default:
 		return nil, errors.New("浏览器仅提供远控功能")
 	}
 }
-func (a *API) assetCache(method, target string, p Object) (any, error) {
-	a.assets.Lock()
-	defer a.assets.Unlock()
-	b, _ := json.Marshal([]string{target, str(p, "key")})
-	key := "asset:" + string(b)
-	v, e := a.store.Get("asset-index")
-	if e != nil {
-		return nil, e
-	}
-	index := arr(v)
-	if method == "client.assetCache.get" {
-		v, e := a.store.Get(key)
-		if e == nil && v != nil {
-			for _, x := range index {
-				if x["key"] == key {
-					x["touched"] = time.Now().UnixMilli()
-				}
-			}
-			_ = a.store.Put("asset-index", index)
-		}
-		return v, e
-	}
-	if method == "client.assetCache.clear" {
-		out := []Object{}
-		for _, x := range index {
-			if target == "" || x["device"] == target {
-				_ = a.store.Delete(str(x, "key"))
-			} else {
-				out = append(out, x)
-			}
-		}
-		return nil, a.store.Put("asset-index", out)
-	}
-	bytes, e := base64.StdEncoding.DecodeString(str(p, "data"))
-	if e != nil || len(bytes) > 50<<20 {
-		return nil, errors.New("附件超过缓存上限或格式无效")
-	}
-	out := []Object{}
-	var size int64
-	for _, x := range index {
-		if x["key"] != key {
-			out = append(out, x)
-			size += num(x, "size")
-		}
-	}
-	for size+int64(len(bytes)) > 96<<20 && len(out) > 0 {
-		old := 0
-		for i, x := range out {
-			if num(x, "touched") < num(out[old], "touched") {
-				old = i
-			}
-		}
-		_ = a.store.Delete(str(out[old], "key"))
-		size -= num(out[old], "size")
-		out = append(out[:old], out[old+1:]...)
-	}
-	if e = a.store.Put(key, Object{"data": p["data"]}); e != nil {
-		return nil, e
-	}
-	return nil, a.store.Put("asset-index", append(out, Object{"key": key, "device": target, "size": len(bytes), "touched": time.Now().UnixMilli()}))
-}
-
 func publishClientInfo(c *browserclient.Client, info any) {
 	if info == nil {
 		return
@@ -587,4 +523,18 @@ func publishClientInfo(c *browserclient.Client, info any) {
 		defer cancel()
 		_, _ = c.Call(ctx, Object{"method": "peer.info", "params": info})
 	}()
+}
+
+func (a *API) ApplyHistory(ctx context.Context, k persistence.Session, p persistence.HistoryPatch) error {
+	return a.store.ApplyHistory(ctx, k, p)
+}
+func (a *API) ReadPage(ctx context.Context, k persistence.Session, q persistence.PageQuery) (persistence.HistoryPage, error) {
+	return a.store.ReadPage(ctx, k, q)
+}
+
+func (a *API) Navigation(ctx context.Context, k persistence.Session) ([]persistence.Landmark, error) {
+	if dao, ok := a.store.(persistence.NavigationDAO); ok {
+		return dao.Navigation(ctx, k)
+	}
+	return nil, nil
 }

@@ -37,22 +37,28 @@ func TestAndroidBackConfirmationResetsAfterNavigation(t *testing.T) {
 		t.Skip("checks platform exit requests with the simulated Android host")
 	}
 	app := nsgotest.Start(t, func(cx *core.Scope) core.Node { return RootWithAPI(cx, &mobileDemo{newDemoAPI()}, true) }, nsgotest.Size(390, 844), nsgotest.Environment(core.Environment{OS: core.OSAndroid, Idiom: core.IdiomPhone}))
-	app.WaitFor("id:device-demo-device", time.Second)
-	app.Back()
-	app.WaitFor(sessionSelector("demo-device", "codex-app", "demo-chat"), time.Second)
-	app.Press(sessionSelector("demo-device", "codex-app", "demo-chat"))
-	app.Back()
-	app.Find("id:session-sidebar")
 	app.Back()
 	app.Find("text:" + rootBackHint)
+	openDemoChat(t, app)
+	app.Back()
+	app.Find("id:chat-input")
+	app.Find("text:" + rootBackHint)
 	if app.BackUnhandled != 0 {
-		t.Fatal("navigation reused the previous exit confirmation")
+		t.Fatal("session selection reused the previous exit confirmation")
 	}
-	// Dismissing a modal consumes Back before the root exit guard.
+	showSessionDirectory(t, app)
 	app.Press("id:connect-device")
 	app.Back()
 	app.Find("id:session-sidebar")
+	app.Back()
+	app.WaitUntil(time.Second, func() bool { return !app.Exists("id:mobile-sidebar") })
+	app.Find("id:chat-input")
 	if app.BackUnhandled != 0 {
-		t.Fatal("dismissing a modal exited the app")
+		t.Fatal("dismissing overlays exited the app")
+	}
+	app.Back()
+	app.Find("text:" + rootBackHint)
+	if app.BackUnhandled != 0 {
+		t.Fatal("drawer navigation reused an exit confirmation")
 	}
 }

@@ -7,7 +7,6 @@ import (
 	"log"
 	"time"
 
-	"github.com/coder/websocket"
 	"github.com/monkeyWie/reignhub/internal/connectivity"
 	"github.com/monkeyWie/reignhub/internal/control"
 	"github.com/monkeyWie/reignhub/internal/device"
@@ -41,16 +40,8 @@ func serveHost(ctx context.Context, p Pairing, opts Options, d *control.Dispatch
 	return serveHostObserved(ctx, p, opts, d, nil)
 }
 func serveHostObserved(ctx context.Context, p Pairing, opts Options, d *control.Dispatcher, status *HostStatus) error {
-	var ws, dataWS *websocket.Conn
-	var hostPeer string
-	var allowRelay bool
-	var err error
-	if opts.RelayOnly {
-		ws, dataWS, hostPeer, err = dialWithRelayPolicy(ctx, p, "host", connectivity.StageTimeout, true)
-		allowRelay = dataWS != nil
-	} else {
-		ws, hostPeer, allowRelay, err = dialSignal(ctx, p, "host", connectivity.StageTimeout)
-	}
+	ws, dataWS, welcome, err := dialService(ctx, p, "host", connectivity.StageTimeout, opts)
+	hostPeer, allowRelay := welcome.Peer, welcome.AllowRelay
 	if err != nil {
 		return err
 	}
@@ -131,6 +122,7 @@ func serveHostObserved(ctx context.Context, p Pairing, opts Options, d *control.
 			var peer *wire
 			limiter := make(chan struct{}, 8)
 			probes := make(chan struct{}, 2)
+			terminalSlots := make(chan struct{}, 4)
 			var reads hostReads
 			peer, err = newWire(ctx, ws, f.Peer, key, true, opts, func(data []byte) {
 				if opts.ResolveKey != nil {
@@ -155,10 +147,18 @@ func serveHostObserved(ctx context.Context, p Pairing, opts Options, d *control.
 				// instead; connection liveness is checked independently.
 				callCtx, stop := context.WithCancel(peer.ctx)
 				callCtx = transport.WithMethod(callCtx, req.Method)
+				identity := ""
+				if deviceID != "" {
+					identity = p.Host + "/" + deviceID
+				}
+				callCtx = control.WithRemoteIdentity(callCtx, identity)
 				watch := req.Method == "watch"
 				slots := limiter
 				if req.Method == "network" {
 					slots = probes // Liveness must remain measurable while Agent reads stall.
+				}
+				if req.Method == "terminal.read" {
+					slots = terminalSlots
 				}
 				busy := func() {
 					stop()
@@ -191,7 +191,7 @@ func serveHostObserved(ctx context.Context, p Pairing, opts Options, d *control.
 					if deviceID != "" {
 						req.ID = deviceID + "/" + req.ID
 					}
-					partialSent := false
+					var partsSent uint32
 					if req.Progress && req.Method == "transcript" {
 						callCtx = provider.WithTranscriptObserver(callCtx, func(fragment provider.Transcript) error {
 							if opts.ResolveKey != nil {
@@ -206,7 +206,11 @@ func serveHostObserved(ctx context.Context, p Pairing, opts Options, d *control.
 							if err != nil {
 								return err
 							}
-							encoded, err := json.Marshal(control.Response{ID: originalID, Partial: true, Result: raw})
+							fragmentResponse := control.Response{ID: originalID, Partial: true, Result: raw}
+							if peer.native.negotiated.Load() {
+								fragmentResponse.Sequence = partsSent + 1
+							}
+							encoded, err := json.Marshal(fragmentResponse)
 							if err != nil {
 								return err
 							}
@@ -216,7 +220,7 @@ func serveHostObserved(ctx context.Context, p Pairing, opts Options, d *control.
 							if err := peer.sendContext(callCtx, originalID, encoded); err != nil {
 								return err
 							}
-							partialSent = true
+							partsSent++
 							return nil
 						})
 					}
@@ -235,7 +239,10 @@ func serveHostObserved(ctx context.Context, p Pairing, opts Options, d *control.
 					} else {
 						result = d.HandleRemote(callCtx, req)
 					}
-					if partialSent && result.Error == "" {
+					if partsSent > 0 && result.Error == "" {
+						if peer.native.negotiated.Load() {
+							result.Sequence = partsSent + 1
+						}
 						var metadata provider.Transcript
 						if json.Unmarshal(result.Result, &metadata) == nil {
 							metadata.Turns = nil
@@ -261,6 +268,7 @@ func serveHostObserved(ctx context.Context, p Pairing, opts Options, d *control.
 			if err != nil {
 				continue
 			}
+			peer.native.welcome, peer.native.hostID = welcome.Native, p.Host
 			peer.device = deviceID
 			peer.relayLink = replyRelay
 			peer.grant = f.Grant

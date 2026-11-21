@@ -3,12 +3,15 @@
 package database
 
 import (
+	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
+
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 	_ "modernc.org/sqlite"
-	"os"
-	"path/filepath"
 )
 
 func OpenSQLite(path string) (*gorm.DB, error) {
@@ -21,7 +24,7 @@ func OpenSQLite(path string) (*gorm.DB, error) {
 		return nil, err
 	}
 	_ = f.Close()
-	db, err := gorm.Open(sqlite.New(sqlite.Config{DriverName: "sqlite", DSN: path}), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	db, err := openSQLite(path)
 	if err != nil {
 		return nil, err
 	}
@@ -42,4 +45,25 @@ func OpenSQLite(path string) (*gorm.DB, error) {
 		return nil, err
 	}
 	return db, nil
+}
+
+// OpenSQLiteReadOnly opens existing service state without initializing its schema or identity.
+func OpenSQLiteReadOnly(path string) (*gorm.DB, error) {
+	if path == "" {
+		return nil, os.ErrInvalid
+	}
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return nil, err
+	}
+	file := filepath.ToSlash(absolute)
+	if !strings.HasPrefix(file, "/") {
+		file = "/" + file
+	}
+	uri := url.URL{Scheme: "file", Path: file, RawQuery: "mode=ro&_pragma=busy_timeout(5000)"}
+	return openSQLite(uri.String())
+}
+
+func openSQLite(dsn string) (*gorm.DB, error) {
+	return gorm.Open(sqlite.New(sqlite.Config{DriverName: "sqlite", DSN: dsn}), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
 }

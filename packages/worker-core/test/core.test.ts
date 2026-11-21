@@ -5,9 +5,12 @@ import {
   runInDurableObject,
 } from "cloudflare:test";
 import { beforeAll, describe, it, expect } from "vitest";
-import { routes } from "@reignhub/protocol";
-import { room, type CoreEnv } from "../src";
+import { externalRelays } from "../src/external-relay";
+import { bytes64 } from "../src/crypto";
+import { routes, type Frame } from "@reignhub/protocol";
+import { handleCore, room, type CoreEnv } from "../src";
 const bindings = env as unknown as CoreEnv & {
+  TEST_RELAY_SIGNER: JsonWebKey;
   TEST_MIGRATIONS: Parameters<typeof applyD1Migrations>[1];
 };
 beforeAll(() => applyD1Migrations(bindings.DB, bindings.TEST_MIGRATIONS));
@@ -60,9 +63,77 @@ describe("device authorization and separated ingress", () => {
     const r = await post(routes.config, {});
     const c = (await r.json()) as Record<string, unknown>;
     expect(c.protocol).toBe(1);
+    expect(c.selfStun).toEqual(["stun:probe.example:26331"]);
+    expect(c.tcpStun).toEqual(["probe.example:26331"]);
     expect(c.grantPublicKey).toBeTruthy();
     expect(JSON.stringify(c)).not.toContain("private");
     expect((await post("/v2/register", {})).status).toBe(404);
+  });
+  it("publishes the configured STUN transports and honors explicit empty lists", async () => {
+    async function config(value: CoreEnv["EXTERNAL_STUN"]) {
+      const response = await handleCore(
+        new Request("https://reignhub.test" + routes.config),
+        {
+          ...bindings,
+          SELF_STUN: "stun:old.example:3478",
+          TCP_STUN: "old.example:3478",
+          EXTERNAL_STUN: value,
+        },
+      );
+      return { status: response!.status, body: await response!.json() };
+    }
+    expect(await config(undefined)).toMatchObject({
+      body: {
+        selfStun: ["stun:old.example:3478"],
+        tcpStun: ["old.example:3478"],
+      },
+    });
+    expect(await config("[]")).toMatchObject({
+      body: { selfStun: [], tcpStun: [] },
+    });
+    expect(await config('["[::1]:3478","[::1]:3478"]')).toMatchObject({
+      body: { selfStun: ["stun:[::1]:3478"], tcpStun: ["[::1]:3478"] },
+    });
+    expect(await config(["udp:udp.example:3478"])).toMatchObject({
+      body: { selfStun: ["stun:udp.example:3478"], tcpStun: [] },
+    });
+    expect(await config(["tcp:tcp.example:3479"])).toMatchObject({
+      body: { selfStun: [], tcpStun: ["tcp.example:3479"] },
+    });
+    for (const value of [
+      "{",
+      '{"typo":[]}',
+      '{"udp":null}',
+      '["host:0"]',
+      '["host:65536"]',
+    ]) {
+      expect(await config(value)).toMatchObject({
+        status: 503,
+        body: { code: "INVALID_STUN_CONFIG" },
+      });
+    }
+  });
+  it("resolves shared and single-transport relays and rejects conflicting addresses", () => {
+    const pin = bindings.TEST_RELAY_SIGNER.x!;
+    const resolve = (addresses: string[]) =>
+      externalRelays({ ...bindings, EXTERNAL_RELAYS: [{ addresses, pin }] });
+    expect(resolve(["relay.example:26332"])).toEqual([
+      { address: "relay.example:26332", pin },
+    ]);
+    expect(resolve(["tcp:[2001:db8::1]:443"])).toEqual([
+      { tcpAddress: "[2001:db8::1]:443", pin },
+    ]);
+    expect(resolve(["udp:relay.example:26332"])).toEqual([
+      { udpAddress: "relay.example:26332", pin },
+    ]);
+    for (const addresses of [
+      [],
+      ["relay.example:26332", "tcp:relay.example:443"],
+      ["udp://relay.example:443"],
+      ["udp:[invalid]:443"],
+    ]) {
+      expect(() => resolve(addresses)).toThrow();
+    }
   });
   it("rejects unauthenticated and hostile origins", async () => {
     expect(
@@ -125,7 +196,7 @@ describe("device authorization and separated ingress", () => {
     );
     const hostRelay = hostRelayResponse.webSocket!;
     hostRelay.accept();
-    await message(hostRelay);
+    expect((await message(hostRelay)).nativeRelay).toBeUndefined();
     const p = crypto.randomUUID().replaceAll("-", "");
     await post(
       routes.request,
@@ -162,6 +233,49 @@ describe("device authorization and separated ingress", () => {
     const welcome = await message(client);
     expect(welcome.allowRelay).toBe(true);
     expect(welcome.grant).toBeTruthy();
+    const hostNode = (hostWelcome as Frame).nativeRelay!;
+    const clientNode = (welcome as Frame).nativeRelay!;
+    expect(hostNode).toMatchObject({
+      udpAddress: "relay.example:26332",
+      tcpAddress: "relay.example:26333",
+    });
+    expect(clientNode.udpAddress).toEqual(hostNode.udpAddress);
+    expect(clientNode.tcpAddress).toEqual(hostNode.tcpAddress);
+    expect(clientNode.pin).toEqual(hostNode.pin);
+    expect(clientNode.ticket).not.toEqual(hostNode.ticket);
+    const signer = await crypto.subtle.importKey(
+      "jwk",
+      bindings.TEST_RELAY_SIGNER,
+      "Ed25519",
+      false,
+      ["sign"],
+    );
+    async function checkLease(hostTicket: string) {
+      const body = JSON.stringify({
+        host: h.id,
+        peer: welcome.peer,
+        hostTicket,
+        clientTicket: clientNode.ticket,
+      });
+      const signature = await crypto.subtle.sign(
+        "Ed25519",
+        signer,
+        new TextEncoder().encode("reign/native-relay/lease/v1\n" + body),
+      );
+      return SELF.fetch("https://reignhub.test" + routes.nativeLease, {
+        method: "POST",
+        headers: {
+          "X-Reign-Relay-Pin": clientNode.pin,
+          "X-Reign-Relay-Signature": bytes64(new Uint8Array(signature)),
+        },
+        body,
+      });
+    }
+    expect((await post(routes.nativeLease, {})).status).toBe(403);
+    expect((await checkLease(clientNode.ticket)).status).toBe(403);
+    expect(await (await checkLease(hostNode.ticket)).json()).toEqual({
+      validFor: 60,
+    });
     const dr = await socket(
       h.id,
       c.token,
@@ -338,7 +452,11 @@ describe("device authorization and separated ingress", () => {
     expect(responses.map((r) => r.status)).toEqual([101, 101]);
     // Invalid credentials cannot replace the new host.
     expect((await socket(h.id, "wrong-token", "host")).status).toBe(401);
-    const status = await post(routes.resolve, { connectionId: h.connectionId }, h.token);
+    const status = await post(
+      routes.resolve,
+      { connectionId: h.connectionId },
+      h.token,
+    );
     expect(((await status.json()) as { online: boolean }).online).toBe(true);
     for (const r of responses)
       if (r.webSocket) {

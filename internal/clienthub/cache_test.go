@@ -3,6 +3,7 @@ package clienthub
 import (
 	"context"
 	"encoding/json"
+	"github.com/monkeyWie/reignhub/pkg/persistence"
 	"testing"
 
 	"github.com/monkeyWie/reignhub/internal/control"
@@ -20,7 +21,7 @@ func TestLocalSnapshotsAndDirectoriesAreIndependentOfConnection(t *testing.T) {
 		if err = h.DB.Put("rpc:"+id+":"+string(b), []map[string]any{{"id": "codex-app"}}); err != nil {
 			t.Fatal(err)
 		}
-		if err = h.DB.Put("directory:"+id+":codex-app", map[string]any{"items": map[string]any{"chat": map[string]any{"id": id, "providerId": "codex-app"}}}); err != nil {
+		if err = h.DB.WriteDirectory(context.Background(), persistence.DirectoryKey{Env: id, Provider: "codex-app"}, persistence.DirectoryHead{}, persistence.DirectoryBatch{Upserts: []persistence.Object{{"id": id, "providerId": "codex-app"}}}); err != nil {
 			t.Fatal(err)
 		}
 		if err = h.SaveSnapshot(id, "codex-app", "chat", json.RawMessage(`{"turns":[{"id":"latest-delta"}]}`)); err != nil {
@@ -73,13 +74,13 @@ func TestFirstPageIsCachedBeforeDirectoryScanCompletes(t *testing.T) {
 		}
 	}
 	put(control.Request{Method: "providers"}, []map[string]any{{"id": "codex-app"}})
-	put(control.Request{Method: "sessions", Provider: "codex-app"}, map[string]any{"sessions": []map[string]any{{"id": "preview", "providerId": "codex-app"}}})
+	_ = h.DB.WriteDirectory(context.Background(), persistence.DirectoryKey{Env: "one", Provider: "codex-app"}, persistence.DirectoryHead{}, persistence.DirectoryBatch{Preview: true, Upserts: []persistence.Object{{"id": "preview", "providerId": "codex-app"}}})
 	v, err := h.Cached("one", control.Request{})
 	if err != nil || len(v.(map[string]any)["sessions"].([]map[string]any)) != 1 {
 		t.Fatal("metadata page not cached", v, err)
 	}
 	// Once a complete empty directory arrives, stale preview entries stay deleted.
-	if err = h.DB.Put("directory:one:codex-app", map[string]any{"items": map[string]any{}}); err != nil {
+	if err = h.DB.WriteDirectory(context.Background(), persistence.DirectoryKey{Env: "one", Provider: "codex-app"}, persistence.DirectoryHead{}, persistence.DirectoryBatch{Reset: true}); err != nil {
 		t.Fatal(err)
 	}
 	v, err = h.Cached("one", control.Request{})
@@ -95,8 +96,7 @@ func TestFreshReadCannotMistakeOfflineCacheForRemoteConfirmation(t *testing.T) {
 	}
 	defer h.Close()
 	r := control.Request{Method: "transcript", Provider: "codex-app", Session: "chat"}
-	b, _ := json.Marshal(r)
-	if err = h.DB.Put("rpc:one:"+string(b), map[string]any{"turns": []any{}}); err != nil {
+	if err = h.SaveSnapshot("one", r.Provider, r.Session, json.RawMessage(`{"turns":[]}`)); err != nil {
 		t.Fatal(err)
 	}
 	if v, e := h.Call(context.Background(), "one", r); e != nil || v == nil {
@@ -114,9 +114,7 @@ func TestOfflineSyncCannotErasePersistedPreview(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := control.Request{Method: "sessions", Provider: "codex-app"}
-	key, _ := json.Marshal(r)
-	if err = h.DB.Put("rpc:one:"+string(key), map[string]any{"sessions": []map[string]any{{"id": "preview", "providerId": "codex-app"}}}); err != nil {
+	if err = h.DB.WriteDirectory(context.Background(), persistence.DirectoryKey{Env: "one", Provider: "codex-app"}, persistence.DirectoryHead{}, persistence.DirectoryBatch{Preview: true, Upserts: []persistence.Object{{"id": "preview", "providerId": "codex-app"}}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = h.Sync(context.Background(), "one", "codex-app"); err == nil {

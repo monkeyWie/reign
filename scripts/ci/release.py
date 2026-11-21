@@ -109,7 +109,6 @@ def verify(args):
     if len(apks) != 1:
         raise SystemExit('Expected exactly one Android APK')
     expected += [apks[0].name]
-    expected += [f'reignhub-probe-{args.version}-linux-{arch}.tar.gz' for arch in ('amd64', 'arm64')]
     expected += server_assets(args.version)
     actual = {p.name for p in output.iterdir() if p.is_file() and p.suffix != '.sha256' and p.name != 'SHA256SUMS'}
     if actual != set(expected):

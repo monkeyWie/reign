@@ -7,6 +7,7 @@ import (
 
 	"github.com/monkeyWie/reignhub/internal/device"
 	"github.com/nsgo-dev/nsgo/core"
+	"github.com/nsgo-dev/nsgo/icons/lucide"
 	"github.com/nsgo-dev/nsgo/nsgotest"
 )
 
@@ -109,4 +110,39 @@ func TestProfileSnapshotReachesAPI(t *testing.T) {
 	if base.profile != info {
 		t.Fatalf("missing profile: %#v", base.profile)
 	}
+}
+
+func TestSidebarIdentifiesLocalAndRemotePlatforms(t *testing.T) {
+	var s *State
+	app := nsgotest.Start(t, func(cx *core.Scope) core.Node {
+		s = workspaceLayoutFixture(cx)
+		s.setAppearance("dark")
+		s.devices = []Object{{"id": "local", "local": true, "connected": true}, {"id": "pc", "name": "Desktop", "connected": true}}
+		return s.workspaceView(cx)
+	}, nsgotest.Size(980, 700), nsgotest.Environment(core.Environment{OS: core.OSMacOS, Idiom: core.IdiomDesktop}))
+	app.Find("id:host-platform-local")
+	remote := app.Find("id:host-platform-pc").ID
+	app.Post(func() {
+		if s.hostIcon(s.cx, "local") != brandLogos["apple"] || s.hostIcon(s.cx, "pc") != lucide.Monitor() {
+			t.Error("wrong icon for local Mac or unidentified host")
+		}
+		s.workspaces["pc"] = workspaceCache{providers: []Object{{"installPath": `C:\Program Files\Fixture\agent.exe`}}}
+		if s.hostIcon(s.cx, "pc") != brandLogos["windows"] {
+			t.Error("legacy Windows installation path did not identify host")
+		}
+		s.workspaces["pc"] = workspaceCache{}
+		s.devices[1] = Object{"id": "pc", "name": "Desktop", "platform": "windows", "connected": false}
+		s.changed()
+	})
+	app.Settle()
+	app.Post(func() {
+		if s.hostIcon(s.cx, "pc") != brandLogos["windows"] {
+			t.Error("offline Windows device lost its platform")
+		}
+	})
+	app.Settle()
+	if remote != app.Find("id:host-platform-pc").ID {
+		t.Error("metadata refresh replaced the device icon view")
+	}
+	app.Screenshot("sidebar-host-platforms")
 }

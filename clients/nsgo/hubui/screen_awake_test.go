@@ -29,6 +29,7 @@ func TestAndroidConversationKeepsScreenOnOnlyWhileVisibleAndActive(t *testing.T)
 	host.Handle("ras.background", func(call *core.HostCall) { call.Resolve(Object{"running": true}) })
 	env := core.Environment{OS: core.OSAndroid, Idiom: core.IdiomPhone}
 	app := nsgotest.Start(t, func(cx *core.Scope) core.Node { return RootWithAPI(cx, newDemoAPI(), true) }, nsgotest.Size(390, 844), nsgotest.Environment(env), nsgotest.Host(host))
+	showSessionDirectory(t, app)
 	app.WaitFor("id:device-demo-device", time.Second)
 	if awake.Load() {
 		t.Fatal("device page kept screen awake")
@@ -46,13 +47,16 @@ func TestAndroidConversationKeepsScreenOnOnlyWhileVisibleAndActive(t *testing.T)
 		app.SetEnvironment(env)
 		app.WaitUntil(time.Second, func() bool { return awake.Load() == (lifecycle == core.LifecycleActive) })
 	}
-	app.Press("id:back-sessions")
+	app.Press("id:mobile-menu")
 	app.WaitUntil(time.Second, func() bool { return !awake.Load() })
 	app.Press(sessionSelector("demo-device", "codex-app", "demo-chat"))
 	app.WaitUntil(time.Second, awake.Load)
 	app.Back()
-	app.WaitUntil(time.Second, func() bool { return !awake.Load() })
-	// A wider phone/tablet layout does not use the native stack.
+	app.Settle()
+	if !awake.Load() {
+		t.Fatal("root Back hid the conversation")
+	}
+	// A wider phone/tablet layout keeps its persistent sidebar.
 	app.Resize(720, 844)
 	app.Press(sessionSelector("demo-device", "codex-app", "demo-chat"))
 	app.WaitUntil(time.Second, awake.Load)
@@ -74,8 +78,10 @@ func TestIOSConversationDisplayHoldReleasesOnBackAndBackground(t *testing.T) {
 	env.Lifecycle = core.LifecycleActive
 	app.SetEnvironment(env)
 	app.WaitUntil(time.Second, func() bool { return len(app.Awake) == 1 })
-	app.Back()
+	showSessionDirectory(t, app)
 	app.WaitUntil(time.Second, func() bool { return len(app.Awake) == 0 })
+	app.Back()
+	app.WaitUntil(time.Second, func() bool { return len(app.Awake) == 1 })
 }
 
 func TestDesktopConversationDoesNotPreventSleep(t *testing.T) {

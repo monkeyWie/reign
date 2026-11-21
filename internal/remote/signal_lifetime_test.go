@@ -27,7 +27,7 @@ func TestDirectRPCSurvivesEitherSignalSocketClosing(t *testing.T) {
 			defer cancel()
 			status := NewHostStatus(pair.Relay)
 			fake := &testProvider{log: provider.NewEventLog()}
-			opts := Options{DisableTCP: !tcp, DisableWebRTC: tcp}
+			opts := Options{DisableNative: true, DisableTCP: !tcp, DisableWebRTC: tcp}
 			done := make(chan error, 1)
 			go func() {
 				done <- serveHostObserved(ctx, pair, opts, &control.Dispatcher{Providers: map[string]provider.Provider{"test": fake}}, status)

@@ -38,13 +38,13 @@ def package_managers(output, release_version, archives):
                 asset_url, digest = url(os_name, arch)
                 formula.extend([f'    if {condition}', f'      url "{asset_url}"', f'      sha256 "{digest}"', '    end'])
             formula.append('  end')
-        formula.extend(['  def install', '    bin.install "reignhub-server"', '    (etc/"reignhub-server").install "server.json" unless (etc/"reignhub-server/server.json").exist?',
-                        '  end', '  service do', '    run [opt_bin/"reignhub-server", "--config", etc/"reignhub-server/server.json", "--state", var/"lib/reignhub-server/reignhub.db"]',
+        formula.extend(['  def install', '    bin.install "reignhub-server"', '    inreplace "config.json", "data/reignhub.db", (var/"lib/reignhub-server/reignhub.db").to_s', '    (etc/"reignhub-server").install "config.json" unless (etc/"reignhub-server/config.json").exist?',
+                        '  end', '  service do', '    run [opt_bin/"reignhub-server", "--config", etc/"reignhub-server/config.json"]',
                         '    keep_alive true', '    working_dir var', '    log_path var/"log/reignhub-server.log"', '    error_log_path var/"log/reignhub-server.log"', '  end',
                         '  test do', '    assert_match version.to_s, shell_output("#{bin}/reignhub-server --version")', '  end', 'end', ''])
         (bundle / 'Formula/reignhub-server.rb').write_text('\n'.join(formula))
-        scoop = {'version': release_version, 'description': 'Standalone ReignHub service with embedded Web and TCP/UDP discovery', 'homepage': 'https://reignhub.app', 'license': 'MIT', 'architecture': {}, 'bin': 'reignhub-server.exe', 'persist': ['data', 'server.json'],
-                 'notes': 'Start reignhub-server --config "$persist_dir\\server.json" --state "$persist_dir\\data\\reignhub.db". Open HTTP TCP 26330 and discovery TCP/UDP 26331 in your firewall.'}
+        scoop = {'version': release_version, 'description': 'Standalone ReignHub service with embedded Web and TCP/UDP discovery', 'homepage': 'https://reignhub.app', 'license': 'MIT', 'architecture': {}, 'bin': 'reignhub-server.exe', 'persist': ['data', 'config.json'],
+                 'notes': 'Start reignhub-server --config "$persist_dir\\config.json". Open HTTP TCP 26330 and TCP/UDP 26331 (discovery) and 26332 (native relay) in your firewall.'}
         for arch, scoop_arch in (('amd64', '64bit'), ('arm64', 'arm64')):
             asset_url, digest = url('windows', arch)
             scoop['architecture'][scoop_arch] = {'url': asset_url, 'hash': digest, 'extract_dir': archives[('windows', arch)].name.removesuffix('.zip')}
@@ -107,7 +107,7 @@ def main():
             binary = 'reignhub-server' + ('.exe' if os_name == 'windows' else '')
             subprocess.run(['go', 'build', '-trimpath', f'-ldflags=-s -w -X github.com/monkeyWie/reignhub/internal/servercmd.Version={args.version}', '-o', str(bundle / binary), './cmd/reignhub-server'], cwd=stage,
                            env={**os.environ, 'GOWORK': 'off', 'GOOS': os_name, 'GOARCH': arch, 'CGO_ENABLED': '0'}, check=True)
-            for filename in ('README.md', 'server.json', 'reignhub-server.service', 'nginx.conf.example'):
+            for filename in ('README.md', 'config.json', 'reignhub-server.service', 'nginx.conf.example'):
                 shutil.copy2(ROOT / 'deploy/service' / filename, bundle / filename)
             shutil.copy2(ROOT / 'LICENSE', bundle / 'LICENSE')
             (bundle / 'release.json').write_text(json.dumps({'version': args.version, 'os': os_name, 'arch': arch, 'protocol': 1, 'webEmbedded': True, 'wasmParts': len(manifest['wasmParts'])}, indent=2) + '\n')

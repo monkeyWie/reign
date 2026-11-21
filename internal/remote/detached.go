@@ -6,7 +6,7 @@ func (w *wire) hasDirectPath() bool {
 	w.mu.Lock()
 	direct := w.direct
 	w.mu.Unlock()
-	return w.ctx.Err() == nil && (direct || w.tcpSnapshot() != nil)
+	return w.ctx.Err() == nil && (direct || w.tcpSnapshot() != nil || w.native.direct.Load() != nil)
 }
 
 // A signal lease only discovers peers and transports negotiation. Its loss

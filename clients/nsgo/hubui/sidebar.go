@@ -24,7 +24,13 @@ func (s *State) manageDevice(id string) {
 }
 func (s *State) sidebarDevices(cx *core.Scope) core.Node {
 	return core.View{Style: core.Style{Padding: core.Symmetric(10, 12), Gap: 4}, Children: []core.Node{
-		row(s.brand(cx, 18, true), spacer(), sidebarIconButton(cx, "connect-device", locales.For(s.cx).AddDevice(), lucide.Plus, func() { s.scanned = nil; s.dialog.Set("connect") })),
+		core.Show{When: func() bool { return !s.inlineSidebarHeading(cx) }, Then: func(cx *core.Scope) core.Node {
+			return row(s.brand(cx, 18, true), spacer(), s.addDeviceButton(cx), core.Show{When: s.narrowLayout, Then: func(cx *core.Scope) core.Node {
+				v := labelledIconButton(cx, "close-mobile-sidebar", locales.For(cx).HideSidebar(), lucide.PanelLeftClose, s.closeMobileSidebar).(core.View)
+				v.Style.Width, v.Style.Height, v.Style.MinHeight = core.Pt(44), core.Pt(44), core.Pt(44)
+				return v
+			}})
+		}},
 		core.Scroll{TestID: "sidebar-devices", Style: core.Style{MaxHeight: core.Pt(148), MinHeight: core.Pt(0)}, Children: []core.Node{
 			core.Each(func() []Object { s.read(); return s.devices }, func(d Object) string { return str(d, "id") }, func(cx *core.Scope, d func() Object, _ func() int) core.Node {
 				id := str(d(), "id")
@@ -35,7 +41,7 @@ func (s *State) sidebarDevices(cx *core.Scope) core.Node {
 						}
 						return deviceName(d())
 					}, OnPress: func(core.PressEvent) { s.manageDevice(id) }, Style: core.Style{FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0), Direction: core.Row, AlignItems: core.AlignCenter, Gap: 8, Padding: core.Symmetric(8, 8), CornerRadius: 8}, StyleFunc: func() core.Style { return pressStyle(cx) }, Children: []core.Node{
-						glyph(cx, choose(flag(d(), "local"), lucide.Laptop, lucide.Monitor), 15),
+						s.hostGlyph(cx, id, 15),
 						singleLine(cx, func() string {
 							if flag(d(), "local") {
 								return locales.For(s.cx).LocalDevice()
@@ -63,6 +69,12 @@ func (s *State) sidebarDevices(cx *core.Scope) core.Node {
 			}),
 		}},
 	}}
+}
+
+func (s *State) addDeviceButton(cx *core.Scope) core.Node {
+	v := sidebarIconButton(cx, "connect-device", locales.For(cx).AddDevice(), lucide.Plus, func() { s.scanned = nil; s.dialog.Set("connect") }).(core.View)
+	v.Desktop.WindowDrag = core.WindowDragOff
+	return v
 }
 func (s *State) directory(cx *core.Scope) core.Node {
 	stamp := core.NewMemo(cx, func() uint64 { s.read(); return s.catalogueVersion })
@@ -177,7 +189,7 @@ func (s *State) treeHeader(cx *core.Scope, item func() directoryRow, brake *list
 				s.read()
 				switch data.Kind {
 				case "device":
-					return lucide.Monitor()
+					return s.hostIcon(cx, data.Target)
 				case "agent":
 					return agentIcon(data.Provider)
 				default:

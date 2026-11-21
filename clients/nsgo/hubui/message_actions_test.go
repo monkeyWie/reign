@@ -45,6 +45,9 @@ func TestUncertainMessageCannotRetryAndMergesPersistedEcho(t *testing.T) {
 	app.WaitUntil(time.Second, func() bool { return len(f.requests) == 1 })
 	request := <-f.requests
 	id := s.outgoing[s.key()][0].ID
+	bubble := app.Find("id:message-" + id)
+	body := app.Find("text:possibly persisted before renderer failed").ID
+	height := bubble.Frame.Size.Height
 	request.result <- &control.ResponseError{Code: control.WriteOutcomeUnknown, Message: "App renderer failed after submission"}
 	app.WaitFor("text:发送结果待确认", time.Second)
 	if app.Exists("id:retry-message-" + id) {
@@ -57,7 +60,10 @@ func TestUncertainMessageCannotRetryAndMergesPersistedEcho(t *testing.T) {
 			s.changed()
 		})
 	})
-	app.WaitFor("id:message-turn|remote", time.Second)
+	app.WaitUntil(time.Second, func() bool { return len(s.messageRows) == 1 && s.messageRows[0].ID == "turn|remote" })
+	if after := app.Find("id:message-" + id); after.ID != bubble.ID || after.Frame.Size.Height != height || body != app.Find("text:possibly persisted before renderer failed").ID {
+		t.Fatal("confirmation replaced the submitted bubble or changed its height")
+	}
 	if len(f.requests) != 0 || len(s.outgoing[s.key()]) != 0 || app.Exists("id:delivery-"+id) {
 		t.Fatal("uncertain message duplicated or retained after echo")
 	}

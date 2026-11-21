@@ -212,7 +212,7 @@ func (s *State) workspaceView(cx *core.Scope) core.Node {
 			// in its reactive properties instead of resetting every pane.
 			return core.Untracked(cx, func() core.Node {
 				if compact {
-					return s.phonePages(cx)
+					return s.compactWorkspace(cx)
 				}
 				selection := core.NewMemo(cx, func() string {
 					s.read()
